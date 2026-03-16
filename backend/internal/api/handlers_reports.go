@@ -1,0 +1,159 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+)
+
+func (s *Server) handleReportByCategory(w http.ResponseWriter, r *http.Request) {
+	userID := UserIDFromContext(r.Context())
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	typ := r.URL.Query().Get("type") // "income" or "expense"
+
+	query := `SELECT c.id, c.name, c.color, t.type, SUM(t.amount) as total
+	          FROM transactions t
+	          JOIN categories c ON t.category_id = c.id
+	          WHERE t.user_id = ? AND t.deleted_at IS NULL`
+	args := []any{userID}
+
+	if from != "" {
+		query += " AND t.date >= ?"
+		args = append(args, from)
+	}
+	if to != "" {
+		query += " AND t.date <= ?"
+		args = append(args, to)
+	}
+	if typ != "" {
+		query += " AND t.type = ?"
+		args = append(args, typ)
+	}
+
+	query += " GROUP BY c.id, t.type ORDER BY total DESC"
+
+	rows, err := s.DB.Query(query, args...)
+	if err != nil {
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var results []map[string]any
+	for rows.Next() {
+		var catID int64
+		var catName, catType string
+		var catColor *string
+		var total float64
+		rows.Scan(&catID, &catName, &catColor, &catType, &total)
+		results = append(results, map[string]any{
+			"category_id": catID, "category_name": catName,
+			"category_color": catColor, "type": catType, "total": total,
+		})
+	}
+
+	if results == nil {
+		results = []map[string]any{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
+func (s *Server) handleReportByMonth(w http.ResponseWriter, r *http.Request) {
+	userID := UserIDFromContext(r.Context())
+	year := r.URL.Query().Get("year")
+
+	query := `SELECT strftime('%Y-%m', date) as month, type, SUM(amount) as total
+	          FROM transactions
+	          WHERE user_id = ? AND deleted_at IS NULL`
+	args := []any{userID}
+
+	if year != "" {
+		query += " AND strftime('%Y', date) = ?"
+		args = append(args, year)
+	}
+
+	query += " GROUP BY month, type ORDER BY month"
+
+	rows, err := s.DB.Query(query, args...)
+	if err != nil {
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var results []map[string]any
+	for rows.Next() {
+		var month, typ string
+		var total float64
+		rows.Scan(&month, &typ, &total)
+		results = append(results, map[string]any{
+			"month": month, "type": typ, "total": total,
+		})
+	}
+
+	if results == nil {
+		results = []map[string]any{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
+func (s *Server) handleReportTrend(w http.ResponseWriter, r *http.Request) {
+	userID := UserIDFromContext(r.Context())
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	groupBy := r.URL.Query().Get("group_by") // "day", "week", "month"
+
+	var strftimeFmt string
+	switch groupBy {
+	case "day":
+		strftimeFmt = "%Y-%m-%d"
+	case "week":
+		strftimeFmt = "%Y-W%W"
+	default:
+		strftimeFmt = "%Y-%m"
+	}
+
+	query := `SELECT strftime('` + strftimeFmt + `', date) as period, type, SUM(amount) as total
+	          FROM transactions
+	          WHERE user_id = ? AND deleted_at IS NULL`
+	args := []any{userID}
+
+	if from != "" {
+		query += " AND date >= ?"
+		args = append(args, from)
+	}
+	if to != "" {
+		query += " AND date <= ?"
+		args = append(args, to)
+	}
+
+	query += " GROUP BY period, type ORDER BY period"
+
+	rows, err := s.DB.Query(query, args...)
+	if err != nil {
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var results []map[string]any
+	for rows.Next() {
+		var period, typ string
+		var total float64
+		rows.Scan(&period, &typ, &total)
+		results = append(results, map[string]any{
+			"period": period, "type": typ, "total": total,
+		})
+	}
+
+	if results == nil {
+		results = []map[string]any{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}

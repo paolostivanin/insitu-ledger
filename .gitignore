@@ -1,0 +1,42 @@
+# Go
+backend/server
+backend/insitu-ledger
+backend/data/
+
+# Node
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+
+# Mobile
+mobile/.gradle/
+mobile/build/
+mobile/app/build/
+mobile/local.properties
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data / SQLite
+*.db
+*.db-wal
+*.db-shm
+
+# Test
+coverage/
+*.cover
+*.out
+
+# Environment
+.env
+.env.*
+
+# Claude
+.claude/
