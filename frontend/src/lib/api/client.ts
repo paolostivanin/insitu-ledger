@@ -306,6 +306,61 @@ export interface AdminUser {
 	created_at: string;
 }
 
+// Batch operations
+export const batch = {
+	deleteTransactions: (ids: number[]) =>
+		request<void>('/transactions/batch-delete', { method: 'POST', body: { ids } }),
+	updateCategory: (ids: number[], category_id: number) =>
+		request<void>('/transactions/batch-update-category', { method: 'POST', body: { ids, category_id } })
+};
+
+// CSV import/export
+export const csv = {
+	exportTransactions: async (params?: { from?: string; to?: string }) => {
+		let url = `${BASE}/transactions/export`;
+		if (params) {
+			const search = new URLSearchParams(
+				Object.entries(params).filter(([, v]) => v !== '' && v !== undefined) as [string, string][]
+			);
+			if (search.toString()) url += `?${search}`;
+		}
+		const headers: Record<string, string> = {};
+		const token = getToken();
+		if (token) headers['Authorization'] = `Bearer ${token}`;
+		const res = await fetch(url, { headers });
+		if (!res.ok) throw new ApiError(res.status, await res.text());
+		const blob = await res.blob();
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(blob);
+		a.download = 'transactions.csv';
+		a.click();
+		URL.revokeObjectURL(a.href);
+	},
+	importTransactions: async (file: File) => {
+		const url = `${BASE}/transactions/import`;
+		const headers: Record<string, string> = {};
+		const token = getToken();
+		if (token) headers['Authorization'] = `Bearer ${token}`;
+		const form = new FormData();
+		form.append('file', file);
+		const res = await fetch(url, { method: 'POST', headers, body: form });
+		if (!res.ok) throw new ApiError(res.status, await res.text());
+		return res.json() as Promise<{ imported: number }>;
+	}
+};
+
+// Audit logs
+export interface AuditLog {
+	id: number;
+	admin_user_id: number;
+	admin_username: string;
+	action: string;
+	target_user_id: number | null;
+	details: string | null;
+	ip_address: string | null;
+	created_at: string;
+}
+
 export const admin = {
 	listUsers: () => request<AdminUser[]>('/admin/users'),
 	createUser: (username: string, email: string, name: string, password: string) =>
@@ -318,5 +373,21 @@ export const admin = {
 	toggleAdmin: (id: number) =>
 		request<void>(`/admin/users/${id}/toggle-admin`, { method: 'POST' }),
 	disableTOTP: (id: number) =>
-		request<void>(`/admin/users/${id}/disable-totp`, { method: 'POST' })
+		request<void>(`/admin/users/${id}/disable-totp`, { method: 'POST' }),
+	auditLogs: (params?: { limit?: string; offset?: string }) =>
+		request<AuditLog[]>('/admin/audit-logs', { params }),
+	backup: async () => {
+		const url = `${BASE}/admin/backup`;
+		const headers: Record<string, string> = {};
+		const token = getToken();
+		if (token) headers['Authorization'] = `Bearer ${token}`;
+		const res = await fetch(url, { headers });
+		if (!res.ok) throw new ApiError(res.status, await res.text());
+		const blob = await res.blob();
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(blob);
+		a.download = `insitu-backup-${new Date().toISOString().slice(0, 10)}.db`;
+		a.click();
+		URL.revokeObjectURL(a.href);
+	}
 };

@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { reports, type CategoryReport, type MonthReport, type TrendReport } from '$lib/api/client';
+	import { theme } from '$lib/stores/theme';
 	import * as echarts from 'echarts';
 
 	let categoryData = $state<CategoryReport[]>([]);
@@ -21,10 +22,46 @@
 	let barChart: echarts.ECharts;
 	let trendChart: echarts.ECharts;
 
+	function getCssVar(name: string): string {
+		return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+	}
+
+	function getEchartsTheme(): string {
+		return getCssVar('--bg') === '#0f1117' ? 'dark' : undefined as any;
+	}
+
+	function reinitCharts() {
+		const echartsTheme = getEchartsTheme();
+		if (pieChart) pieChart.dispose();
+		if (barChart) barChart.dispose();
+		if (trendChart) trendChart.dispose();
+		pieChart = echarts.init(pieChartEl, echartsTheme);
+		barChart = echarts.init(barChartEl, echartsTheme);
+		trendChart = echarts.init(trendChartEl, echartsTheme);
+		renderPie();
+		renderBar();
+		renderTrend();
+	}
+
+	const unsubTheme = theme.subscribe(() => {
+		if (pieChart) {
+			// Defer to allow CSS vars to update
+			setTimeout(reinitCharts, 50);
+		}
+	});
+
+	onDestroy(() => {
+		unsubTheme();
+		if (pieChart) pieChart.dispose();
+		if (barChart) barChart.dispose();
+		if (trendChart) trendChart.dispose();
+	});
+
 	onMount(async () => {
-		pieChart = echarts.init(pieChartEl, 'dark');
-		barChart = echarts.init(barChartEl, 'dark');
-		trendChart = echarts.init(trendChartEl, 'dark');
+		const echartsTheme = getEchartsTheme();
+		pieChart = echarts.init(pieChartEl, echartsTheme);
+		barChart = echarts.init(barChartEl, echartsTheme);
+		trendChart = echarts.init(trendChartEl, echartsTheme);
 
 		window.addEventListener('resize', () => {
 			pieChart.resize();
@@ -58,13 +95,13 @@
 		if (!pieChart) return;
 		pieChart.setOption({
 			backgroundColor: 'transparent',
-			title: { text: `${reportType === 'expense' ? 'Expenses' : 'Income'} by Category`, left: 'center', textStyle: { color: '#e4e6ed' } },
+			title: { text: `${reportType === 'expense' ? 'Expenses' : 'Income'} by Category`, left: 'center', textStyle: { color: getCssVar('--text') } },
 			tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
 			series: [{
 				type: 'pie',
 				radius: ['40%', '70%'],
-				itemStyle: { borderRadius: 6, borderColor: '#1a1d27', borderWidth: 2 },
-				label: { color: '#e4e6ed' },
+				itemStyle: { borderRadius: 6, borderColor: getCssVar('--bg-card'), borderWidth: 2 },
+				label: { color: getCssVar('--text') },
 				data: categoryData.map(c => ({
 					value: c.total,
 					name: c.category_name,
@@ -82,14 +119,14 @@
 
 		barChart.setOption({
 			backgroundColor: 'transparent',
-			title: { text: `${year} Monthly Overview`, left: 'center', textStyle: { color: '#e4e6ed' } },
+			title: { text: `${year} Monthly Overview`, left: 'center', textStyle: { color: getCssVar('--text') } },
 			tooltip: { trigger: 'axis' },
-			legend: { data: ['Income', 'Expenses'], bottom: 0, textStyle: { color: '#8b8fa3' } },
-			xAxis: { type: 'category', data: months, axisLabel: { color: '#8b8fa3' } },
-			yAxis: { type: 'value', axisLabel: { color: '#8b8fa3' }, splitLine: { lineStyle: { color: '#2a2e3a' } } },
+			legend: { data: ['Income', 'Expenses'], bottom: 0, textStyle: { color: getCssVar('--text-muted') } },
+			xAxis: { type: 'category', data: months, axisLabel: { color: getCssVar('--text-muted') } },
+			yAxis: { type: 'value', axisLabel: { color: getCssVar('--text-muted') }, splitLine: { lineStyle: { color: getCssVar('--border') } } },
 			series: [
-				{ name: 'Income', type: 'bar', data: incomeData, color: '#22c55e', barMaxWidth: 30 },
-				{ name: 'Expenses', type: 'bar', data: expenseData, color: '#ef4444', barMaxWidth: 30 }
+				{ name: 'Income', type: 'bar', data: incomeData, color: getCssVar('--income'), barMaxWidth: 30 },
+				{ name: 'Expenses', type: 'bar', data: expenseData, color: getCssVar('--expense'), barMaxWidth: 30 }
 			]
 		});
 	}
@@ -103,15 +140,15 @@
 
 		trendChart.setOption({
 			backgroundColor: 'transparent',
-			title: { text: 'Income vs Expenses Trend', left: 'center', textStyle: { color: '#e4e6ed' } },
+			title: { text: 'Income vs Expenses Trend', left: 'center', textStyle: { color: getCssVar('--text') } },
 			tooltip: { trigger: 'axis' },
-			legend: { data: ['Income', 'Expenses', 'Net'], bottom: 0, textStyle: { color: '#8b8fa3' } },
-			xAxis: { type: 'category', data: periods, axisLabel: { color: '#8b8fa3' } },
-			yAxis: { type: 'value', axisLabel: { color: '#8b8fa3' }, splitLine: { lineStyle: { color: '#2a2e3a' } } },
+			legend: { data: ['Income', 'Expenses', 'Net'], bottom: 0, textStyle: { color: getCssVar('--text-muted') } },
+			xAxis: { type: 'category', data: periods, axisLabel: { color: getCssVar('--text-muted') } },
+			yAxis: { type: 'value', axisLabel: { color: getCssVar('--text-muted') }, splitLine: { lineStyle: { color: getCssVar('--border') } } },
 			series: [
-				{ name: 'Income', type: 'line', data: incomeData, color: '#22c55e', smooth: true },
-				{ name: 'Expenses', type: 'line', data: expenseData, color: '#ef4444', smooth: true },
-				{ name: 'Net', type: 'line', data: netData, color: '#6366f1', smooth: true, lineStyle: { type: 'dashed' } }
+				{ name: 'Income', type: 'line', data: incomeData, color: getCssVar('--income'), smooth: true },
+				{ name: 'Expenses', type: 'line', data: expenseData, color: getCssVar('--expense'), smooth: true },
+				{ name: 'Net', type: 'line', data: netData, color: getCssVar('--primary'), smooth: true, lineStyle: { type: 'dashed' } }
 			]
 		});
 	}

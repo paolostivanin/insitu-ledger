@@ -1,0 +1,1233 @@
+openapi: "3.0.3"
+info:
+  title: InSitu Ledger API
+  description: Self-hosted personal finance tracker API
+  version: "1.0.0"
+
+servers:
+  - url: /api
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    Error:
+      type: string
+
+    LoginRequest:
+      type: object
+      required: [login, password]
+      properties:
+        login:
+          type: string
+          description: Username or email
+        password:
+          type: string
+        totp_code:
+          type: string
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user_id:
+          type: integer
+        name:
+          type: string
+        is_admin:
+          type: boolean
+        force_password_change:
+          type: boolean
+        totp_enabled:
+          type: boolean
+        totp_required:
+          type: boolean
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        is_admin:
+          type: boolean
+        force_password_change:
+          type: boolean
+        totp_enabled:
+          type: boolean
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: integer
+        account_id:
+          type: integer
+        category_id:
+          type: integer
+        user_id:
+          type: integer
+        type:
+          type: string
+          enum: [income, expense]
+        amount:
+          type: number
+        currency:
+          type: string
+        description:
+          type: string
+          nullable: true
+        date:
+          type: string
+          format: date
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        sync_version:
+          type: integer
+
+    TransactionInput:
+      type: object
+      required: [account_id, category_id, type, amount, date]
+      properties:
+        account_id:
+          type: integer
+        category_id:
+          type: integer
+        type:
+          type: string
+          enum: [income, expense]
+        amount:
+          type: number
+          minimum: 0.01
+        currency:
+          type: string
+          default: EUR
+        description:
+          type: string
+        date:
+          type: string
+          format: date
+
+    Category:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        parent_id:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        type:
+          type: string
+          enum: [income, expense]
+        icon:
+          type: string
+          nullable: true
+        color:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        sync_version:
+          type: integer
+
+    CategoryInput:
+      type: object
+      required: [name, type]
+      properties:
+        parent_id:
+          type: integer
+          nullable: true
+        name:
+          type: string
+        type:
+          type: string
+          enum: [income, expense]
+        icon:
+          type: string
+        color:
+          type: string
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        name:
+          type: string
+        currency:
+          type: string
+        balance:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        sync_version:
+          type: integer
+
+    AccountInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        currency:
+          type: string
+          default: EUR
+        balance:
+          type: number
+
+    ScheduledTransaction:
+      type: object
+      properties:
+        id:
+          type: integer
+        account_id:
+          type: integer
+        category_id:
+          type: integer
+        user_id:
+          type: integer
+        type:
+          type: string
+          enum: [income, expense]
+        amount:
+          type: number
+        currency:
+          type: string
+        description:
+          type: string
+          nullable: true
+        rrule:
+          type: string
+        next_occurrence:
+          type: string
+          format: date
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        sync_version:
+          type: integer
+
+    ScheduledInput:
+      type: object
+      required: [account_id, category_id, type, amount, rrule, next_occurrence]
+      properties:
+        account_id:
+          type: integer
+        category_id:
+          type: integer
+        type:
+          type: string
+          enum: [income, expense]
+        amount:
+          type: number
+          minimum: 0.01
+        currency:
+          type: string
+        description:
+          type: string
+        rrule:
+          type: string
+        next_occurrence:
+          type: string
+          format: date
+
+    SharedAccess:
+      type: object
+      properties:
+        id:
+          type: integer
+        owner_user_id:
+          type: integer
+        guest_user_id:
+          type: integer
+        permission:
+          type: string
+          enum: [read, write]
+        guest_name:
+          type: string
+        guest_email:
+          type: string
+
+    CategoryReport:
+      type: object
+      properties:
+        category_id:
+          type: integer
+        category_name:
+          type: string
+        category_color:
+          type: string
+          nullable: true
+        type:
+          type: string
+        total:
+          type: number
+
+    MonthReport:
+      type: object
+      properties:
+        month:
+          type: string
+        type:
+          type: string
+        total:
+          type: number
+
+    TrendReport:
+      type: object
+      properties:
+        period:
+          type: string
+        type:
+          type: string
+        total:
+          type: number
+
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        admin_user_id:
+          type: integer
+        admin_username:
+          type: string
+        action:
+          type: string
+        target_user_id:
+          type: integer
+          nullable: true
+        details:
+          type: string
+          nullable: true
+        ip_address:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    AdminUser:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+        name:
+          type: string
+        is_admin:
+          type: boolean
+        force_password_change:
+          type: boolean
+        totp_enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+tags:
+  - name: Auth
+  - name: Transactions
+  - name: Categories
+  - name: Accounts
+  - name: Scheduled
+  - name: Reports
+  - name: Shared
+  - name: Admin
+  - name: Sync
+
+paths:
+  /health:
+    get:
+      tags: [Auth]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Invalid credentials
+        "429":
+          description: Rate limited
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout
+      responses:
+        "204":
+          description: Logged out
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+      responses:
+        "204":
+          description: Password changed
+
+  /auth/profile:
+    put:
+      tags: [Auth]
+      summary: Update profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                email:
+                  type: string
+                name:
+                  type: string
+      responses:
+        "204":
+          description: Profile updated
+
+  /auth/totp/setup:
+    post:
+      tags: [Auth]
+      summary: Setup TOTP 2FA
+      responses:
+        "200":
+          description: TOTP secret and QR code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:
+                    type: string
+                  qr_code:
+                    type: string
+                  otpauth:
+                    type: string
+
+  /auth/totp/verify:
+    post:
+      tags: [Auth]
+      summary: Verify TOTP code to complete 2FA setup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+      responses:
+        "204":
+          description: TOTP verified
+
+  /auth/totp/reset:
+    post:
+      tags: [Auth]
+      summary: Reset TOTP (requires password)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+      responses:
+        "200":
+          description: New TOTP secret
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:
+                    type: string
+                  qr_code:
+                    type: string
+                  otpauth:
+                    type: string
+
+  /transactions:
+    get:
+      tags: [Transactions]
+      summary: List transactions
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: category_id
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: string
+        - name: offset
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Transaction"
+    post:
+      tags: [Transactions]
+      summary: Create transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransactionInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+
+  /transactions/{id}:
+    put:
+      tags: [Transactions]
+      summary: Update transaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransactionInput"
+      responses:
+        "204":
+          description: Updated
+    delete:
+      tags: [Transactions]
+      summary: Delete transaction (soft delete)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /transactions/batch-delete:
+    post:
+      tags: [Transactions]
+      summary: Batch delete transactions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /transactions/batch-update-category:
+    post:
+      tags: [Transactions]
+      summary: Batch update category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, category_id]
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: integer
+                category_id:
+                  type: integer
+      responses:
+        "204":
+          description: Updated
+
+  /transactions/export:
+    get:
+      tags: [Transactions]
+      summary: Export transactions as CSV
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /transactions/import:
+    post:
+      tags: [Transactions]
+      summary: Import transactions from CSV
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported:
+                    type: integer
+
+  /categories:
+    get:
+      tags: [Categories]
+      summary: List categories
+      responses:
+        "200":
+          description: List of categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+    post:
+      tags: [Categories]
+      summary: Create category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+
+  /categories/{id}:
+    put:
+      tags: [Categories]
+      summary: Update category
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryInput"
+      responses:
+        "204":
+          description: Updated
+    delete:
+      tags: [Categories]
+      summary: Delete category
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /accounts:
+    get:
+      tags: [Accounts]
+      summary: List accounts
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+    post:
+      tags: [Accounts]
+      summary: Create account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+
+  /accounts/{id}:
+    put:
+      tags: [Accounts]
+      summary: Update account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountInput"
+      responses:
+        "204":
+          description: Updated
+    delete:
+      tags: [Accounts]
+      summary: Delete account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /scheduled:
+    get:
+      tags: [Scheduled]
+      summary: List scheduled transactions
+      responses:
+        "200":
+          description: List of scheduled transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ScheduledTransaction"
+    post:
+      tags: [Scheduled]
+      summary: Create scheduled transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduledInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+
+  /scheduled/{id}:
+    put:
+      tags: [Scheduled]
+      summary: Update scheduled transaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduledInput"
+      responses:
+        "204":
+          description: Updated
+    delete:
+      tags: [Scheduled]
+      summary: Delete scheduled transaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /sync:
+    get:
+      tags: [Sync]
+      summary: Sync data for mobile
+      parameters:
+        - name: since
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Sync data
+
+  /reports/by-category:
+    get:
+      tags: [Reports]
+      summary: Report by category
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [income, expense]
+      responses:
+        "200":
+          description: Category report
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryReport"
+
+  /reports/by-month:
+    get:
+      tags: [Reports]
+      summary: Report by month
+      parameters:
+        - name: year
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Monthly report
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MonthReport"
+
+  /reports/trend:
+    get:
+      tags: [Reports]
+      summary: Trend report
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: group_by
+          in: query
+          schema:
+            type: string
+            enum: [day, week, month]
+      responses:
+        "200":
+          description: Trend data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TrendReport"
+
+  /shared:
+    get:
+      tags: [Shared]
+      summary: List shared access
+      responses:
+        "200":
+          description: Shared access list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SharedAccess"
+    post:
+      tags: [Shared]
+      summary: Grant shared access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [guest_email, permission]
+              properties:
+                guest_email:
+                  type: string
+                permission:
+                  type: string
+                  enum: [read, write]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+
+  /shared/{id}:
+    delete:
+      tags: [Shared]
+      summary: Revoke shared access
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Revoked
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: List all users (admin only)
+      responses:
+        "200":
+          description: User list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminUser"
+    post:
+      tags: [Admin]
+      summary: Create user (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email, name, password]
+              properties:
+                username:
+                  type: string
+                email:
+                  type: string
+                name:
+                  type: string
+                password:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+
+  /admin/users/{id}:
+    put:
+      tags: [Admin]
+      summary: Update user (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                email:
+                  type: string
+                name:
+                  type: string
+      responses:
+        "204":
+          description: Updated
+    delete:
+      tags: [Admin]
+      summary: Delete user (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /admin/users/{id}/reset-password:
+    post:
+      tags: [Admin]
+      summary: Reset user password (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_password]
+              properties:
+                new_password:
+                  type: string
+                  minLength: 8
+      responses:
+        "204":
+          description: Password reset
+
+  /admin/users/{id}/toggle-admin:
+    post:
+      tags: [Admin]
+      summary: Toggle admin status (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Toggled
+
+  /admin/users/{id}/disable-totp:
+    post:
+      tags: [Admin]
+      summary: Disable TOTP for user (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: TOTP disabled
+
+  /admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: List audit logs (admin only)
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: string
+            default: "50"
+        - name: offset
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLog"
+
+  /admin/backup:
+    get:
+      tags: [Admin]
+      summary: Download database backup (admin only)
+      responses:
+        "200":
+          description: SQLite database file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary

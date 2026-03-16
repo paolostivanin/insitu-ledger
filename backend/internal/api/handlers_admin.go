@@ -95,6 +95,10 @@ func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, _ := result.LastInsertId()
+
+	adminID := UserIDFromContext(r.Context())
+	writeAuditLog(s.DB, adminID, "create_user", int64Ptr(id), "username: "+req.Username, clientIP(r))
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]any{"id": id})
@@ -132,6 +136,9 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		s.DB.Exec("UPDATE users SET name = ? WHERE id = ?", *req.Name, id)
 	}
 
+	adminID := UserIDFromContext(r.Context())
+	writeAuditLog(s.DB, adminID, "update_user", int64Ptr(id), "", clientIP(r))
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -151,6 +158,8 @@ func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	s.DB.Exec("DELETE FROM sessions WHERE user_id = ?", id)
 	s.DB.Exec("DELETE FROM users WHERE id = ?", id)
+
+	writeAuditLog(s.DB, adminID, "delete_user", int64Ptr(id), "", clientIP(r))
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -185,6 +194,9 @@ func (s *Server) handleAdminResetPassword(w http.ResponseWriter, r *http.Request
 	s.DB.Exec("UPDATE users SET password_hash = ?, force_password_change = 1 WHERE id = ?", hash, id)
 	s.DB.Exec("DELETE FROM sessions WHERE user_id = ?", id)
 
+	adminID := UserIDFromContext(r.Context())
+	writeAuditLog(s.DB, adminID, "reset_password", int64Ptr(id), "", clientIP(r))
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -203,6 +215,9 @@ func (s *Server) handleAdminToggleAdmin(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.DB.Exec("UPDATE users SET is_admin = CASE WHEN is_admin = 1 THEN 0 ELSE 1 END WHERE id = ?", id)
+
+	writeAuditLog(s.DB, adminID, "toggle_admin", int64Ptr(id), "", clientIP(r))
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -215,5 +230,9 @@ func (s *Server) handleAdminDisableTOTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.DB.Exec("UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?", id)
+
+	adminID := UserIDFromContext(r.Context())
+	writeAuditLog(s.DB, adminID, "disable_totp", int64Ptr(id), "", clientIP(r))
+
 	w.WriteHeader(http.StatusNoContent)
 }

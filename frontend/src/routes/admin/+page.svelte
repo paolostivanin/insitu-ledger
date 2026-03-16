@@ -89,14 +89,23 @@
 		if (!confirm(`Disable 2FA for "${name}"?`)) return;
 		try { await admin.disableTOTP(id); await load(); } catch (e: any) { error = e.message; }
 	}
+
+	async function downloadBackup() {
+		error = '';
+		try { await admin.backup(); } catch (e: any) { error = e.message; }
+	}
 </script>
 
 <div class="page">
 	<div class="page-header">
 		<h1>User Management</h1>
-		<button class="btn-primary" onclick={() => showCreateForm = !showCreateForm}>
-			{showCreateForm ? 'Cancel' : '+ New User'}
-		</button>
+		<div class="header-actions">
+			<a href="/admin/audit-logs" class="btn-ghost" style="padding: 0.5rem 1rem; border-radius: var(--radius); border: 1px solid var(--border); text-decoration: none; font-size: 0.875rem;">Audit Logs</a>
+			<button class="btn-ghost" onclick={downloadBackup}>Download Backup</button>
+			<button class="btn-primary" onclick={() => showCreateForm = !showCreateForm}>
+				{showCreateForm ? 'Cancel' : '+ New User'}
+			</button>
+		</div>
 	</div>
 
 	{#if error}
@@ -227,6 +236,11 @@
 		justify-content: space-between;
 		align-items: center;
 		margin-bottom: 1rem;
+	}
+	.header-actions {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
 	}
 	h2 { font-size: 1rem; margin-bottom: 0.25rem; }
 	.hint {

@@ -28,6 +28,10 @@ func NewRouter(s *Server) http.Handler {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
+	// API docs (unauthenticated)
+	mux.HandleFunc("GET /api/docs", handleDocsUI)
+	mux.HandleFunc("GET /api/docs/openapi.yaml", handleDocsSpec)
+
 	// Public routes (no registration — admin creates users)
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 
@@ -75,6 +79,14 @@ func NewRouter(s *Server) http.Handler {
 	protected.HandleFunc("GET /api/reports/by-month", s.handleReportByMonth)
 	protected.HandleFunc("GET /api/reports/trend", s.handleReportTrend)
 
+	// Batch operations
+	protected.HandleFunc("POST /api/transactions/batch-delete", s.handleBatchDeleteTransactions)
+	protected.HandleFunc("POST /api/transactions/batch-update-category", s.handleBatchUpdateCategory)
+
+	// CSV import/export
+	protected.HandleFunc("GET /api/transactions/export", s.handleExportTransactions)
+	protected.HandleFunc("POST /api/transactions/import", s.handleImportTransactions)
+
 	// Shared access
 	protected.HandleFunc("GET /api/shared", s.handleListSharedAccess)
 	protected.HandleFunc("POST /api/shared", s.handleCreateSharedAccess)
@@ -89,6 +101,8 @@ func NewRouter(s *Server) http.Handler {
 	admin.HandleFunc("POST /api/admin/users/{id}/reset-password", s.handleAdminResetPassword)
 	admin.HandleFunc("POST /api/admin/users/{id}/toggle-admin", s.handleAdminToggleAdmin)
 	admin.HandleFunc("POST /api/admin/users/{id}/disable-totp", s.handleAdminDisableTOTP)
+	admin.HandleFunc("GET /api/admin/audit-logs", s.handleAdminAuditLogs)
+	admin.HandleFunc("GET /api/admin/backup", s.handleAdminBackup)
 	protected.Handle("/api/admin/", s.AdminMiddleware(admin))
 
 	// Mount protected routes behind auth middleware

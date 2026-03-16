@@ -122,6 +122,18 @@ CREATE INDEX IF NOT EXISTS idx_categories_sync ON categories(sync_version);
 CREATE INDEX IF NOT EXISTS idx_accounts_sync ON accounts(sync_version);
 CREATE INDEX IF NOT EXISTS idx_scheduled_sync ON scheduled_transactions(sync_version);
 
+-- Audit log for admin actions
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_user_id INTEGER NOT NULL REFERENCES users(id),
+    action TEXT NOT NULL,
+    target_user_id INTEGER,
+    details TEXT,
+    ip_address TEXT,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
+
 -- Triggers to auto-increment sync_version on changes
 CREATE TRIGGER IF NOT EXISTS trg_transactions_version AFTER INSERT ON transactions
 BEGIN

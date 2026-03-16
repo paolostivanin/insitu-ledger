@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { transactions, categories, accounts, type Transaction, type Category, type Account } from '$lib/api/client';
+	import { onMount, onDestroy } from 'svelte';
+	import { transactions, categories, accounts, batch, csv, type Transaction, type Category, type Account } from '$lib/api/client';
 	import CategoryPicker from '$lib/components/CategoryPicker.svelte';
 
 	let txns = $state<Transaction[]>([]);
@@ -25,25 +25,69 @@
 	let fDate = $state(new Date().toISOString().slice(0, 10));
 	let fCurrency = $state('EUR');
 
-	onMount(load);
+	// Batch selection
+	let selectedIds = $state<Set<number>>(new Set());
+	let showBatchCategoryPicker = $state(false);
+	let batchCategoryId = $state(0);
+
+	// Import
+	let importInput: HTMLInputElement;
+
+	// Pagination
+	const PAGE_SIZE = 50;
+	let hasMore = $state(true);
+	let loadingMore = $state(false);
+
+	onMount(() => {
+		load();
+		window.addEventListener('shortcut-new', onShortcutNew);
+		window.addEventListener('shortcut-close', onShortcutClose);
+	});
+
+	onDestroy(() => {
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('shortcut-new', onShortcutNew);
+			window.removeEventListener('shortcut-close', onShortcutClose);
+		}
+	});
+
+	function onShortcutNew() { resetForm(); showForm = true; }
+	function onShortcutClose() { showForm = false; showBatchCategoryPicker = false; }
 
 	async function load() {
 		loading = true;
 		try {
 			const [t, c, a] = await Promise.all([
-				transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat }),
+				transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat, limit: PAGE_SIZE.toString() }),
 				categories.list(),
 				accounts.list()
 			]);
 			txns = t;
 			cats = c;
 			accts = a;
+			hasMore = t.length === PAGE_SIZE;
 			if (accts.length && !fAccountId) fAccountId = accts[0].id;
 			if (cats.length && !fCategoryId) fCategoryId = cats[0].id;
 		} catch (e: any) {
 			error = e.message;
 		}
 		loading = false;
+		selectedIds = new Set();
+	}
+
+	async function loadMore() {
+		loadingMore = true;
+		try {
+			const more = await transactions.list({
+				from: filterFrom, to: filterTo, category_id: filterCat,
+				limit: PAGE_SIZE.toString(), offset: txns.length.toString()
+			});
+			txns = [...txns, ...more];
+			hasMore = more.length === PAGE_SIZE;
+		} catch (e: any) {
+			error = e.message;
+		}
+		loadingMore = false;
 	}
 
 	function catName(id: number): string {
@@ -126,14 +170,83 @@
 	function handleCategoryCreated(cat: Category) {
 		cats = [...cats, cat];
 	}
+
+	// Batch operations
+	function toggleSelect(id: number) {
+		const next = new Set(selectedIds);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selectedIds = next;
+	}
+
+	function toggleSelectAll() {
+		if (selectedIds.size === txns.length) {
+			selectedIds = new Set();
+		} else {
+			selectedIds = new Set(txns.map(t => t.id));
+		}
+	}
+
+	async function batchDelete() {
+		if (!confirm(`Delete ${selectedIds.size} transaction(s)?`)) return;
+		error = '';
+		try {
+			await batch.deleteTransactions([...selectedIds]);
+			await load();
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
+
+	async function batchChangeCategory() {
+		if (!batchCategoryId) return;
+		error = '';
+		try {
+			await batch.updateCategory([...selectedIds], batchCategoryId);
+			showBatchCategoryPicker = false;
+			await load();
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
+
+	// CSV export/import
+	async function exportCsv() {
+		error = '';
+		try {
+			await csv.exportTransactions({ from: filterFrom, to: filterTo });
+		} catch (e: any) {
+			error = e.message;
+		}
+	}
+
+	async function importCsv(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		error = '';
+		try {
+			const result = await csv.importTransactions(file);
+			alert(`Successfully imported ${result.imported} transaction(s).`);
+			await load();
+		} catch (e: any) {
+			error = e.message;
+		}
+		input.value = '';
+	}
 </script>
 
 <div class="page">
 	<div class="page-header">
 		<h1>Transactions</h1>
-		<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
-			{showForm ? 'Cancel' : '+ New Transaction'}
-		</button>
+		<div class="header-actions">
+			<button class="btn-ghost" onclick={exportCsv}>Export CSV</button>
+			<button class="btn-ghost" onclick={() => importInput.click()}>Import CSV</button>
+			<input type="file" accept=".csv" bind:this={importInput} onchange={importCsv} style="display:none" />
+			<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
+				{showForm ? 'Cancel' : '+ New Transaction'}
+			</button>
+		</div>
 	</div>
 
 	{#if error}
@@ -216,8 +329,51 @@
 		</div>
 	</div>
 
+	{#if selectedIds.size > 0}
+		<div class="batch-bar card">
+			<span>{selectedIds.size} selected</span>
+			<button class="btn-danger" onclick={batchDelete}>Delete Selected</button>
+			<button class="btn-ghost" onclick={() => { showBatchCategoryPicker = !showBatchCategoryPicker; batchCategoryId = cats[0]?.id || 0; }}>
+				Change Category
+			</button>
+			{#if showBatchCategoryPicker}
+				<select bind:value={batchCategoryId}>
+					{#each cats as c}
+						<option value={c.id}>{c.name}</option>
+					{/each}
+				</select>
+				<button class="btn-primary" onclick={batchChangeCategory}>Apply</button>
+			{/if}
+			<button class="btn-ghost" onclick={() => { selectedIds = new Set(); }}>Clear</button>
+		</div>
+	{/if}
+
 	{#if loading}
-		<p>Loading...</p>
+		<div class="card table-wrap">
+			<table>
+				<thead>
+					<tr>
+						<th class="check-col"></th>
+						<th>Date</th><th>Time</th><th>Type</th><th>Category</th><th>Account</th><th>Description</th><th>Amount</th><th></th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each Array(5) as _}
+						<tr class="skeleton-row">
+							<td><div class="skeleton" style="width:16px;height:16px"></div></td>
+							<td><div class="skeleton" style="width:80px"></div></td>
+							<td><div class="skeleton" style="width:50px"></div></td>
+							<td><div class="skeleton" style="width:60px"></div></td>
+							<td><div class="skeleton" style="width:80px"></div></td>
+							<td><div class="skeleton" style="width:70px"></div></td>
+							<td><div class="skeleton" style="width:120px"></div></td>
+							<td><div class="skeleton" style="width:80px"></div></td>
+							<td></td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
 	{:else if txns.length === 0}
 		<p class="empty-state">No transactions found</p>
 	{:else}
@@ -225,6 +381,9 @@
 			<table>
 				<thead>
 					<tr>
+						<th class="check-col">
+							<input type="checkbox" checked={selectedIds.size === txns.length && txns.length > 0} onchange={toggleSelectAll} />
+						</th>
 						<th>Date</th>
 						<th>Time</th>
 						<th>Type</th>
@@ -238,6 +397,9 @@
 				<tbody>
 					{#each txns as txn}
 						<tr>
+							<td class="check-col">
+								<input type="checkbox" checked={selectedIds.has(txn.id)} onchange={() => toggleSelect(txn.id)} />
+							</td>
 							<td>{txn.date}</td>
 							<td class="time-cell">{fmtTime(txn.created_at)}</td>
 							<td><span class="badge {txn.type === 'income' ? 'badge-income' : 'badge-expense'}">{txn.type}</span></td>
@@ -256,6 +418,14 @@
 				</tbody>
 			</table>
 		</div>
+
+		{#if hasMore}
+			<div class="load-more">
+				<button class="btn-ghost" onclick={loadMore} disabled={loadingMore}>
+					{loadingMore ? 'Loading...' : 'Load More'}
+				</button>
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -265,6 +435,11 @@
 		justify-content: space-between;
 		align-items: center;
 		margin-bottom: 1rem;
+	}
+	.header-actions {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
 	}
 	h2 {
 		font-size: 1rem;
@@ -276,5 +451,34 @@
 	.time-cell {
 		color: var(--text-muted);
 		font-size: 0.85rem;
+	}
+	.check-col {
+		width: 40px;
+		text-align: center;
+	}
+	.batch-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin-bottom: 1rem;
+		padding: 0.75rem 1.5rem;
+	}
+	.batch-bar span {
+		font-weight: 500;
+		font-size: 0.9rem;
+	}
+	.skeleton {
+		height: 14px;
+		background: var(--bg-hover);
+		border-radius: 4px;
+		animation: pulse 1.5s ease-in-out infinite;
+	}
+	@keyframes pulse {
+		0%, 100% { opacity: 0.4; }
+		50% { opacity: 0.8; }
+	}
+	.load-more {
+		text-align: center;
+		margin-top: 1rem;
 	}
 </style>
