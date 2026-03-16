@@ -54,7 +54,8 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 ## API Endpoints
 
 ### Public
-- `POST /api/auth/login`
+- `GET /api/health` — health check (returns `{"status":"ok"}`)
+- `POST /api/auth/login` — rate-limited (10 attempts per IP per 15 minutes)
 
 ### Protected (Bearer token required)
 - **Auth** — `POST logout`, `POST change-password`, `PUT profile`, `GET me`
@@ -99,6 +100,16 @@ docker compose up --build
 ```
 
 This builds a multi-stage image (Node for the frontend, Go for the backend) and runs the server on port 8080. Data is persisted in a named Docker volume.
+
+### Reverse Proxy (required)
+
+InSitu Ledger does **not** handle TLS. You must run it behind a reverse proxy such as [Caddy](https://caddyserver.com/) or nginx for HTTPS termination. Example Caddyfile:
+
+```
+ledger.example.com {
+    reverse_proxy localhost:8080
+}
+```
 
 ### Configuration
 

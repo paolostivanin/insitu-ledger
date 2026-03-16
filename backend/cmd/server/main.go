@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/pstivanin/insitu-ledger/backend/internal/api"
@@ -42,8 +45,31 @@ func main() {
 	// Check for due scheduled transactions every hour
 	scheduler.Start(conn, 1*time.Hour)
 
-	log.Printf("InSitu Ledger listening on %s", *addr)
-	if err := http.ListenAndServe(*addr, router); err != nil {
-		log.Fatalf("server error: %v", err)
+	srv := &http.Server{
+		Addr:    *addr,
+		Handler: router,
 	}
+
+	// Graceful shutdown on SIGINT/SIGTERM
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("InSitu Ledger listening on %s", *addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
+
+	<-done
+	log.Println("Shutting down...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("forced shutdown: %v", err)
+	}
+
+	log.Println("Server stopped")
 }

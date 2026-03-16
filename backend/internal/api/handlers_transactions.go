@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 )
@@ -112,7 +113,14 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 		req.Currency = "EUR"
 	}
 
-	result, err := s.DB.Exec(
+	tx, err := s.DB.Begin()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(
 		`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, date)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		req.AccountID, req.CategoryID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Date,
@@ -122,12 +130,20 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Update account balance
 	sign := 1.0
 	if req.Type == "expense" {
 		sign = -1.0
 	}
-	s.DB.Exec("UPDATE accounts SET balance = balance + ? WHERE id = ?", req.Amount*sign, req.AccountID)
+	if _, err := tx.Exec("UPDATE accounts SET balance = balance + ? WHERE id = ?", req.Amount*sign, req.AccountID); err != nil {
+		http.Error(w, "failed to update balance", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("commit error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	id, _ := result.LastInsertId()
 	w.Header().Set("Content-Type", "application/json")
@@ -149,11 +165,18 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	tx, err := s.DB.Begin()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
 	// Get old transaction to reverse balance
 	var oldAmount float64
 	var oldType string
 	var oldAccountID int64
-	err = s.DB.QueryRow(
+	err = tx.QueryRow(
 		"SELECT amount, type, account_id FROM transactions WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
 		id, userID,
 	).Scan(&oldAmount, &oldType, &oldAccountID)
@@ -167,15 +190,17 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 	if oldType == "expense" {
 		oldSign = -1.0
 	}
-	s.DB.Exec("UPDATE accounts SET balance = balance - ? WHERE id = ?", oldAmount*oldSign, oldAccountID)
+	if _, err := tx.Exec("UPDATE accounts SET balance = balance - ? WHERE id = ?", oldAmount*oldSign, oldAccountID); err != nil {
+		http.Error(w, "failed to update balance", http.StatusInternalServerError)
+		return
+	}
 
 	// Apply update
-	_, err = s.DB.Exec(
+	if _, err := tx.Exec(
 		`UPDATE transactions SET account_id=?, category_id=?, type=?, amount=?, currency=?, description=?, date=?
 		 WHERE id=? AND user_id=?`,
 		req.AccountID, req.CategoryID, req.Type, req.Amount, req.Currency, req.Description, req.Date, id, userID,
-	)
-	if err != nil {
+	); err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
 		return
 	}
@@ -185,7 +210,16 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 	if req.Type == "expense" {
 		newSign = -1.0
 	}
-	s.DB.Exec("UPDATE accounts SET balance = balance + ? WHERE id = ?", req.Amount*newSign, req.AccountID)
+	if _, err := tx.Exec("UPDATE accounts SET balance = balance + ? WHERE id = ?", req.Amount*newSign, req.AccountID); err != nil {
+		http.Error(w, "failed to update balance", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("commit error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -198,11 +232,18 @@ func (s *Server) handleDeleteTransaction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	tx, err := s.DB.Begin()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
 	// Soft delete — reverse balance
 	var amount float64
 	var typ string
 	var accountID int64
-	err = s.DB.QueryRow(
+	err = tx.QueryRow(
 		"SELECT amount, type, account_id FROM transactions WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
 		id, userID,
 	).Scan(&amount, &typ, &accountID)
@@ -211,13 +252,25 @@ func (s *Server) handleDeleteTransaction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	s.DB.Exec("UPDATE transactions SET deleted_at = datetime('now') WHERE id = ?", id)
+	if _, err := tx.Exec("UPDATE transactions SET deleted_at = datetime('now') WHERE id = ?", id); err != nil {
+		http.Error(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
 
 	sign := 1.0
 	if typ == "expense" {
 		sign = -1.0
 	}
-	s.DB.Exec("UPDATE accounts SET balance = balance - ? WHERE id = ?", amount*sign, accountID)
+	if _, err := tx.Exec("UPDATE accounts SET balance = balance - ? WHERE id = ?", amount*sign, accountID); err != nil {
+		http.Error(w, "failed to update balance", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("commit error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }

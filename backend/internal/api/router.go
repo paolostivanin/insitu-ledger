@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 
 	"github.com/pstivanin/insitu-ledger/backend/internal/auth"
@@ -9,14 +10,23 @@ import (
 
 // Server holds dependencies for all HTTP handlers.
 type Server struct {
-	DB        *sql.DB
-	AuthStore *auth.Store
+	DB               *sql.DB
+	AuthStore        *auth.Store
+	LoginRateLimiter *LoginRateLimiter
 }
 
 // NewRouter sets up all routes and returns the root handler.
 func NewRouter(s *Server) http.Handler {
+	s.LoginRateLimiter = NewLoginRateLimiter()
+
 	mux := http.NewServeMux()
 	authMw := AuthMiddleware(s.AuthStore)
+
+	// Health check (unauthenticated)
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
 
 	// Public routes (no registration — admin creates users)
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
@@ -87,5 +97,6 @@ func NewRouter(s *Server) http.Handler {
 	// Serve frontend static files
 	mux.Handle("/", http.FileServer(http.Dir("static")))
 
-	return mux
+	// Wrap entire mux with logging and body limit
+	return LoggingMiddleware(BodyLimitMiddleware(mux))
 }

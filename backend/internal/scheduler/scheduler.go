@@ -61,27 +61,44 @@ func processDue(db *sql.DB) {
 	}
 
 	for _, s := range due {
-		// Create the actual transaction
-		_, err := db.Exec(
+		tx, err := db.Begin()
+		if err != nil {
+			log.Printf("scheduler: begin tx error for scheduled %d: %v", s.id, err)
+			continue
+		}
+
+		_, err = tx.Exec(
 			`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, date)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			s.accountID, s.categoryID, s.userID, s.typ, s.amount, s.currency, s.description, s.nextOccurrence,
 		)
 		if err != nil {
+			tx.Rollback()
 			log.Printf("scheduler: insert transaction error for scheduled %d: %v", s.id, err)
 			continue
 		}
 
-		// Update account balance
 		sign := 1.0
 		if s.typ == "expense" {
 			sign = -1.0
 		}
-		db.Exec("UPDATE accounts SET balance = balance + ? WHERE id = ?", s.amount*sign, s.accountID)
+		if _, err := tx.Exec("UPDATE accounts SET balance = balance + ? WHERE id = ?", s.amount*sign, s.accountID); err != nil {
+			tx.Rollback()
+			log.Printf("scheduler: update balance error for scheduled %d: %v", s.id, err)
+			continue
+		}
 
-		// Advance next_occurrence based on rrule
 		next := advanceDate(s.nextOccurrence, s.rrule)
-		db.Exec("UPDATE scheduled_transactions SET next_occurrence = ? WHERE id = ?", next, s.id)
+		if _, err := tx.Exec("UPDATE scheduled_transactions SET next_occurrence = ? WHERE id = ?", next, s.id); err != nil {
+			tx.Rollback()
+			log.Printf("scheduler: advance next_occurrence error for scheduled %d: %v", s.id, err)
+			continue
+		}
+
+		if err := tx.Commit(); err != nil {
+			log.Printf("scheduler: commit error for scheduled %d: %v", s.id, err)
+			continue
+		}
 
 		log.Printf("scheduler: materialized scheduled %d, next: %s", s.id, next)
 	}
