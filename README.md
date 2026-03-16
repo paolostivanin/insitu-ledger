@@ -119,7 +119,3 @@ ledger.example.com {
 | `-data` / `INSITU_DATA_DIR` | `./data`  | Directory for the SQLite database |
 
 Environment variables take precedence over flags.
-
-## License
-
-All rights reserved.
