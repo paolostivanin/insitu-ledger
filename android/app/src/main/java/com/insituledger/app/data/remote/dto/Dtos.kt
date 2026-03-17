@@ -151,4 +151,9 @@ data class SyncResponse(
     @SerializedName("scheduled_transactions") val scheduledTransactions: List<ScheduledTransactionDto>
 )
 
+data class AutocompleteSuggestion(
+    val description: String,
+    @SerializedName("category_id") val categoryId: Long
+)
+
 data class IdResponse(val id: Long)

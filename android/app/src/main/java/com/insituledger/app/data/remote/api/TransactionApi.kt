@@ -22,4 +22,7 @@ interface TransactionApi {
 
     @DELETE("transactions/{id}")
     suspend fun delete(@Path("id") id: Long): Response<Unit>
+
+    @GET("transactions/autocomplete")
+    suspend fun autocomplete(@Query("q") query: String): Response<List<AutocompleteSuggestion>>
 }

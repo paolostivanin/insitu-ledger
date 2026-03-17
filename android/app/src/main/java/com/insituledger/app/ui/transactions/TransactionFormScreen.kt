@@ -60,7 +60,7 @@ fun TransactionFormScreen(
                     value = uiState.accounts.find { it.id == uiState.accountId }?.name ?: "",
                     onValueChange = {}, readOnly = true, label = { Text("Account") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountExpanded) },
-                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
                 )
                 ExposedDropdownMenu(expanded = accountExpanded, onDismissRequest = { accountExpanded = false }) {
                     uiState.accounts.forEach { account ->
@@ -85,8 +85,46 @@ fun TransactionFormScreen(
                 label = { Text("Amount") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true, modifier = Modifier.fillMaxWidth())
 
-            OutlinedTextField(value = uiState.description, onValueChange = viewModel::updateDescription,
-                label = { Text("Description") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            ExposedDropdownMenuBox(
+                expanded = uiState.showSuggestions,
+                onExpandedChange = { if (!it) viewModel.dismissSuggestions() }
+            ) {
+                OutlinedTextField(
+                    value = uiState.description,
+                    onValueChange = viewModel::updateDescription,
+                    label = { Text("Description") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable)
+                )
+                if (uiState.suggestions.isNotEmpty()) {
+                    ExposedDropdownMenu(
+                        expanded = uiState.showSuggestions,
+                        onDismissRequest = { viewModel.dismissSuggestions() }
+                    ) {
+                        uiState.suggestions.forEach { suggestion ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(suggestion.description)
+                                        val catName = uiState.categories.find { it.id == suggestion.categoryId }?.name ?: ""
+                                        if (catName.isNotEmpty()) {
+                                            Text(
+                                                catName,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = { viewModel.selectSuggestion(suggestion) }
+                            )
+                        }
+                    }
+                }
+            }
 
             OutlinedTextField(value = uiState.date, onValueChange = viewModel::updateDate,
                 label = { Text("Date (YYYY-MM-DD)") }, singleLine = true, modifier = Modifier.fillMaxWidth())

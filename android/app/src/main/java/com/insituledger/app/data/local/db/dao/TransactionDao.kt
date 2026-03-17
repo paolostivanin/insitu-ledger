@@ -46,6 +46,15 @@ interface TransactionDao {
     @Upsert
     suspend fun upsertAll(transactions: List<TransactionEntity>)
 
+    @Query("""
+        SELECT description, category_id AS categoryId FROM transactions
+        WHERE deleted_at IS NULL AND description IS NOT NULL AND description LIKE :query || '%'
+        GROUP BY description
+        ORDER BY MAX(date) DESC
+        LIMIT 10
+    """)
+    suspend fun autocomplete(query: String): List<LocalAutocompleteSuggestion>
+
     @Query("DELETE FROM transactions WHERE deleted_at IS NOT NULL")
     suspend fun purgeDeleted()
 
@@ -65,4 +74,9 @@ interface TransactionDao {
 data class MonthlySummary(
     val income: Double,
     val expense: Double
+)
+
+data class LocalAutocompleteSuggestion(
+    val description: String,
+    val categoryId: Long
 )

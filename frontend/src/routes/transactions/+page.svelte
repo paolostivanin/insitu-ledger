@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { transactions, categories, accounts, batch, csv, type Transaction, type Category, type Account } from '$lib/api/client';
+	import { transactions, categories, accounts, batch, csv, type Transaction, type Category, type Account, type AutocompleteSuggestion } from '$lib/api/client';
 	import CategoryPicker from '$lib/components/CategoryPicker.svelte';
 
 	let txns = $state<Transaction[]>([]);
@@ -29,6 +29,37 @@
 	let selectedIds = $state<Set<number>>(new Set());
 	let showBatchCategoryPicker = $state(false);
 	let batchCategoryId = $state(0);
+
+	// Autocomplete
+	let suggestions = $state<AutocompleteSuggestion[]>([]);
+	let showSuggestions = $state(false);
+	let debounceTimer: ReturnType<typeof setTimeout>;
+
+	async function onDescriptionInput(value: string) {
+		fDescription = value;
+		clearTimeout(debounceTimer);
+		if (value.length < 2) {
+			suggestions = [];
+			showSuggestions = false;
+			return;
+		}
+		debounceTimer = setTimeout(async () => {
+			try {
+				suggestions = await transactions.autocomplete(value);
+				showSuggestions = suggestions.length > 0;
+			} catch {
+				suggestions = [];
+				showSuggestions = false;
+			}
+		}, 200);
+	}
+
+	function selectSuggestion(s: AutocompleteSuggestion) {
+		fDescription = s.description;
+		fCategoryId = s.category_id;
+		suggestions = [];
+		showSuggestions = false;
+	}
 
 	// Import
 	let importInput: HTMLInputElement;
@@ -298,9 +329,24 @@
 						<input id="date" type="date" bind:value={fDate} required />
 					</div>
 				</div>
-				<div class="form-group">
+				<div class="form-group autocomplete-wrap">
 					<label for="desc">Description</label>
-					<input id="desc" type="text" bind:value={fDescription} placeholder="Optional" />
+					<input id="desc" type="text" value={fDescription}
+						oninput={(e) => onDescriptionInput((e.target as HTMLInputElement).value)}
+						onfocusout={() => setTimeout(() => { showSuggestions = false; }, 150)}
+						placeholder="Optional" autocomplete="off" />
+					{#if showSuggestions}
+						<ul class="autocomplete-list">
+							{#each suggestions as s}
+								<li>
+									<button type="button" onmousedown={() => selectSuggestion(s)}>
+										{s.description}
+										<span class="autocomplete-cat">{catName(s.category_id)}</span>
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
 				</div>
 				<button class="btn-primary" type="submit">{editId ? 'Update' : 'Create'}</button>
 			</form>
@@ -480,5 +526,45 @@
 	.load-more {
 		text-align: center;
 		margin-top: 1rem;
+	}
+	.autocomplete-wrap {
+		position: relative;
+	}
+	.autocomplete-list {
+		position: absolute;
+		top: 100%;
+		left: 0;
+		right: 0;
+		background: var(--bg-card);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		margin: 2px 0 0;
+		padding: 0;
+		list-style: none;
+		z-index: 10;
+		max-height: 200px;
+		overflow-y: auto;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	}
+	.autocomplete-list li button {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		width: 100%;
+		padding: 0.5rem 0.75rem;
+		background: none;
+		border: none;
+		cursor: pointer;
+		font-size: 0.9rem;
+		color: var(--text);
+		text-align: left;
+	}
+	.autocomplete-list li button:hover {
+		background: var(--bg-hover);
+	}
+	.autocomplete-cat {
+		font-size: 0.8rem;
+		color: var(--text-muted);
+		margin-left: 1rem;
 	}
 </style>

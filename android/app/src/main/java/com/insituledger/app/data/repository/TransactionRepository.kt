@@ -44,6 +44,10 @@ class TransactionRepository @Inject constructor(
 
     suspend fun getById(id: Long): Transaction? = transactionDao.getById(id)?.toDomain()
 
+    suspend fun autocomplete(query: String): List<Pair<String, Long>> {
+        return transactionDao.autocomplete(query).map { it.description to it.categoryId }
+    }
+
     suspend fun create(
         accountId: Long, categoryId: Long, type: String,
         amount: Double, currency: String, description: String?, date: String

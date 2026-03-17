@@ -9,11 +9,18 @@ import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
+
+data class DescriptionSuggestion(
+    val description: String,
+    val categoryId: Long
+)
 
 data class TransactionFormUiState(
     val id: Long? = null,
@@ -26,6 +33,8 @@ data class TransactionFormUiState(
     val date: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
     val accounts: List<Account> = emptyList(),
     val categories: List<Category> = emptyList(),
+    val suggestions: List<DescriptionSuggestion> = emptyList(),
+    val showSuggestions: Boolean = false,
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
     val error: String? = null,
@@ -80,7 +89,46 @@ class TransactionFormViewModel @Inject constructor(
     fun updateType(type: String) { _uiState.update { it.copy(type = type) } }
     fun updateAmount(amount: String) { _uiState.update { it.copy(amount = amount) } }
     fun updateCurrency(currency: String) { _uiState.update { it.copy(currency = currency) } }
-    fun updateDescription(desc: String) { _uiState.update { it.copy(description = desc) } }
+    private var autocompleteJob: Job? = null
+
+    fun updateDescription(desc: String) {
+        _uiState.update { it.copy(description = desc) }
+        autocompleteJob?.cancel()
+        if (desc.length < 2) {
+            _uiState.update { it.copy(suggestions = emptyList(), showSuggestions = false) }
+            return
+        }
+        autocompleteJob = viewModelScope.launch {
+            delay(200)
+            try {
+                val results = transactionRepository.autocomplete(desc)
+                _uiState.update {
+                    it.copy(
+                        suggestions = results.map { (d, c) -> DescriptionSuggestion(d, c) },
+                        showSuggestions = results.isNotEmpty()
+                    )
+                }
+            } catch (_: Exception) {
+                _uiState.update { it.copy(suggestions = emptyList(), showSuggestions = false) }
+            }
+        }
+    }
+
+    fun selectSuggestion(suggestion: DescriptionSuggestion) {
+        _uiState.update {
+            it.copy(
+                description = suggestion.description,
+                categoryId = suggestion.categoryId,
+                suggestions = emptyList(),
+                showSuggestions = false
+            )
+        }
+    }
+
+    fun dismissSuggestions() {
+        _uiState.update { it.copy(showSuggestions = false) }
+    }
+
     fun updateDate(date: String) { _uiState.update { it.copy(date = date) } }
 
     fun createCategory(name: String, type: String) {

@@ -115,6 +115,11 @@ export interface TransactionInput {
 	date: string;
 }
 
+export interface AutocompleteSuggestion {
+	description: string;
+	category_id: number;
+}
+
 export const transactions = {
 	list: (params?: { from?: string; to?: string; category_id?: string; limit?: string; offset?: string }) =>
 		request<Transaction[]>('/transactions', { params }),
@@ -123,7 +128,9 @@ export const transactions = {
 	update: (id: number, data: TransactionInput) =>
 		request<void>(`/transactions/${id}`, { method: 'PUT', body: data }),
 	delete: (id: number) =>
-		request<void>(`/transactions/${id}`, { method: 'DELETE' })
+		request<void>(`/transactions/${id}`, { method: 'DELETE' }),
+	autocomplete: (q: string) =>
+		request<AutocompleteSuggestion[]>('/transactions/autocomplete', { params: { q } })
 };
 
 // Categories

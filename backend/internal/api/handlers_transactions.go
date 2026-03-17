@@ -224,6 +224,50 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.Request) {
+	userID := UserIDFromContext(r.Context())
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]any{})
+		return
+	}
+
+	rows, err := s.DB.Query(
+		`SELECT description, category_id FROM transactions
+		 WHERE user_id = ? AND deleted_at IS NULL AND description IS NOT NULL AND description LIKE ?
+		 GROUP BY description
+		 ORDER BY MAX(date) DESC
+		 LIMIT 10`,
+		userID, q+"%",
+	)
+	if err != nil {
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type suggestion struct {
+		Description string `json:"description"`
+		CategoryID  int64  `json:"category_id"`
+	}
+	var results []suggestion
+	for rows.Next() {
+		var s suggestion
+		if err := rows.Scan(&s.Description, &s.CategoryID); err != nil {
+			http.Error(w, "scan error", http.StatusInternalServerError)
+			return
+		}
+		results = append(results, s)
+	}
+	if results == nil {
+		results = []suggestion{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
 func (s *Server) handleDeleteTransaction(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
