@@ -7,6 +7,7 @@ import com.insituledger.app.data.local.db.entity.PendingOperationEntity
 import com.insituledger.app.data.remote.api.AccountApi
 import com.insituledger.app.data.remote.dto.AccountInput
 import com.insituledger.app.domain.model.Account
+import com.insituledger.app.data.sync.SyncManager
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -18,7 +19,8 @@ class AccountRepository @Inject constructor(
     private val accountDao: AccountDao,
     private val pendingOpDao: PendingOperationDao,
     private val accountApi: AccountApi,
-    private val gson: Gson
+    private val gson: Gson,
+    private val syncManager: SyncManager
 ) {
     fun getAll(): Flow<List<Account>> = accountDao.getAll().map { list ->
         list.map { it.toDomain() }
@@ -46,6 +48,7 @@ class AccountRepository @Inject constructor(
             entityId = localId,
             payloadJson = gson.toJson(input)
         ))
+        syncManager.triggerImmediateSync()
         return localId
     }
 
@@ -61,6 +64,7 @@ class AccountRepository @Inject constructor(
             serverId = if (id > 0) id else null,
             payloadJson = gson.toJson(input)
         ))
+        syncManager.triggerImmediateSync()
     }
 
     suspend fun delete(id: Long) {
@@ -73,6 +77,7 @@ class AccountRepository @Inject constructor(
             entityId = id,
             serverId = if (id > 0) id else null
         ))
+        syncManager.triggerImmediateSync()
     }
 
     private fun AccountEntity.toDomain() = Account(

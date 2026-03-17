@@ -86,6 +86,13 @@ class ScheduledFormViewModel @Inject constructor(
     fun updateRrule(rrule: String) { _uiState.update { it.copy(rrule = rrule) } }
     fun updateNextOccurrence(date: String) { _uiState.update { it.copy(nextOccurrence = date) } }
 
+    fun createCategory(name: String, type: String) {
+        viewModelScope.launch {
+            val id = categoryRepository.create(name, type, null, null, null)
+            _uiState.update { it.copy(categoryId = id) }
+        }
+    }
+
     fun save() {
         val state = _uiState.value
         val amount = state.amount.toDoubleOrNull()

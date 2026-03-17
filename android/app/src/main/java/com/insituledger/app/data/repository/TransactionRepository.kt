@@ -7,6 +7,7 @@ import com.insituledger.app.data.local.db.entity.TransactionEntity
 import com.insituledger.app.data.remote.api.TransactionApi
 import com.insituledger.app.data.remote.dto.TransactionInput
 import com.insituledger.app.domain.model.Transaction
+import com.insituledger.app.data.sync.SyncManager
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -18,7 +19,8 @@ class TransactionRepository @Inject constructor(
     private val transactionDao: TransactionDao,
     private val pendingOpDao: PendingOperationDao,
     private val transactionApi: TransactionApi,
-    private val gson: Gson
+    private val gson: Gson,
+    private val syncManager: SyncManager
 ) {
     fun getAll(): Flow<List<Transaction>> = transactionDao.getAll().map { list ->
         list.map { it.toDomain() }
@@ -69,6 +71,7 @@ class TransactionRepository @Inject constructor(
             entityId = localId,
             payloadJson = gson.toJson(input)
         ))
+        syncManager.triggerImmediateSync()
         return localId
     }
 
@@ -90,6 +93,7 @@ class TransactionRepository @Inject constructor(
             serverId = if (id > 0) id else null,
             payloadJson = gson.toJson(input)
         ))
+        syncManager.triggerImmediateSync()
     }
 
     suspend fun delete(id: Long) {
@@ -102,6 +106,7 @@ class TransactionRepository @Inject constructor(
             entityId = id,
             serverId = if (id > 0) id else null
         ))
+        syncManager.triggerImmediateSync()
     }
 
     private fun TransactionEntity.toDomain() = Transaction(

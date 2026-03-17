@@ -50,6 +50,7 @@ android {
 }
 
 dependencies {
+    implementation(libs.appcompat)
     implementation(libs.core.ktx)
     implementation(libs.lifecycle.runtime.ktx)
     implementation(libs.lifecycle.runtime.compose)
@@ -89,6 +90,8 @@ dependencies {
     implementation(libs.coroutines.android)
 
     implementation(libs.gson)
+
+    implementation(libs.biometric)
 
     implementation(libs.lib.recur)
 

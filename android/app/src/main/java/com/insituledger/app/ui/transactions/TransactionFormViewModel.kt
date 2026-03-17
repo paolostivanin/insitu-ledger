@@ -83,6 +83,13 @@ class TransactionFormViewModel @Inject constructor(
     fun updateDescription(desc: String) { _uiState.update { it.copy(description = desc) } }
     fun updateDate(date: String) { _uiState.update { it.copy(date = date) } }
 
+    fun createCategory(name: String, type: String) {
+        viewModelScope.launch {
+            val id = categoryRepository.create(name, type, null, null, null)
+            _uiState.update { it.copy(categoryId = id) }
+        }
+    }
+
     fun save() {
         val state = _uiState.value
         val amount = state.amount.toDoubleOrNull()

@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.ui.common.IncomeExpenseToggle
 import com.insituledger.app.ui.common.LoadingIndicator
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,12 +45,7 @@ fun CategoryFormScreen(
         ) {
             Spacer(modifier = Modifier.height(4.dp))
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = uiState.type == "expense", onClick = { viewModel.updateType("expense") },
-                    label = { Text("Expense") }, modifier = Modifier.weight(1f))
-                FilterChip(selected = uiState.type == "income", onClick = { viewModel.updateType("income") },
-                    label = { Text("Income") }, modifier = Modifier.weight(1f))
-            }
+            IncomeExpenseToggle(selected = uiState.type, onSelect = viewModel::updateType)
 
             OutlinedTextField(value = uiState.name, onValueChange = viewModel::updateName,
                 label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())

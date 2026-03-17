@@ -14,6 +14,7 @@ import javax.inject.Inject
 data class SettingsUiState(
     val userName: String = "",
     val themeMode: String = "system",
+    val biometricEnabled: Boolean = false,
     val pendingOps: Int = 0,
     val lastSyncVersion: Long = 0,
     val isSyncing: Boolean = false,
@@ -40,14 +41,16 @@ class SettingsViewModel @Inject constructor(
                 prefs.userNameFlow,
                 prefs.themeModeFlow,
                 prefs.lastSyncVersionFlow,
-                pendingOpDao.getCount()
-            ) { name, theme, syncVersion, pendingCount ->
+                pendingOpDao.getCount(),
+                prefs.biometricEnabledFlow
+            ) { values ->
                 _uiState.update {
                     it.copy(
-                        userName = name ?: "",
-                        themeMode = theme,
-                        lastSyncVersion = syncVersion,
-                        pendingOps = pendingCount
+                        userName = (values[0] as? String) ?: "",
+                        themeMode = values[1] as String,
+                        lastSyncVersion = values[2] as Long,
+                        pendingOps = values[3] as Int,
+                        biometricEnabled = values[4] as Boolean
                     )
                 }
             }.collect()
@@ -56,6 +59,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setTheme(mode: String) {
         viewModelScope.launch { prefs.saveThemeMode(mode) }
+    }
+
+    fun setBiometric(enabled: Boolean) {
+        viewModelScope.launch { prefs.saveBiometricEnabled(enabled) }
     }
 
     fun forceSync() {

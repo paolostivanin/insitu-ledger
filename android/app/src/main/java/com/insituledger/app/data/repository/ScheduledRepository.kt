@@ -7,6 +7,7 @@ import com.insituledger.app.data.local.db.entity.ScheduledTransactionEntity
 import com.insituledger.app.data.remote.api.ScheduledApi
 import com.insituledger.app.data.remote.dto.ScheduledInput
 import com.insituledger.app.domain.model.ScheduledTransaction
+import com.insituledger.app.data.sync.SyncManager
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -18,7 +19,8 @@ class ScheduledRepository @Inject constructor(
     private val scheduledDao: ScheduledTransactionDao,
     private val pendingOpDao: PendingOperationDao,
     private val scheduledApi: ScheduledApi,
-    private val gson: Gson
+    private val gson: Gson,
+    private val syncManager: SyncManager
 ) {
     fun getAll(): Flow<List<ScheduledTransaction>> = scheduledDao.getAll().map { list ->
         list.map { it.toDomain() }
@@ -55,6 +57,7 @@ class ScheduledRepository @Inject constructor(
             entityId = localId,
             payloadJson = gson.toJson(input)
         ))
+        syncManager.triggerImmediateSync()
         return localId
     }
 
@@ -78,6 +81,7 @@ class ScheduledRepository @Inject constructor(
             serverId = if (id > 0) id else null,
             payloadJson = gson.toJson(input)
         ))
+        syncManager.triggerImmediateSync()
     }
 
     suspend fun delete(id: Long) {
@@ -90,6 +94,7 @@ class ScheduledRepository @Inject constructor(
             entityId = id,
             serverId = if (id > 0) id else null
         ))
+        syncManager.triggerImmediateSync()
     }
 
     private fun ScheduledTransactionEntity.toDomain() = ScheduledTransaction(

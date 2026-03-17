@@ -13,6 +13,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.ui.common.CategoryDropdownWithAdd
+import com.insituledger.app.ui.common.IncomeExpenseToggle
 import com.insituledger.app.ui.common.LoadingIndicator
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,12 +51,7 @@ fun ScheduledFormScreen(
         ) {
             Spacer(modifier = Modifier.height(4.dp))
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = uiState.type == "expense", onClick = { viewModel.updateType("expense") },
-                    label = { Text("Expense") }, modifier = Modifier.weight(1f))
-                FilterChip(selected = uiState.type == "income", onClick = { viewModel.updateType("income") },
-                    label = { Text("Income") }, modifier = Modifier.weight(1f))
-            }
+            IncomeExpenseToggle(selected = uiState.type, onSelect = viewModel::updateType)
 
             var accountExpanded by remember { mutableStateOf(false) }
             ExposedDropdownMenuBox(expanded = accountExpanded, onExpandedChange = { accountExpanded = it }) {
@@ -74,23 +71,13 @@ fun ScheduledFormScreen(
                 }
             }
 
-            var catExpanded by remember { mutableStateOf(false) }
-            val filteredCats = uiState.categories.filter { it.type == uiState.type }
-            ExposedDropdownMenuBox(expanded = catExpanded, onExpandedChange = { catExpanded = it }) {
-                OutlinedTextField(
-                    value = uiState.categories.find { it.id == uiState.categoryId }?.name ?: "",
-                    onValueChange = {}, readOnly = true, label = { Text("Category") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = catExpanded) },
-                    modifier = Modifier.fillMaxWidth().menuAnchor()
-                )
-                ExposedDropdownMenu(expanded = catExpanded, onDismissRequest = { catExpanded = false }) {
-                    filteredCats.forEach { cat ->
-                        DropdownMenuItem(text = { Text(cat.name) }, onClick = {
-                            viewModel.updateCategoryId(cat.id); catExpanded = false
-                        })
-                    }
-                }
-            }
+            CategoryDropdownWithAdd(
+                categories = uiState.categories,
+                selectedId = uiState.categoryId,
+                type = uiState.type,
+                onSelect = viewModel::updateCategoryId,
+                onCreateCategory = viewModel::createCategory
+            )
 
             OutlinedTextField(value = uiState.amount, onValueChange = viewModel::updateAmount,
                 label = { Text("Amount") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),

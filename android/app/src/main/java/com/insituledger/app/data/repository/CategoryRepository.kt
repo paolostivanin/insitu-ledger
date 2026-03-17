@@ -7,6 +7,7 @@ import com.insituledger.app.data.local.db.entity.PendingOperationEntity
 import com.insituledger.app.data.remote.api.CategoryApi
 import com.insituledger.app.data.remote.dto.CategoryInput
 import com.insituledger.app.domain.model.Category
+import com.insituledger.app.data.sync.SyncManager
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -18,7 +19,8 @@ class CategoryRepository @Inject constructor(
     private val categoryDao: CategoryDao,
     private val pendingOpDao: PendingOperationDao,
     private val categoryApi: CategoryApi,
-    private val gson: Gson
+    private val gson: Gson,
+    private val syncManager: SyncManager
 ) {
     fun getAll(): Flow<List<Category>> = categoryDao.getAll().map { list ->
         list.map { it.toDomain() }
@@ -52,6 +54,7 @@ class CategoryRepository @Inject constructor(
             entityId = localId,
             payloadJson = gson.toJson(input)
         ))
+        syncManager.triggerImmediateSync()
         return localId
     }
 
@@ -67,6 +70,7 @@ class CategoryRepository @Inject constructor(
             serverId = if (id > 0) id else null,
             payloadJson = gson.toJson(input)
         ))
+        syncManager.triggerImmediateSync()
     }
 
     suspend fun delete(id: Long) {
@@ -79,6 +83,7 @@ class CategoryRepository @Inject constructor(
             entityId = id,
             serverId = if (id > 0) id else null
         ))
+        syncManager.triggerImmediateSync()
     }
 
     private fun CategoryEntity.toDomain() = Category(

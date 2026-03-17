@@ -26,6 +26,7 @@ class UserPreferences @Inject constructor(
         val TOTP_ENABLED = booleanPreferencesKey("totp_enabled")
         val LAST_SYNC_VERSION = longPreferencesKey("last_sync_version")
         val THEME_MODE = stringPreferencesKey("theme_mode")
+        val BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
     }
 
     val tokenFlow: Flow<String?> = context.dataStore.data.map { it[TOKEN] }
@@ -37,6 +38,7 @@ class UserPreferences @Inject constructor(
     val totpEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[TOTP_ENABLED] ?: false }
     val lastSyncVersionFlow: Flow<Long> = context.dataStore.data.map { it[LAST_SYNC_VERSION] ?: 0L }
     val themeModeFlow: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "system" }
+    val biometricEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[BIOMETRIC_ENABLED] ?: false }
 
     suspend fun saveToken(token: String) {
         context.dataStore.edit { it[TOKEN] = token }
@@ -62,6 +64,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun saveThemeMode(mode: String) {
         context.dataStore.edit { it[THEME_MODE] = mode }
+    }
+
+    suspend fun saveBiometricEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[BIOMETRIC_ENABLED] = enabled }
     }
 
     suspend fun clearAll() {
