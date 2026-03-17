@@ -48,11 +48,11 @@ func NewRouter(s *Server) http.Handler {
 	protected.HandleFunc("POST /api/auth/totp/reset", s.handleTOTPReset)
 
 	// Transactions
+	protected.HandleFunc("GET /api/transactions/autocomplete", s.handleAutocompleteTransactions)
 	protected.HandleFunc("GET /api/transactions", s.handleListTransactions)
 	protected.HandleFunc("POST /api/transactions", s.handleCreateTransaction)
 	protected.HandleFunc("PUT /api/transactions/{id}", s.handleUpdateTransaction)
 	protected.HandleFunc("DELETE /api/transactions/{id}", s.handleDeleteTransaction)
-	protected.HandleFunc("GET /api/transactions/autocomplete", s.handleAutocompleteTransactions)
 
 	// Categories
 	protected.HandleFunc("GET /api/categories", s.handleListCategories)

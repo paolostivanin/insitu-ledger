@@ -54,7 +54,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 		body: body ? JSON.stringify(body) : undefined
 	});
 
-	if (res.status === 401) {
+	if (res.status === 401 && !path.startsWith('/auth/login')) {
 		clearToken();
 		if (typeof window !== 'undefined') window.location.href = '/login';
 		throw new ApiError(401, 'Unauthorized');

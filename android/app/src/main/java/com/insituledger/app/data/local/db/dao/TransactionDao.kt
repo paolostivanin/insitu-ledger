@@ -48,8 +48,9 @@ interface TransactionDao {
 
     @Query("""
         SELECT description, category_id AS categoryId FROM transactions
-        WHERE deleted_at IS NULL AND description IS NOT NULL AND description LIKE :query || '%'
-        GROUP BY description
+        WHERE deleted_at IS NULL AND description IS NOT NULL
+          AND description LIKE :query || '%' COLLATE NOCASE
+        GROUP BY description COLLATE NOCASE
         ORDER BY MAX(date) DESC
         LIMIT 10
     """)

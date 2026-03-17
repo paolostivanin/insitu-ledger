@@ -235,8 +235,9 @@ func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.R
 
 	rows, err := s.DB.Query(
 		`SELECT description, category_id FROM transactions
-		 WHERE user_id = ? AND deleted_at IS NULL AND description IS NOT NULL AND description LIKE ?
-		 GROUP BY description
+		 WHERE user_id = ? AND deleted_at IS NULL AND description IS NOT NULL
+		   AND description LIKE ? COLLATE NOCASE
+		 GROUP BY description COLLATE NOCASE
 		 ORDER BY MAX(date) DESC
 		 LIMIT 10`,
 		userID, q+"%",
