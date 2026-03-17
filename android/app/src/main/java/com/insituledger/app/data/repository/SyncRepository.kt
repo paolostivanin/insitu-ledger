@@ -1,6 +1,8 @@
 package com.insituledger.app.data.repository
 
+import androidx.room.withTransaction
 import com.insituledger.app.data.local.datastore.UserPreferences
+import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.db.dao.*
 import com.insituledger.app.data.local.db.entity.*
 import com.insituledger.app.data.remote.api.*
@@ -12,6 +14,7 @@ import javax.inject.Singleton
 
 @Singleton
 class SyncRepository @Inject constructor(
+    private val database: AppDatabase,
     private val syncApi: SyncApi,
     private val transactionApi: TransactionApi,
     private val categoryApi: CategoryApi,
@@ -151,27 +154,35 @@ class SyncRepository @Inject constructor(
     }
 
     private suspend fun remapAccountId(oldId: Long, newId: Long) {
-        accountDao.updateId(oldId, newId)
-        transactionDao.updateAccountId(oldId, newId)
-        scheduledDao.updateAccountId(oldId, newId)
-        pendingOpDao.updateEntityId(oldId, newId, "account")
+        database.withTransaction {
+            accountDao.updateId(oldId, newId)
+            transactionDao.updateAccountId(oldId, newId)
+            scheduledDao.updateAccountId(oldId, newId)
+            pendingOpDao.updateEntityId(oldId, newId, "account")
+        }
     }
 
     private suspend fun remapCategoryId(oldId: Long, newId: Long) {
-        categoryDao.updateId(oldId, newId)
-        transactionDao.updateCategoryId(oldId, newId)
-        scheduledDao.updateCategoryId(oldId, newId)
-        pendingOpDao.updateEntityId(oldId, newId, "category")
+        database.withTransaction {
+            categoryDao.updateId(oldId, newId)
+            transactionDao.updateCategoryId(oldId, newId)
+            scheduledDao.updateCategoryId(oldId, newId)
+            pendingOpDao.updateEntityId(oldId, newId, "category")
+        }
     }
 
     private suspend fun remapTransactionId(oldId: Long, newId: Long) {
-        transactionDao.updateId(oldId, newId)
-        pendingOpDao.updateEntityId(oldId, newId, "transaction")
+        database.withTransaction {
+            transactionDao.updateId(oldId, newId)
+            pendingOpDao.updateEntityId(oldId, newId, "transaction")
+        }
     }
 
     private suspend fun remapScheduledId(oldId: Long, newId: Long) {
-        scheduledDao.updateId(oldId, newId)
-        pendingOpDao.updateEntityId(oldId, newId, "scheduled")
+        database.withTransaction {
+            scheduledDao.updateId(oldId, newId)
+            pendingOpDao.updateEntityId(oldId, newId, "scheduled")
+        }
     }
 
     suspend fun pull(): Result<Unit> {

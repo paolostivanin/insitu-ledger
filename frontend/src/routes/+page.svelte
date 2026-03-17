@@ -8,6 +8,7 @@
 	let categoryData = $state<CategoryReport[]>([]);
 	let monthData = $state<MonthReport[]>([]);
 	let loading = $state(true);
+	let loadError = $state('');
 
 	onMount(async () => {
 		if (!isAuthenticated()) {
@@ -25,8 +26,10 @@
 			recentTxns = t;
 			categoryData = c;
 			monthData = m;
-		} catch {
-			// handled by api client redirect
+		} catch (e: any) {
+			if (e?.status !== 401) {
+				loadError = 'Failed to load dashboard data. Please try refreshing.';
+			}
 		}
 		loading = false;
 	});
@@ -53,6 +56,8 @@
 <div class="page">
 	{#if loading}
 		<p class="text-muted">Loading...</p>
+	{:else if loadError}
+		<p class="error-msg">{loadError}</p>
 	{:else}
 		<h1>Dashboard</h1>
 

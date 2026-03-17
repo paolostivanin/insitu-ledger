@@ -79,6 +79,11 @@ func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.Password) < 8 {
+		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -133,7 +138,10 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Name != nil {
-		s.DB.Exec("UPDATE users SET name = ? WHERE id = ?", *req.Name, id)
+		if _, err := s.DB.Exec("UPDATE users SET name = ? WHERE id = ?", *req.Name, id); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	adminID := UserIDFromContext(r.Context())
@@ -156,8 +164,26 @@ func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.DB.Exec("DELETE FROM sessions WHERE user_id = ?", id)
-	s.DB.Exec("DELETE FROM users WHERE id = ?", id)
+	tx, err := s.DB.Begin()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM sessions WHERE user_id = ?", id); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if _, err := tx.Exec("DELETE FROM users WHERE id = ?", id); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	writeAuditLog(s.DB, adminID, "delete_user", int64Ptr(id), "", clientIP(r))
 
@@ -191,8 +217,26 @@ func (s *Server) handleAdminResetPassword(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	s.DB.Exec("UPDATE users SET password_hash = ?, force_password_change = 1 WHERE id = ?", hash, id)
-	s.DB.Exec("DELETE FROM sessions WHERE user_id = ?", id)
+	tx, err := s.DB.Begin()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("UPDATE users SET password_hash = ?, force_password_change = 1 WHERE id = ?", hash, id); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if _, err := tx.Exec("DELETE FROM sessions WHERE user_id = ?", id); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	adminID := UserIDFromContext(r.Context())
 	writeAuditLog(s.DB, adminID, "reset_password", int64Ptr(id), "", clientIP(r))
@@ -214,7 +258,10 @@ func (s *Server) handleAdminToggleAdmin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.DB.Exec("UPDATE users SET is_admin = CASE WHEN is_admin = 1 THEN 0 ELSE 1 END WHERE id = ?", id)
+	if _, err := s.DB.Exec("UPDATE users SET is_admin = CASE WHEN is_admin = 1 THEN 0 ELSE 1 END WHERE id = ?", id); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	writeAuditLog(s.DB, adminID, "toggle_admin", int64Ptr(id), "", clientIP(r))
 
@@ -229,7 +276,10 @@ func (s *Server) handleAdminDisableTOTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.DB.Exec("UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?", id)
+	if _, err := s.DB.Exec("UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?", id); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	adminID := UserIDFromContext(r.Context())
 	writeAuditLog(s.DB, adminID, "disable_totp", int64Ptr(id), "", clientIP(r))

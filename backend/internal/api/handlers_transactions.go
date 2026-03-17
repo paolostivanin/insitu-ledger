@@ -24,8 +24,25 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 	from := r.URL.Query().Get("from")       // YYYY-MM-DD
 	to := r.URL.Query().Get("to")           // YYYY-MM-DD
 	catID := r.URL.Query().Get("category_id")
-	limit := r.URL.Query().Get("limit")
-	offset := r.URL.Query().Get("offset")
+
+	limitVal, offsetVal, err := parsePagination(r.URL.Query().Get("limit"), r.URL.Query().Get("offset"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if from != "" {
+		if err := validateDate(from); err != nil {
+			http.Error(w, "invalid 'from' date: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	if to != "" {
+		if err := validateDate(to); err != nil {
+			http.Error(w, "invalid 'to' date: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 
 	query := `SELECT id, account_id, category_id, user_id, type, amount, currency,
 	           description, date, created_at, updated_at, sync_version
@@ -45,18 +62,8 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 		args = append(args, catID)
 	}
 
-	query += " ORDER BY date DESC"
-
-	if limit == "" {
-		limit = "50"
-	}
-	query += " LIMIT ?"
-	args = append(args, limit)
-
-	if offset != "" {
-		query += " OFFSET ?"
-		args = append(args, offset)
-	}
+	query += " ORDER BY date DESC LIMIT ? OFFSET ?"
+	args = append(args, limitVal, offsetVal)
 
 	rows, err := s.DB.Query(query, args...)
 	if err != nil {
@@ -108,6 +115,16 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 	if req.Amount <= 0 {
 		http.Error(w, "amount must be positive", http.StatusBadRequest)
 		return
+	}
+	if err := validateDate(req.Date); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Description != nil {
+		if err := validateLength("description", *req.Description, 500); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	if req.Currency == "" {
 		req.Currency = "EUR"
@@ -162,6 +179,11 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 	var req createTransactionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := validateDate(req.Date); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

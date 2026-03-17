@@ -3,15 +3,18 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 )
 
 func writeAuditLog(db *sql.DB, adminID int64, action string, targetUserID *int64, details, ip string) {
-	db.Exec(
+	if _, err := db.Exec(
 		"INSERT INTO audit_logs (admin_user_id, action, target_user_id, details, ip_address) VALUES (?, ?, ?, ?, ?)",
 		adminID, action, targetUserID, details, ip,
-	)
+	); err != nil {
+		log.Printf("audit log write failed: %v", err)
+	}
 }
 
 func clientIP(r *http.Request) string {
@@ -22,24 +25,18 @@ func clientIP(r *http.Request) string {
 }
 
 func (s *Server) handleAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
-	limit := r.URL.Query().Get("limit")
-	offset := r.URL.Query().Get("offset")
-
-	if limit == "" {
-		limit = "50"
+	limitVal, offsetVal, err := parsePagination(r.URL.Query().Get("limit"), r.URL.Query().Get("offset"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	query := `SELECT al.id, al.admin_user_id, u.username, al.action, al.target_user_id, al.details, al.ip_address, al.created_at
 		FROM audit_logs al
 		JOIN users u ON u.id = al.admin_user_id
 		ORDER BY al.created_at DESC
-		LIMIT ?`
-	args := []any{limit}
-
-	if offset != "" {
-		query += " OFFSET ?"
-		args = append(args, offset)
-	}
+		LIMIT ? OFFSET ?`
+	args := []any{limitVal, offsetVal}
 
 	rows, err := s.DB.Query(query, args...)
 	if err != nil {

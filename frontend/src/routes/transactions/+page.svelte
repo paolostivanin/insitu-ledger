@@ -2,6 +2,8 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { transactions, categories, accounts, batch, csv, type Transaction, type Category, type Account, type AutocompleteSuggestion } from '$lib/api/client';
 	import CategoryPicker from '$lib/components/CategoryPicker.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { addToast } from '$lib/stores/toast';
 
 	let txns = $state<Transaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -10,6 +12,12 @@
 	let showForm = $state(false);
 	let editId = $state<number | null>(null);
 	let error = $state('');
+	let submitting = $state(false);
+
+	// Confirm dialog
+	let confirmOpen = $state(false);
+	let confirmMessage = $state('');
+	let confirmAction = $state(() => {});
 
 	// Filters
 	let filterFrom = $state('');
@@ -34,16 +42,19 @@
 	let suggestions = $state<AutocompleteSuggestion[]>([]);
 	let showSuggestions = $state(false);
 	let debounceTimer: ReturnType<typeof setTimeout>;
+	let abortController: AbortController | null = null;
 
 	async function onDescriptionInput(value: string) {
 		fDescription = value;
 		clearTimeout(debounceTimer);
+		if (abortController) abortController.abort();
 		if (value.length < 2) {
 			suggestions = [];
 			showSuggestions = false;
 			return;
 		}
 		debounceTimer = setTimeout(async () => {
+			abortController = new AbortController();
 			try {
 				suggestions = await transactions.autocomplete(value);
 				showSuggestions = suggestions.length > 0;
@@ -165,6 +176,7 @@
 	async function submit(e: Event) {
 		e.preventDefault();
 		error = '';
+		submitting = true;
 		const data = {
 			account_id: fAccountId,
 			category_id: fCategoryId,
@@ -186,12 +198,16 @@
 		} catch (e: any) {
 			error = e.message;
 		}
+		submitting = false;
 	}
 
-	async function remove(id: number) {
-		if (!confirm('Delete this transaction?')) return;
-		await transactions.delete(id);
-		await load();
+	function remove(id: number) {
+		confirmMessage = 'Delete this transaction?';
+		confirmAction = async () => {
+			await transactions.delete(id);
+			await load();
+		};
+		confirmOpen = true;
 	}
 
 	function filteredCats(): Category[] {
@@ -218,15 +234,18 @@
 		}
 	}
 
-	async function batchDelete() {
-		if (!confirm(`Delete ${selectedIds.size} transaction(s)?`)) return;
-		error = '';
-		try {
-			await batch.deleteTransactions([...selectedIds]);
-			await load();
-		} catch (e: any) {
-			error = e.message;
-		}
+	function batchDelete() {
+		confirmMessage = `Delete ${selectedIds.size} transaction(s)?`;
+		confirmAction = async () => {
+			error = '';
+			try {
+				await batch.deleteTransactions([...selectedIds]);
+				await load();
+			} catch (e: any) {
+				error = e.message;
+			}
+		};
+		confirmOpen = true;
 	}
 
 	async function batchChangeCategory() {
@@ -258,7 +277,7 @@
 		error = '';
 		try {
 			const result = await csv.importTransactions(file);
-			alert(`Successfully imported ${result.imported} transaction(s).`);
+			addToast(`Successfully imported ${result.imported} transaction(s).`);
 			await load();
 		} catch (e: any) {
 			error = e.message;
@@ -302,7 +321,25 @@
 					</div>
 					<div class="form-group">
 						<label for="currency">Currency</label>
-						<input id="currency" type="text" bind:value={fCurrency} />
+						<select id="currency" bind:value={fCurrency}>
+							<option value="EUR">EUR</option>
+							<option value="USD">USD</option>
+							<option value="GBP">GBP</option>
+							<option value="CHF">CHF</option>
+							<option value="JPY">JPY</option>
+							<option value="CAD">CAD</option>
+							<option value="AUD">AUD</option>
+							<option value="BRL">BRL</option>
+							<option value="SEK">SEK</option>
+							<option value="NOK">NOK</option>
+							<option value="DKK">DKK</option>
+							<option value="PLN">PLN</option>
+							<option value="CZK">CZK</option>
+							<option value="HUF">HUF</option>
+							<option value="CNY">CNY</option>
+							<option value="INR">INR</option>
+							<option value="KRW">KRW</option>
+						</select>
 					</div>
 				</div>
 				<div class="form-row">
@@ -331,7 +368,7 @@
 				</div>
 				<div class="form-group autocomplete-wrap">
 					<label for="desc">Description</label>
-					<input id="desc" type="text" value={fDescription}
+					<input id="desc" type="text" value={fDescription} maxlength="500"
 						oninput={(e) => onDescriptionInput((e.target as HTMLInputElement).value)}
 						onfocusout={() => setTimeout(() => { showSuggestions = false; }, 150)}
 						placeholder="Optional" autocomplete="off" />
@@ -348,7 +385,7 @@
 						</ul>
 					{/if}
 				</div>
-				<button class="btn-primary" type="submit">{editId ? 'Update' : 'Create'}</button>
+				<button class="btn-primary" type="submit" disabled={submitting}>{submitting ? 'Saving...' : editId ? 'Update' : 'Create'}</button>
 			</form>
 		</div>
 	{/if}
@@ -474,6 +511,8 @@
 		{/if}
 	{/if}
 </div>
+
+<ConfirmDialog bind:open={confirmOpen} message={confirmMessage} onconfirm={confirmAction} />
 
 <style>
 	.page-header {

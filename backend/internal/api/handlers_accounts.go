@@ -7,9 +7,8 @@ import (
 )
 
 type accountRequest struct {
-	Name     string  `json:"name"`
-	Currency string  `json:"currency"`
-	Balance  float64 `json:"balance"`
+	Name     string `json:"name"`
+	Currency string `json:"currency"`
 }
 
 func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
@@ -59,13 +58,17 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateLength("name", req.Name, 100); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if req.Currency == "" {
 		req.Currency = "EUR"
 	}
 
 	result, err := s.DB.Exec(
-		"INSERT INTO accounts (user_id, name, currency, balance) VALUES (?, ?, ?, ?)",
-		userID, req.Name, req.Currency, req.Balance,
+		"INSERT INTO accounts (user_id, name, currency, balance) VALUES (?, ?, ?, 0)",
+		userID, req.Name, req.Currency,
 	)
 	if err != nil {
 		http.Error(w, "failed to create account", http.StatusInternalServerError)
@@ -93,8 +96,8 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = s.DB.Exec(
-		"UPDATE accounts SET name=?, currency=?, balance=? WHERE id=? AND user_id=?",
-		req.Name, req.Currency, req.Balance, id, userID,
+		"UPDATE accounts SET name=?, currency=? WHERE id=? AND user_id=?",
+		req.Name, req.Currency, id, userID,
 	)
 	if err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
@@ -112,6 +115,15 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.DB.Exec("UPDATE accounts SET deleted_at = datetime('now') WHERE id = ? AND user_id = ?", id, userID)
+	result, err := s.DB.Exec("UPDATE accounts SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		http.Error(w, "account not found", http.StatusNotFound)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

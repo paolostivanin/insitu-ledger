@@ -43,7 +43,9 @@ func main() {
 	router := api.NewRouter(server)
 
 	// Check for due scheduled transactions every hour
-	scheduler.Start(conn, 1*time.Hour)
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	defer schedulerCancel()
+	scheduler.Start(schedulerCtx, conn, 1*time.Hour)
 
 	srv := &http.Server{
 		Addr:    *addr,
@@ -63,6 +65,8 @@ func main() {
 
 	<-done
 	log.Println("Shutting down...")
+
+	schedulerCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

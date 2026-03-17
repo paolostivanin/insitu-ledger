@@ -1,8 +1,12 @@
 package com.insituledger.app.data.remote.interceptor
 
 import com.insituledger.app.data.local.datastore.UserPreferences
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -13,11 +17,24 @@ import javax.inject.Singleton
 class AuthInterceptor @Inject constructor(
     private val userPreferences: UserPreferences
 ) : Interceptor {
+
+    @Volatile
+    private var cachedServerUrl: String = ""
+
+    @Volatile
+    private var cachedToken: String? = userPreferences.getTokenImmediate()
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        userPreferences.serverUrlFlow.onEach { cachedServerUrl = it }.launchIn(scope)
+        userPreferences.tokenFlow.onEach { cachedToken = it }.launchIn(scope)
+    }
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
-        val serverUrl = runBlocking { userPreferences.serverUrlFlow.first() }
+        val serverUrl = cachedServerUrl
 
-        // Rewrite URL to point to the user's server
         val newRequest = if (serverUrl.isNotBlank()) {
             val baseUrl = "$serverUrl/api/".toHttpUrlOrNull()
             val newUrl = if (baseUrl != null) {
@@ -34,7 +51,7 @@ class AuthInterceptor @Inject constructor(
 
             // Add auth token (skip for login endpoint)
             if (!original.url.encodedPath.endsWith("auth/login")) {
-                val token = runBlocking { userPreferences.tokenFlow.first() }
+                val token = cachedToken
                 if (token != null) {
                     builder.header("Authorization", "Bearer $token")
                 }
@@ -45,6 +62,14 @@ class AuthInterceptor @Inject constructor(
             original
         }
 
-        return chain.proceed(newRequest)
+        val response = chain.proceed(newRequest)
+
+        // Auto-logout on 401 (except for login endpoint)
+        if (response.code == 401 && !original.url.encodedPath.endsWith("auth/login")) {
+            cachedToken = null
+            scope.launch { userPreferences.clearAll() }
+        }
+
+        return response
     }
 }

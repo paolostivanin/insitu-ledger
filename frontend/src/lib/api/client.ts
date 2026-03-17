@@ -180,7 +180,6 @@ export interface Account {
 export interface AccountInput {
 	name: string;
 	currency?: string;
-	balance?: number;
 }
 
 export const accounts = {

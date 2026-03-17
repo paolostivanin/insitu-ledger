@@ -3,10 +3,16 @@
 	import { goto } from '$app/navigation';
 	import { admin, type AdminUser } from '$lib/api/client';
 	import { isAdmin } from '$lib/stores/auth';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let users = $state<AdminUser[]>([]);
 	let loading = $state(true);
 	let error = $state('');
+
+	// Confirm dialog
+	let confirmOpen = $state(false);
+	let confirmMessage = $state('');
+	let confirmAction = $state(() => {});
 	let showCreateForm = $state(false);
 	let showResetForm = $state<number | null>(null);
 	let editUserId = $state<number | null>(null);
@@ -65,9 +71,12 @@
 		} catch (e: any) { error = e.message; }
 	}
 
-	async function deleteUser(id: number, name: string) {
-		if (!confirm(`Delete user "${name}"? All their data will be permanently removed.`)) return;
-		try { await admin.deleteUser(id); await load(); } catch (e: any) { error = e.message; }
+	function deleteUser(id: number, name: string) {
+		confirmMessage = `Delete user "${name}"? All their data will be permanently removed.`;
+		confirmAction = async () => {
+			try { await admin.deleteUser(id); await load(); } catch (e: any) { error = e.message; }
+		};
+		confirmOpen = true;
 	}
 
 	async function resetPassword(e: Event, id: number) {
@@ -85,9 +94,12 @@
 		try { await admin.toggleAdmin(id); await load(); } catch (e: any) { error = e.message; }
 	}
 
-	async function disableTOTP(id: number, name: string) {
-		if (!confirm(`Disable 2FA for "${name}"?`)) return;
-		try { await admin.disableTOTP(id); await load(); } catch (e: any) { error = e.message; }
+	function disableTOTP(id: number, name: string) {
+		confirmMessage = `Disable 2FA for "${name}"?`;
+		confirmAction = async () => {
+			try { await admin.disableTOTP(id); await load(); } catch (e: any) { error = e.message; }
+		};
+		confirmOpen = true;
 	}
 
 	async function downloadBackup() {
@@ -229,6 +241,8 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog bind:open={confirmOpen} message={confirmMessage} onconfirm={confirmAction} />
 
 <style>
 	.page-header {

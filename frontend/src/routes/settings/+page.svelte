@@ -1,12 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { shared, me, type SharedAccess, type UserProfile } from '$lib/api/client';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let profile = $state<UserProfile | null>(null);
 	let sharedList = $state<SharedAccess[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 	let showShareForm = $state(false);
+
+	// Confirm dialog
+	let confirmOpen = $state(false);
+	let confirmMessage = $state('');
+	let confirmAction = $state(() => {});
 
 	let fEmail = $state('');
 	let fPermission = $state('read');
@@ -63,10 +69,13 @@
 		}
 	}
 
-	async function removeShare(id: number) {
-		if (!confirm('Revoke this access?')) return;
-		await shared.delete(id);
-		await loadShared();
+	function removeShare(id: number) {
+		confirmMessage = 'Revoke this shared access?';
+		confirmAction = async () => {
+			await shared.delete(id);
+			await loadShared();
+		};
+		confirmOpen = true;
 	}
 
 	async function changePassword(e: Event) {
@@ -315,6 +324,8 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog bind:open={confirmOpen} message={confirmMessage} confirmText="Revoke" onconfirm={confirmAction} />
 
 <style>
 	.section {

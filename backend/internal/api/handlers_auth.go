@@ -154,7 +154,10 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.DB.Exec("UPDATE users SET password_hash = ?, force_password_change = 0 WHERE id = ?", newHash, userID)
+	if _, err := s.DB.Exec("UPDATE users SET password_hash = ?, force_password_change = 0 WHERE id = ?", newHash, userID); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -185,7 +188,10 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Name != "" {
-		s.DB.Exec("UPDATE users SET name = ? WHERE id = ?", req.Name, userID)
+		if _, err := s.DB.Exec("UPDATE users SET name = ? WHERE id = ?", req.Name, userID); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -234,7 +240,10 @@ func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store the secret (not yet enabled — user must verify first)
-	s.DB.Exec("UPDATE users SET totp_secret = ? WHERE id = ?", key.Secret(), userID)
+	if _, err := s.DB.Exec("UPDATE users SET totp_secret = ? WHERE id = ?", key.Secret(), userID); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	// Generate QR code as base64 PNG
 	img, err := key.Image(200, 200)
@@ -281,7 +290,10 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.DB.Exec("UPDATE users SET totp_enabled = 1 WHERE id = ?", userID)
+	if _, err := s.DB.Exec("UPDATE users SET totp_enabled = 1 WHERE id = ?", userID); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -307,7 +319,10 @@ func (s *Server) handleTOTPReset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Disable current 2FA
-	s.DB.Exec("UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?", userID)
+	if _, err := s.DB.Exec("UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?", userID); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	// Generate new TOTP secret
 	key, err := totp.Generate(totp.GenerateOpts{
@@ -319,7 +334,10 @@ func (s *Server) handleTOTPReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.DB.Exec("UPDATE users SET totp_secret = ? WHERE id = ?", key.Secret(), userID)
+	if _, err := s.DB.Exec("UPDATE users SET totp_secret = ? WHERE id = ?", key.Secret(), userID); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	img, err := key.Image(200, 200)
 	if err != nil {

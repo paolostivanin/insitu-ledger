@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"strings"
@@ -9,15 +10,22 @@ import (
 
 // Start launches a goroutine that checks for due scheduled transactions
 // every interval and materializes them into actual transactions.
-func Start(db *sql.DB, interval time.Duration) {
+// It stops when the context is cancelled.
+func Start(ctx context.Context, db *sql.DB, interval time.Duration) {
 	go func() {
 		// Run once immediately on startup
 		processDue(db)
 
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		for range ticker.C {
-			processDue(db)
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("scheduler: shutting down")
+				return
+			case <-ticker.C:
+				processDue(db)
+			}
 		}
 	}()
 }

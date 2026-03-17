@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { scheduled, categories, accounts, type ScheduledTransaction, type Category, type Account } from '$lib/api/client';
 	import CategoryPicker from '$lib/components/CategoryPicker.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let items = $state<ScheduledTransaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -10,6 +11,12 @@
 	let showForm = $state(false);
 	let editId = $state<number | null>(null);
 	let error = $state('');
+	let submitting = $state(false);
+
+	// Confirm dialog
+	let confirmOpen = $state(false);
+	let confirmMessage = $state('');
+	let confirmAction = $state(() => {});
 
 	let fType = $state<'income' | 'expense'>('expense');
 	let fAccountId = $state(0);
@@ -96,6 +103,7 @@
 	async function submit(e: Event) {
 		e.preventDefault();
 		error = '';
+		submitting = true;
 		const data = {
 			account_id: fAccountId,
 			category_id: fCategoryId,
@@ -118,12 +126,16 @@
 		} catch (e: any) {
 			error = e.message;
 		}
+		submitting = false;
 	}
 
-	async function remove(id: number) {
-		if (!confirm('Delete this scheduled transaction?')) return;
-		await scheduled.delete(id);
-		await load();
+	function remove(id: number) {
+		confirmMessage = 'Delete this scheduled transaction?';
+		confirmAction = async () => {
+			await scheduled.delete(id);
+			await load();
+		};
+		confirmOpen = true;
 	}
 
 	function filteredCats(): Category[] {
@@ -201,9 +213,9 @@
 				</div>
 				<div class="form-group">
 					<label for="desc">Description</label>
-					<input id="desc" type="text" bind:value={fDescription} placeholder="Optional" />
+					<input id="desc" type="text" bind:value={fDescription} placeholder="Optional" maxlength="500" />
 				</div>
-				<button class="btn-primary" type="submit">{editId ? 'Update' : 'Create'}</button>
+				<button class="btn-primary" type="submit" disabled={submitting}>{submitting ? 'Saving...' : editId ? 'Update' : 'Create'}</button>
 			</form>
 		</div>
 	{/if}
@@ -252,6 +264,8 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog bind:open={confirmOpen} message={confirmMessage} onconfirm={confirmAction} />
 
 <style>
 	.page-header {

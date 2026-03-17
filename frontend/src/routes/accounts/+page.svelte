@@ -1,16 +1,22 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { accounts, type Account } from '$lib/api/client';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let accts = $state<Account[]>([]);
 	let loading = $state(true);
 	let showForm = $state(false);
 	let editId = $state<number | null>(null);
 	let error = $state('');
+	let submitting = $state(false);
 
 	let fName = $state('');
 	let fCurrency = $state('EUR');
-	let fBalance = $state(0);
+
+	// Confirm dialog
+	let confirmOpen = $state(false);
+	let confirmMessage = $state('');
+	let confirmAction = $state(() => {});
 
 	onMount(load);
 
@@ -24,25 +30,24 @@
 		editId = null;
 		fName = '';
 		fCurrency = 'EUR';
-		fBalance = 0;
 	}
 
 	function startEdit(a: Account) {
 		editId = a.id;
 		fName = a.name;
 		fCurrency = a.currency;
-		fBalance = a.balance;
 		showForm = true;
 	}
 
 	async function submit(e: Event) {
 		e.preventDefault();
 		error = '';
+		submitting = true;
 		try {
 			if (editId) {
-				await accounts.update(editId, { name: fName, currency: fCurrency, balance: fBalance });
+				await accounts.update(editId, { name: fName, currency: fCurrency });
 			} else {
-				await accounts.create({ name: fName, currency: fCurrency, balance: fBalance });
+				await accounts.create({ name: fName, currency: fCurrency });
 			}
 			showForm = false;
 			resetForm();
@@ -50,12 +55,16 @@
 		} catch (e: any) {
 			error = e.message;
 		}
+		submitting = false;
 	}
 
-	async function remove(id: number) {
-		if (!confirm('Delete this account?')) return;
-		await accounts.delete(id);
-		await load();
+	function remove(id: number) {
+		confirmMessage = 'Delete this account?';
+		confirmAction = async () => {
+			await accounts.delete(id);
+			await load();
+		};
+		confirmOpen = true;
 	}
 
 	function fmt(n: number): string {
@@ -86,18 +95,32 @@
 				<div class="form-row">
 					<div class="form-group">
 						<label for="name">Name</label>
-						<input id="name" type="text" bind:value={fName} required />
+						<input id="name" type="text" bind:value={fName} required maxlength="100" />
 					</div>
 					<div class="form-group">
 						<label for="currency">Currency</label>
-						<input id="currency" type="text" bind:value={fCurrency} required />
-					</div>
-					<div class="form-group">
-						<label for="balance">Initial Balance</label>
-						<input id="balance" type="number" step="0.01" bind:value={fBalance} />
+						<select id="currency" bind:value={fCurrency}>
+							<option value="EUR">EUR</option>
+							<option value="USD">USD</option>
+							<option value="GBP">GBP</option>
+							<option value="CHF">CHF</option>
+							<option value="JPY">JPY</option>
+							<option value="CAD">CAD</option>
+							<option value="AUD">AUD</option>
+							<option value="BRL">BRL</option>
+							<option value="SEK">SEK</option>
+							<option value="NOK">NOK</option>
+							<option value="DKK">DKK</option>
+							<option value="PLN">PLN</option>
+							<option value="CZK">CZK</option>
+							<option value="HUF">HUF</option>
+							<option value="CNY">CNY</option>
+							<option value="INR">INR</option>
+							<option value="KRW">KRW</option>
+						</select>
 					</div>
 				</div>
-				<button class="btn-primary" type="submit">{editId ? 'Update' : 'Create'}</button>
+				<button class="btn-primary" type="submit" disabled={submitting}>{submitting ? 'Saving...' : editId ? 'Update' : 'Create'}</button>
 			</form>
 		</div>
 	{/if}
@@ -125,6 +148,8 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog bind:open={confirmOpen} message={confirmMessage} onconfirm={confirmAction} />
 
 <style>
 	.page-header {

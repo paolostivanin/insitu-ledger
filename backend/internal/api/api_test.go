@@ -412,8 +412,8 @@ func TestTransactionsCRUD(t *testing.T) {
 	var accts []map[string]any
 	json.Unmarshal(w.Body.Bytes(), &accts)
 	balance := accts[0]["balance"].(float64)
-	if balance != 4950.0 {
-		t.Errorf("balance = %v, want 4950", balance)
+	if balance != -50.0 {
+		t.Errorf("balance = %v, want -50", balance)
 	}
 
 	// Delete
@@ -430,8 +430,8 @@ func TestTransactionsCRUD(t *testing.T) {
 	handler.ServeHTTP(w, req)
 	json.Unmarshal(w.Body.Bytes(), &accts)
 	balance = accts[0]["balance"].(float64)
-	if balance != 5000.0 {
-		t.Errorf("balance after delete = %v, want 5000", balance)
+	if balance != 0.0 {
+		t.Errorf("balance after delete = %v, want 0", balance)
 	}
 }
 

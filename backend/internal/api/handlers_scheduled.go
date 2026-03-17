@@ -74,6 +74,11 @@ func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 		req.Currency = "EUR"
 	}
 
+	if err := validateDate(req.NextOccurrence); err != nil {
+		http.Error(w, "invalid next_occurrence: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	result, err := s.DB.Exec(
 		`INSERT INTO scheduled_transactions (account_id, category_id, user_id, type, amount, currency, description, rrule, next_occurrence)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -104,6 +109,11 @@ func (s *Server) handleUpdateScheduled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateDate(req.NextOccurrence); err != nil {
+		http.Error(w, "invalid next_occurrence: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	_, err = s.DB.Exec(
 		`UPDATE scheduled_transactions SET account_id=?, category_id=?, type=?, amount=?, currency=?,
 		 description=?, rrule=?, next_occurrence=? WHERE id=? AND user_id=?`,
@@ -126,6 +136,15 @@ func (s *Server) handleDeleteScheduled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.DB.Exec("UPDATE scheduled_transactions SET deleted_at = datetime('now') WHERE id = ? AND user_id = ?", id, userID)
+	result, err := s.DB.Exec("UPDATE scheduled_transactions SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		http.Error(w, "scheduled transaction not found", http.StatusNotFound)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

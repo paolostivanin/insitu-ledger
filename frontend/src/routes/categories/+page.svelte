@@ -1,12 +1,19 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { categories, type Category } from '$lib/api/client';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let cats = $state<Category[]>([]);
 	let loading = $state(true);
 	let showForm = $state(false);
 	let editId = $state<number | null>(null);
 	let error = $state('');
+	let submitting = $state(false);
+
+	// Confirm dialog
+	let confirmOpen = $state(false);
+	let confirmMessage = $state('');
+	let confirmAction = $state(() => {});
 
 	let fName = $state('');
 	let fType = $state<'income' | 'expense'>('expense');
@@ -56,6 +63,7 @@
 	async function submit(e: Event) {
 		e.preventDefault();
 		error = '';
+		submitting = true;
 		const data = {
 			name: fName,
 			type: fType,
@@ -75,16 +83,20 @@
 		} catch (e: any) {
 			error = e.message;
 		}
+		submitting = false;
 	}
 
-	async function remove(id: number) {
-		if (!confirm('Delete this category?')) return;
-		try {
-			await categories.delete(id);
-			await load();
-		} catch (e: any) {
-			error = e.message;
-		}
+	function remove(id: number) {
+		confirmMessage = 'Delete this category?';
+		confirmAction = async () => {
+			try {
+				await categories.delete(id);
+				await load();
+			} catch (e: any) {
+				error = e.message;
+			}
+		};
+		confirmOpen = true;
 	}
 </script>
 
@@ -107,7 +119,7 @@
 				<div class="form-row">
 					<div class="form-group">
 						<label for="name">Name</label>
-						<input id="name" type="text" bind:value={fName} required />
+						<input id="name" type="text" bind:value={fName} required maxlength="100" />
 					</div>
 					<div class="form-group">
 						<label for="type">Type</label>
@@ -136,7 +148,7 @@
 						<input id="icon" type="text" bind:value={fIcon} placeholder="e.g. 🍔" />
 					</div>
 				</div>
-				<button class="btn-primary" type="submit">{editId ? 'Update' : 'Create'}</button>
+				<button class="btn-primary" type="submit" disabled={submitting}>{submitting ? 'Saving...' : editId ? 'Update' : 'Create'}</button>
 			</form>
 		</div>
 	{/if}
@@ -178,6 +190,8 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog bind:open={confirmOpen} message={confirmMessage} onconfirm={confirmAction} />
 
 <style>
 	.page-header {

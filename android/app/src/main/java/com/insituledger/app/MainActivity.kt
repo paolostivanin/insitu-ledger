@@ -64,7 +64,7 @@ class MainActivity : AppCompatActivity() {
     private fun showBiometricPrompt() {
         val biometricManager = BiometricManager.from(this)
         val canAuthenticate = biometricManager.canAuthenticate(
-            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
         )
 
         if (canAuthenticate != BiometricManager.BIOMETRIC_SUCCESS) {
@@ -99,9 +99,8 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Unlock InSitu Ledger")
             .setSubtitle("Authenticate to access your finances")
             .setAllowedAuthenticators(
-                BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
             )
-            .setNegativeButtonText("Cancel")
             .build()
 
         prompt.authenticate(promptInfo)

@@ -46,6 +46,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -92,6 +93,7 @@ dependencies {
     implementation(libs.gson)
 
     implementation(libs.biometric)
+    implementation(libs.security.crypto)
 
     implementation(libs.lib.recur)
 

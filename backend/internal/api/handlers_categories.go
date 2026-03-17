@@ -62,6 +62,10 @@ func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateLength("name", req.Name, 100); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if req.Type != "income" && req.Type != "expense" {
 		http.Error(w, "type must be 'income' or 'expense'", http.StatusBadRequest)
 		return
@@ -128,6 +132,15 @@ func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.DB.Exec("UPDATE categories SET deleted_at = datetime('now') WHERE id = ? AND user_id = ?", id, userID)
+	result, err := s.DB.Exec("UPDATE categories SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		http.Error(w, "category not found", http.StatusNotFound)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -94,6 +94,15 @@ func (s *Server) handleDeleteSharedAccess(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	s.DB.Exec("DELETE FROM shared_access WHERE id = ? AND owner_user_id = ?", id, userID)
+	result, err := s.DB.Exec("DELETE FROM shared_access WHERE id = ? AND owner_user_id = ?", id, userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		http.Error(w, "shared access not found", http.StatusNotFound)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

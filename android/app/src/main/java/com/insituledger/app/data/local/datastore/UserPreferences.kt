@@ -1,11 +1,15 @@
 package com.insituledger.app.data.local.datastore
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKeys
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,7 +21,6 @@ class UserPreferences @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     companion object {
-        val TOKEN = stringPreferencesKey("token")
         val SERVER_URL = stringPreferencesKey("server_url")
         val USER_ID = longPreferencesKey("user_id")
         val USER_NAME = stringPreferencesKey("user_name")
@@ -27,9 +30,25 @@ class UserPreferences @Inject constructor(
         val LAST_SYNC_VERSION = longPreferencesKey("last_sync_version")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
+
+        private const val ENCRYPTED_PREFS_FILE = "secure_prefs"
+        private const val KEY_TOKEN = "token"
     }
 
-    val tokenFlow: Flow<String?> = context.dataStore.data.map { it[TOKEN] }
+    private val encryptedPrefs: SharedPreferences by lazy {
+        val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+        EncryptedSharedPreferences.create(
+            ENCRYPTED_PREFS_FILE,
+            masterKeyAlias,
+            context,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
+
+    private val _tokenFlow = MutableStateFlow(encryptedPrefs.getString(KEY_TOKEN, null))
+    val tokenFlow: Flow<String?> = _tokenFlow
+
     val serverUrlFlow: Flow<String> = context.dataStore.data.map { it[SERVER_URL] ?: "" }
     val userIdFlow: Flow<Long?> = context.dataStore.data.map { it[USER_ID] }
     val userNameFlow: Flow<String?> = context.dataStore.data.map { it[USER_NAME] }
@@ -41,7 +60,8 @@ class UserPreferences @Inject constructor(
     val biometricEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[BIOMETRIC_ENABLED] ?: false }
 
     suspend fun saveToken(token: String) {
-        context.dataStore.edit { it[TOKEN] = token }
+        encryptedPrefs.edit().putString(KEY_TOKEN, token).apply()
+        _tokenFlow.value = token
     }
 
     suspend fun saveServerUrl(url: String) {
@@ -71,6 +91,10 @@ class UserPreferences @Inject constructor(
     }
 
     suspend fun clearAll() {
+        encryptedPrefs.edit().remove(KEY_TOKEN).apply()
+        _tokenFlow.value = null
         context.dataStore.edit { it.clear() }
     }
+
+    fun getTokenImmediate(): String? = encryptedPrefs.getString(KEY_TOKEN, null)
 }
