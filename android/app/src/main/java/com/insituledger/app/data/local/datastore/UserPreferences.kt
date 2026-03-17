@@ -1,0 +1,70 @@
+package com.insituledger.app.data.local.datastore
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.*
+import androidx.datastore.preferences.preferencesDataStore
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import javax.inject.Inject
+import javax.inject.Singleton
+
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "user_prefs")
+
+@Singleton
+class UserPreferences @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
+    companion object {
+        val TOKEN = stringPreferencesKey("token")
+        val SERVER_URL = stringPreferencesKey("server_url")
+        val USER_ID = longPreferencesKey("user_id")
+        val USER_NAME = stringPreferencesKey("user_name")
+        val IS_ADMIN = booleanPreferencesKey("is_admin")
+        val FORCE_PASSWORD_CHANGE = booleanPreferencesKey("force_password_change")
+        val TOTP_ENABLED = booleanPreferencesKey("totp_enabled")
+        val LAST_SYNC_VERSION = longPreferencesKey("last_sync_version")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
+    }
+
+    val tokenFlow: Flow<String?> = context.dataStore.data.map { it[TOKEN] }
+    val serverUrlFlow: Flow<String> = context.dataStore.data.map { it[SERVER_URL] ?: "" }
+    val userIdFlow: Flow<Long?> = context.dataStore.data.map { it[USER_ID] }
+    val userNameFlow: Flow<String?> = context.dataStore.data.map { it[USER_NAME] }
+    val isAdminFlow: Flow<Boolean> = context.dataStore.data.map { it[IS_ADMIN] ?: false }
+    val forcePasswordChangeFlow: Flow<Boolean> = context.dataStore.data.map { it[FORCE_PASSWORD_CHANGE] ?: false }
+    val totpEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[TOTP_ENABLED] ?: false }
+    val lastSyncVersionFlow: Flow<Long> = context.dataStore.data.map { it[LAST_SYNC_VERSION] ?: 0L }
+    val themeModeFlow: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "system" }
+
+    suspend fun saveToken(token: String) {
+        context.dataStore.edit { it[TOKEN] = token }
+    }
+
+    suspend fun saveServerUrl(url: String) {
+        context.dataStore.edit { it[SERVER_URL] = url }
+    }
+
+    suspend fun saveLoginData(userId: Long, name: String, isAdmin: Boolean, forcePasswordChange: Boolean, totpEnabled: Boolean) {
+        context.dataStore.edit {
+            it[USER_ID] = userId
+            it[USER_NAME] = name
+            it[IS_ADMIN] = isAdmin
+            it[FORCE_PASSWORD_CHANGE] = forcePasswordChange
+            it[TOTP_ENABLED] = totpEnabled
+        }
+    }
+
+    suspend fun saveLastSyncVersion(version: Long) {
+        context.dataStore.edit { it[LAST_SYNC_VERSION] = version }
+    }
+
+    suspend fun saveThemeMode(mode: String) {
+        context.dataStore.edit { it[THEME_MODE] = mode }
+    }
+
+    suspend fun clearAll() {
+        context.dataStore.edit { it.clear() }
+    }
+}

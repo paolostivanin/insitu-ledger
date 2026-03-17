@@ -1,0 +1,60 @@
+package com.insituledger.app.data.sync
+
+import androidx.work.*
+import com.insituledger.app.data.repository.SyncRepository
+import java.util.concurrent.TimeUnit
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class SyncManager @Inject constructor(
+    private val workManager: WorkManager,
+    private val syncRepository: SyncRepository
+) {
+    companion object {
+        const val PERIODIC_SYNC_WORK = "periodic_sync"
+        const val ONE_TIME_SYNC_WORK = "one_time_sync"
+    }
+
+    fun schedulePeriodicSync() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val request = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(constraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
+            .build()
+
+        workManager.enqueueUniquePeriodicWork(
+            PERIODIC_SYNC_WORK,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
+    }
+
+    fun triggerImmediateSync() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val request = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setConstraints(constraints)
+            .build()
+
+        workManager.enqueueUniqueWork(
+            ONE_TIME_SYNC_WORK,
+            ExistingWorkPolicy.REPLACE,
+            request
+        )
+    }
+
+    suspend fun syncNow(): Result<Unit> {
+        return syncRepository.sync()
+    }
+
+    fun cancelAll() {
+        workManager.cancelUniqueWork(PERIODIC_SYNC_WORK)
+        workManager.cancelUniqueWork(ONE_TIME_SYNC_WORK)
+    }
+}
