@@ -127,7 +127,7 @@
 			cats = c;
 			accts = a;
 			hasMore = t.length === PAGE_SIZE;
-			if (accts.length && !fAccountId) fAccountId = accts[0].id;
+			if (accts.length && !fAccountId) fAccountId = getDefaultAccountId();
 			if (cats.length && !fCategoryId) fCategoryId = cats[0].id;
 		} catch (e: any) {
 			error = e.message;
@@ -186,6 +186,15 @@
 		return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 	}
 
+	function getDefaultAccountId(): number {
+		const lastUsed = localStorage.getItem('lastUsedAccountId');
+		if (lastUsed) {
+			const id = parseInt(lastUsed);
+			if (accts.find(a => a.id === id)) return id;
+		}
+		return accts[0]?.id || 0;
+	}
+
 	function resetForm() {
 		editId = null;
 		fType = 'expense';
@@ -193,7 +202,7 @@
 		fDescription = '';
 		fDate = new Date().toISOString().slice(0, 10);
 		fCurrency = 'EUR';
-		if (accts.length) fAccountId = accts[0].id;
+		if (accts.length) fAccountId = getDefaultAccountId();
 		if (cats.length) fCategoryId = cats[0].id;
 	}
 
@@ -224,6 +233,7 @@
 		};
 		const oid = $sharedOwnerUserId || undefined;
 		try {
+			localStorage.setItem('lastUsedAccountId', fAccountId.toString());
 			if (editId) {
 				await transactions.update(editId, data, oid);
 			} else {
@@ -384,9 +394,9 @@
 				<div class="form-row">
 					<div class="form-group">
 						<label for="account">Account</label>
-						<select id="account" bind:value={fAccountId}>
+						<select id="account" bind:value={fAccountId} onchange={() => localStorage.setItem('lastUsedAccountId', fAccountId.toString())}>
 							{#each accts as a}
-								<option value={a.id}>{a.name}</option>
+								<option value={a.id}>{a.name}{$sharedOwnerUserId ? ' (shared)' : ''}</option>
 							{/each}
 						</select>
 					</div>

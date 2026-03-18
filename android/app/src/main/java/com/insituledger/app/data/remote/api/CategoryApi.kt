@@ -6,14 +6,14 @@ import retrofit2.http.*
 
 interface CategoryApi {
     @GET("categories")
-    suspend fun list(): Response<List<CategoryDto>>
+    suspend fun list(@Query("owner_id") ownerId: Long? = null): Response<List<CategoryDto>>
 
     @POST("categories")
-    suspend fun create(@Body input: CategoryInput): Response<IdResponse>
+    suspend fun create(@Body input: CategoryInput, @Query("owner_id") ownerId: Long? = null): Response<IdResponse>
 
     @PUT("categories/{id}")
-    suspend fun update(@Path("id") id: Long, @Body input: CategoryInput): Response<Unit>
+    suspend fun update(@Path("id") id: Long, @Body input: CategoryInput, @Query("owner_id") ownerId: Long? = null): Response<Unit>
 
     @DELETE("categories/{id}")
-    suspend fun delete(@Path("id") id: Long): Response<Unit>
+    suspend fun delete(@Path("id") id: Long, @Query("owner_id") ownerId: Long? = null): Response<Unit>
 }

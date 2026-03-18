@@ -57,16 +57,16 @@ fun TransactionFormScreen(
             var accountExpanded by remember { mutableStateOf(false) }
             ExposedDropdownMenuBox(expanded = accountExpanded, onExpandedChange = { accountExpanded = it }) {
                 OutlinedTextField(
-                    value = uiState.accounts.find { it.id == uiState.accountId }?.name ?: "",
+                    value = uiState.accountDisplays.find { it.account.id == uiState.accountId }?.label ?: "",
                     onValueChange = {}, readOnly = true, label = { Text("Account") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountExpanded) },
                     modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
                 )
                 ExposedDropdownMenu(expanded = accountExpanded, onDismissRequest = { accountExpanded = false }) {
-                    uiState.accounts.forEach { account ->
-                        DropdownMenuItem(text = { Text("${account.name} (${account.currency})") }, onClick = {
-                            viewModel.updateAccountId(account.id)
-                            viewModel.updateCurrency(account.currency)
+                    uiState.accountDisplays.forEach { display ->
+                        DropdownMenuItem(text = { Text("${display.label} (${display.account.currency})") }, onClick = {
+                            viewModel.updateAccountId(display.account.id)
+                            viewModel.updateCurrency(display.account.currency)
                             accountExpanded = false
                         })
                     }

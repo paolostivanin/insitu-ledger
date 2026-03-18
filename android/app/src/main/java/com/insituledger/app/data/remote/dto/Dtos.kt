@@ -157,3 +157,24 @@ data class AutocompleteSuggestion(
 )
 
 data class IdResponse(val id: Long)
+
+data class AccessibleOwnerDto(
+    @SerializedName("owner_user_id") val ownerUserId: Long,
+    val name: String,
+    val email: String,
+    val permission: String
+)
+
+data class SharedAccessDto(
+    val id: Long,
+    @SerializedName("owner_user_id") val ownerUserId: Long,
+    @SerializedName("guest_user_id") val guestUserId: Long,
+    val permission: String,
+    @SerializedName("guest_name") val guestName: String,
+    @SerializedName("guest_email") val guestEmail: String
+)
+
+data class SharedAccessInput(
+    @SerializedName("guest_email") val guestEmail: String,
+    val permission: String
+)

@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.FilterListOff
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,8 +48,10 @@ fun TransactionsScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddClick) {
-                Icon(Icons.Default.Add, contentDescription = "Add Transaction")
+            if (!uiState.isReadOnly) {
+                FloatingActionButton(onClick = onAddClick) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Transaction")
+                }
             }
         }
     ) { padding ->
@@ -104,7 +107,7 @@ fun TransactionsScreen(
                                         TransactionRow(
                                             txn = txn,
                                             onClick = { onTransactionClick(txn.id) },
-                                            onDelete = { viewModel.delete(txn.id) }
+                                            onDelete = if (uiState.isReadOnly) null else {{ viewModel.delete(txn.id) }}
                                         )
                                     }
                                 }
@@ -161,7 +164,7 @@ private fun SortBar(
                     val arrow = if (sortDir == "asc") "\u25B2" else "\u25BC"
                     Text("$label $arrow")
                 },
-                modifier = Modifier.menuAnchor()
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true)
             )
             ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 sortOptions.forEach { (value, label) ->
@@ -224,7 +227,7 @@ private fun FilterBar(
                         value = categories.find { it.id == catId }?.name ?: "All categories",
                         onValueChange = {}, readOnly = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                        modifier = Modifier.menuAnchor()
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true)
                     )
                     ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                         DropdownMenuItem(text = { Text("All categories") }, onClick = { catId = null; expanded = false })
@@ -240,7 +243,7 @@ private fun FilterBar(
 }
 
 @Composable
-private fun TransactionRow(txn: Transaction, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun TransactionRow(txn: Transaction, onClick: () -> Unit, onDelete: (() -> Unit)?) {
     Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),

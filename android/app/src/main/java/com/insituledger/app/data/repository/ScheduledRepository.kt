@@ -30,6 +30,19 @@ class ScheduledRepository @Inject constructor(
         list.map { it.toDomain() }
     }
 
+    suspend fun listFromServer(ownerId: Long): List<ScheduledTransaction> {
+        val response = scheduledApi.list(ownerId = ownerId)
+        if (!response.isSuccessful) return emptyList()
+        return response.body()?.filter { it.deletedAt == null }?.map { dto ->
+            ScheduledTransaction(
+                id = dto.id, accountId = dto.accountId, categoryId = dto.categoryId,
+                userId = dto.userId, type = dto.type, amount = dto.amount,
+                currency = dto.currency, description = dto.description,
+                rrule = dto.rrule, nextOccurrence = dto.nextOccurrence, active = dto.active
+            )
+        } ?: emptyList()
+    }
+
     suspend fun getById(id: Long): ScheduledTransaction? = scheduledDao.getById(id)?.toDomain()
 
     suspend fun create(

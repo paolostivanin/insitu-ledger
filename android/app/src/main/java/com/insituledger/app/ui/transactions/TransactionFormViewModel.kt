@@ -3,8 +3,10 @@ package com.insituledger.app.ui.transactions
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.CategoryRepository
+import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
@@ -22,6 +24,11 @@ data class DescriptionSuggestion(
     val categoryId: Long
 )
 
+data class AccountDisplay(
+    val account: Account,
+    val label: String
+)
+
 data class TransactionFormUiState(
     val id: Long? = null,
     val accountId: Long? = null,
@@ -32,6 +39,7 @@ data class TransactionFormUiState(
     val description: String = "",
     val date: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
     val accounts: List<Account> = emptyList(),
+    val accountDisplays: List<AccountDisplay> = emptyList(),
     val categories: List<Category> = emptyList(),
     val suggestions: List<DescriptionSuggestion> = emptyList(),
     val showSuggestions: Boolean = false,
@@ -46,7 +54,9 @@ class TransactionFormViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val transactionRepository: TransactionRepository,
     private val accountRepository: AccountRepository,
-    private val categoryRepository: CategoryRepository
+    private val categoryRepository: CategoryRepository,
+    private val sharedAccessState: SharedAccessState,
+    private val prefs: UserPreferences
 ) : ViewModel() {
 
     private val editId: Long? = savedStateHandle.get<String>("id")?.toLongOrNull()
@@ -57,34 +67,66 @@ class TransactionFormViewModel @Inject constructor(
 
     private fun loadData() {
         viewModelScope.launch {
-            combine(
-                accountRepository.getAll(),
-                categoryRepository.getAll()
-            ) { accounts, categories -> Pair(accounts, categories) }
-            .collect { (accounts, categories) ->
-                _uiState.update { it.copy(accounts = accounts, categories = categories) }
-                if (editId != null && _uiState.value.isLoading) {
-                    val txn = transactionRepository.getById(editId)
-                    if (txn != null) {
-                        _uiState.update {
-                            it.copy(
-                                accountId = txn.accountId, categoryId = txn.categoryId,
-                                type = txn.type, amount = txn.amount.toString(),
-                                currency = txn.currency, description = txn.description ?: "",
-                                date = txn.date, isLoading = false
-                            )
-                        }
-                    } else {
-                        _uiState.update { it.copy(isLoading = false) }
+            val owner = sharedAccessState.selectedOwner.value
+            val isShared = owner != null
+
+            val accounts: List<Account>
+            val categories: List<Category>
+
+            if (isShared) {
+                accounts = accountRepository.listFromServer(owner!!.ownerId)
+                categories = categoryRepository.listFromServer(owner.ownerId)
+            } else {
+                accounts = accountRepository.getAll().first()
+                categories = categoryRepository.getAll().first()
+            }
+
+            val displays = accounts.map { acct ->
+                AccountDisplay(
+                    account = acct,
+                    label = if (isShared) "${acct.name} (shared)" else acct.name
+                )
+            }
+
+            _uiState.update { it.copy(accounts = accounts, accountDisplays = displays, categories = categories) }
+
+            if (editId != null) {
+                val txn = transactionRepository.getById(editId)
+                if (txn != null) {
+                    _uiState.update {
+                        it.copy(
+                            accountId = txn.accountId, categoryId = txn.categoryId,
+                            type = txn.type, amount = txn.amount.toString(),
+                            currency = txn.currency, description = txn.description ?: "",
+                            date = txn.date, isLoading = false
+                        )
                     }
                 } else {
                     _uiState.update { it.copy(isLoading = false) }
+                }
+            } else {
+                // Default to last-used account
+                val lastAccountId = prefs.lastUsedAccountIdFlow.first()
+                val defaultAccount = if (lastAccountId != null && accounts.any { it.id == lastAccountId }) {
+                    lastAccountId
+                } else {
+                    accounts.firstOrNull()?.id
+                }
+                _uiState.update {
+                    it.copy(
+                        accountId = defaultAccount,
+                        currency = accounts.find { a -> a.id == defaultAccount }?.currency ?: "EUR",
+                        isLoading = false
+                    )
                 }
             }
         }
     }
 
-    fun updateAccountId(id: Long) { _uiState.update { it.copy(accountId = id) } }
+    fun updateAccountId(id: Long) {
+        _uiState.update { it.copy(accountId = id) }
+        viewModelScope.launch { prefs.saveLastUsedAccountId(id) }
+    }
     fun updateCategoryId(id: Long) { _uiState.update { it.copy(categoryId = id) } }
     fun updateType(type: String) { _uiState.update { it.copy(type = type) } }
     fun updateAmount(amount: String) { _uiState.update { it.copy(amount = amount) } }
@@ -148,6 +190,9 @@ class TransactionFormViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true) }
             try {
+                // Persist last-used account
+                prefs.saveLastUsedAccountId(state.accountId)
+
                 if (editId != null) {
                     transactionRepository.update(
                         editId, state.accountId, state.categoryId, state.type,

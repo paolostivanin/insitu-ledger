@@ -30,6 +30,15 @@ class CategoryRepository @Inject constructor(
         list.map { it.toDomain() }
     }
 
+    suspend fun listFromServer(ownerId: Long): List<Category> {
+        val response = categoryApi.list(ownerId = ownerId)
+        if (!response.isSuccessful) return emptyList()
+        return response.body()?.filter { it.deletedAt == null }?.map { dto ->
+            Category(id = dto.id, userId = dto.userId, parentId = dto.parentId,
+                name = dto.name, type = dto.type, icon = dto.icon, color = dto.color)
+        } ?: emptyList()
+    }
+
     fun getByType(type: String): Flow<List<Category>> = categoryDao.getByType(type).map { list ->
         list.map { it.toDomain() }
     }

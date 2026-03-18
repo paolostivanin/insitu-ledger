@@ -46,8 +46,10 @@ fun AccountsScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddClick) {
-                Icon(Icons.Default.Add, contentDescription = "Add Account")
+            if (!uiState.isReadOnly) {
+                FloatingActionButton(onClick = onAddClick) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Account")
+                }
             }
         }
     ) { padding ->
@@ -63,8 +65,8 @@ fun AccountsScreen(
                     items(uiState.accounts, key = { it.id }) { account ->
                         AccountCard(
                             account = account,
-                            onEdit = { onEditClick(account.id) },
-                            onDelete = { viewModel.delete(account.id) }
+                            onEdit = if (uiState.isReadOnly) null else {{ onEditClick(account.id) }},
+                            onDelete = if (uiState.isReadOnly) null else {{ viewModel.delete(account.id) }}
                         )
                     }
                 }
@@ -74,7 +76,7 @@ fun AccountsScreen(
 }
 
 @Composable
-private fun AccountCard(account: Account, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun AccountCard(account: Account, onEdit: (() -> Unit)?, onDelete: (() -> Unit)?) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -93,12 +95,18 @@ private fun AccountCard(account: Account, onEdit: () -> Unit, onDelete: () -> Un
                     fontWeight = FontWeight.SemiBold
                 )
             }
-            Row {
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+            if (onEdit != null || onDelete != null) {
+                Row {
+                    if (onEdit != null) {
+                        IconButton(onClick = onEdit) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    if (onDelete != null) {
+                        IconButton(onClick = onDelete) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                        }
+                    }
                 }
             }
         }

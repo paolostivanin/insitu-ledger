@@ -30,6 +30,14 @@ class AccountRepository @Inject constructor(
         list.map { it.toDomain() }
     }
 
+    suspend fun listFromServer(ownerId: Long): List<Account> {
+        val response = accountApi.list(ownerId = ownerId)
+        if (!response.isSuccessful) return emptyList()
+        return response.body()?.filter { it.deletedAt == null }?.map { dto ->
+            Account(id = dto.id, userId = dto.userId, name = dto.name, currency = dto.currency, balance = dto.balance)
+        } ?: emptyList()
+    }
+
     suspend fun getById(id: Long): Account? = accountDao.getById(id)?.toDomain()
 
     suspend fun create(name: String, currency: String, balance: Double): Long {

@@ -32,8 +32,10 @@ fun ScheduledScreen(
     Scaffold(
         topBar = { TopAppBar(title = { Text("Scheduled") }) },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddClick) {
-                Icon(Icons.Default.Add, contentDescription = "Add Scheduled")
+            if (!uiState.isReadOnly) {
+                FloatingActionButton(onClick = onAddClick) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Scheduled")
+                }
             }
         }
     ) { padding ->
@@ -49,8 +51,8 @@ fun ScheduledScreen(
                     items(uiState.items, key = { it.id }) { item ->
                         ScheduledCard(
                             item = item,
-                            onEdit = { onEditClick(item.id) },
-                            onDelete = { viewModel.delete(item.id) }
+                            onEdit = if (uiState.isReadOnly) null else {{ onEditClick(item.id) }},
+                            onDelete = if (uiState.isReadOnly) null else {{ viewModel.delete(item.id) }}
                         )
                     }
                 }
@@ -60,7 +62,7 @@ fun ScheduledScreen(
 }
 
 @Composable
-private fun ScheduledCard(item: ScheduledTransaction, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun ScheduledCard(item: ScheduledTransaction, onEdit: (() -> Unit)?, onDelete: (() -> Unit)?) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -89,12 +91,18 @@ private fun ScheduledCard(item: ScheduledTransaction, onEdit: () -> Unit, onDele
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     AmountText(amount = item.amount, type = item.type, currency = item.currency)
-                    Row {
-                        IconButton(onClick = onEdit) {
-                            Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
-                        }
-                        IconButton(onClick = onDelete) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                    if (onEdit != null || onDelete != null) {
+                        Row {
+                            if (onEdit != null) {
+                                IconButton(onClick = onEdit) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
+                                }
+                            }
+                            if (onDelete != null) {
+                                IconButton(onClick = onDelete) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                                }
+                            }
                         }
                     }
                 }

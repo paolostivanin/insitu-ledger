@@ -36,6 +36,8 @@ class UserPreferences @Inject constructor(
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
         val SYNC_MODE = stringPreferencesKey("sync_mode") // "none", "webapp", "gdrive"
+        val SHARED_OWNER_ID = longPreferencesKey("shared_owner_id")
+        val LAST_USED_ACCOUNT_ID = longPreferencesKey("last_used_account_id")
 
         private const val ENCRYPTED_PREFS_FILE = "secure_prefs"
         private const val KEY_TOKEN = "token"
@@ -65,6 +67,8 @@ class UserPreferences @Inject constructor(
     val themeModeFlow: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "system" }
     val biometricEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[BIOMETRIC_ENABLED] ?: false }
     val syncModeFlow: Flow<String> = context.dataStore.data.map { it[SYNC_MODE] ?: "none" }
+    val sharedOwnerIdFlow: Flow<Long?> = context.dataStore.data.map { it[SHARED_OWNER_ID] }
+    val lastUsedAccountIdFlow: Flow<Long?> = context.dataStore.data.map { it[LAST_USED_ACCOUNT_ID] }
 
     suspend fun saveToken(token: String) {
         encryptedPrefs.edit().putString(KEY_TOKEN, token).apply()
@@ -99,6 +103,17 @@ class UserPreferences @Inject constructor(
 
     suspend fun saveSyncMode(mode: String) {
         context.dataStore.edit { it[SYNC_MODE] = mode }
+    }
+
+    suspend fun saveSharedOwnerId(ownerId: Long?) {
+        context.dataStore.edit {
+            if (ownerId != null) it[SHARED_OWNER_ID] = ownerId
+            else it.remove(SHARED_OWNER_ID)
+        }
+    }
+
+    suspend fun saveLastUsedAccountId(accountId: Long) {
+        context.dataStore.edit { it[LAST_USED_ACCOUNT_ID] = accountId }
     }
 
     @Volatile

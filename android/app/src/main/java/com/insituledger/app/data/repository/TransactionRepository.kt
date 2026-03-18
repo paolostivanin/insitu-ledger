@@ -87,6 +87,30 @@ class TransactionRepository @Inject constructor(
         }
     }
 
+    suspend fun listFromServer(
+        ownerId: Long,
+        from: String? = null,
+        to: String? = null,
+        categoryId: Long? = null,
+        sortBy: String? = null,
+        sortDir: String? = null,
+        limit: Int = 100
+    ): List<Transaction> {
+        val response = transactionApi.list(
+            from = from, to = to, categoryId = categoryId,
+            limit = limit, sortBy = sortBy, sortDir = sortDir,
+            ownerId = ownerId
+        )
+        if (!response.isSuccessful) return emptyList()
+        return response.body()?.map { dto ->
+            Transaction(
+                id = dto.id, accountId = dto.accountId, categoryId = dto.categoryId,
+                userId = dto.userId, type = dto.type, amount = dto.amount,
+                currency = dto.currency, description = dto.description, date = dto.date
+            )
+        } ?: emptyList()
+    }
+
     suspend fun getMonthlySummary(from: String, to: String) = transactionDao.getMonthlySummary(from, to)
 
     suspend fun getById(id: Long): Transaction? = transactionDao.getById(id)?.toDomain()

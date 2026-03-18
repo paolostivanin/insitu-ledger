@@ -11,18 +11,21 @@ interface TransactionApi {
         @Query("to") to: String? = null,
         @Query("category_id") categoryId: Long? = null,
         @Query("limit") limit: Int? = null,
-        @Query("offset") offset: Int? = null
+        @Query("offset") offset: Int? = null,
+        @Query("sort_by") sortBy: String? = null,
+        @Query("sort_dir") sortDir: String? = null,
+        @Query("owner_id") ownerId: Long? = null
     ): Response<List<TransactionDto>>
 
     @POST("transactions")
-    suspend fun create(@Body input: TransactionInput): Response<IdResponse>
+    suspend fun create(@Body input: TransactionInput, @Query("owner_id") ownerId: Long? = null): Response<IdResponse>
 
     @PUT("transactions/{id}")
-    suspend fun update(@Path("id") id: Long, @Body input: TransactionInput): Response<Unit>
+    suspend fun update(@Path("id") id: Long, @Body input: TransactionInput, @Query("owner_id") ownerId: Long? = null): Response<Unit>
 
     @DELETE("transactions/{id}")
-    suspend fun delete(@Path("id") id: Long): Response<Unit>
+    suspend fun delete(@Path("id") id: Long, @Query("owner_id") ownerId: Long? = null): Response<Unit>
 
     @GET("transactions/autocomplete")
-    suspend fun autocomplete(@Query("q") query: String): Response<List<AutocompleteSuggestion>>
+    suspend fun autocomplete(@Query("q") query: String, @Query("owner_id") ownerId: Long? = null): Response<List<AutocompleteSuggestion>>
 }

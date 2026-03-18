@@ -46,6 +46,11 @@
 		} catch {
 			accessibleOwners = [];
 		}
+		// Clear persisted selection if the owner is no longer accessible
+		const savedId = $sharedOwnerUserId;
+		if (savedId && !accessibleOwners.find(o => o.owner_user_id.toString() === savedId)) {
+			clearSharedOwner();
+		}
 	}
 
 	function switchOwner(e: Event) {

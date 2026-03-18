@@ -43,8 +43,10 @@ fun CategoriesScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddClick) {
-                Icon(Icons.Default.Add, contentDescription = "Add Category")
+            if (!uiState.isReadOnly) {
+                FloatingActionButton(onClick = onAddClick) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Category")
+                }
             }
         }
     ) { padding ->
@@ -64,7 +66,11 @@ fun CategoriesScreen(
                                 color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp))
                         }
                         items(uiState.expenseCategories, key = { it.id }) { cat ->
-                            CategoryRow(cat, onEdit = { onEditClick(cat.id) }, onDelete = { viewModel.delete(cat.id) })
+                            CategoryRow(
+                                cat,
+                                onEdit = if (uiState.isReadOnly) null else {{ onEditClick(cat.id) }},
+                                onDelete = if (uiState.isReadOnly) null else {{ viewModel.delete(cat.id) }}
+                            )
                         }
                     }
                     if (uiState.incomeCategories.isNotEmpty()) {
@@ -73,7 +79,11 @@ fun CategoriesScreen(
                                 color = Color(0xFF2E7D32), modifier = Modifier.padding(vertical = 8.dp))
                         }
                         items(uiState.incomeCategories, key = { it.id }) { cat ->
-                            CategoryRow(cat, onEdit = { onEditClick(cat.id) }, onDelete = { viewModel.delete(cat.id) })
+                            CategoryRow(
+                                cat,
+                                onEdit = if (uiState.isReadOnly) null else {{ onEditClick(cat.id) }},
+                                onDelete = if (uiState.isReadOnly) null else {{ viewModel.delete(cat.id) }}
+                            )
                         }
                     }
                 }
@@ -83,7 +93,7 @@ fun CategoriesScreen(
 }
 
 @Composable
-private fun CategoryRow(category: Category, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun CategoryRow(category: Category, onEdit: (() -> Unit)?, onDelete: (() -> Unit)?) {
     val indent = if (category.parentId != null) 24.dp else 0.dp
     Card(modifier = Modifier.fillMaxWidth().padding(start = indent)) {
         Row(
@@ -101,12 +111,18 @@ private fun CategoryRow(category: Category, onEdit: () -> Unit, onDelete: () -> 
                 }
                 Text(category.name, style = MaterialTheme.typography.bodyMedium)
             }
-            Row {
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+            if (onEdit != null || onDelete != null) {
+                Row {
+                    if (onEdit != null) {
+                        IconButton(onClick = onEdit) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    if (onDelete != null) {
+                        IconButton(onClick = onDelete) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                        }
+                    }
                 }
             }
         }

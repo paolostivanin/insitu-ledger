@@ -3,6 +3,7 @@ package com.insituledger.app.ui.transactions
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.repository.CategoryRepository
+import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.domain.model.Category
@@ -22,11 +23,10 @@ data class TransactionsUiState(
     val filterTo: String? = null,
     val filterCategoryId: Long? = null,
     val sortBy: String = "date",
-    val sortDir: String = "desc"
+    val sortDir: String = "desc",
+    val isReadOnly: Boolean = false
 )
 
-@OptIn(ExperimentalCoroutinesApi::class)
-@HiltViewModel
 data class FilterAndSort(
     val from: String? = null,
     val to: String? = null,
@@ -35,10 +35,13 @@ data class FilterAndSort(
     val sortDir: String = "desc"
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
+@HiltViewModel
 class TransactionsViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
-    private val syncManager: SyncManager
+    private val syncManager: SyncManager,
+    private val sharedAccessState: SharedAccessState
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TransactionsUiState())
@@ -47,21 +50,44 @@ class TransactionsViewModel @Inject constructor(
     private val _filterAndSort = MutableStateFlow(FilterAndSort())
 
     init {
+        // Load categories - either from local DB or server depending on shared state
         viewModelScope.launch {
-            categoryRepository.getAll().collect { cats ->
-                _uiState.update { it.copy(categories = cats) }
+            sharedAccessState.selectedOwner.collectLatest { owner ->
+                if (owner != null) {
+                    val cats = categoryRepository.listFromServer(owner.ownerId)
+                    _uiState.update { it.copy(categories = cats, isReadOnly = owner.permission == "read") }
+                } else {
+                    categoryRepository.getAll().collect { cats ->
+                        _uiState.update { it.copy(categories = cats, isReadOnly = false) }
+                    }
+                }
             }
         }
 
+        // Load transactions reactively based on filters, sort, and shared owner
         viewModelScope.launch {
-            _filterAndSort.flatMapLatest { fs ->
-                transactionRepository.getSorted(
-                    from = fs.from, to = fs.to, categoryId = fs.categoryId,
-                    sortBy = fs.sortBy, sortDir = fs.sortDir
-                )
-            }.collect { txns ->
-                _uiState.update { it.copy(transactions = txns, isLoading = false) }
-            }
+            combine(
+                _filterAndSort,
+                sharedAccessState.selectedOwner
+            ) { fs, owner -> Pair(fs, owner) }
+                .collectLatest { (fs, owner) ->
+                    _uiState.update { it.copy(isLoading = true) }
+                    if (owner != null) {
+                        val txns = transactionRepository.listFromServer(
+                            ownerId = owner.ownerId,
+                            from = fs.from, to = fs.to, categoryId = fs.categoryId,
+                            sortBy = fs.sortBy, sortDir = fs.sortDir
+                        )
+                        _uiState.update { it.copy(transactions = txns, isLoading = false) }
+                    } else {
+                        transactionRepository.getSorted(
+                            from = fs.from, to = fs.to, categoryId = fs.categoryId,
+                            sortBy = fs.sortBy, sortDir = fs.sortDir
+                        ).collect { txns ->
+                            _uiState.update { it.copy(transactions = txns, isLoading = false) }
+                        }
+                    }
+                }
         }
     }
 
@@ -82,12 +108,24 @@ class TransactionsViewModel @Inject constructor(
     fun refresh() {
         viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true) }
-            syncManager.syncNow()
-            _uiState.update { it.copy(isRefreshing = false) }
+            val owner = sharedAccessState.selectedOwner.value
+            if (owner != null) {
+                val fs = _filterAndSort.value
+                val txns = transactionRepository.listFromServer(
+                    ownerId = owner.ownerId,
+                    from = fs.from, to = fs.to, categoryId = fs.categoryId,
+                    sortBy = fs.sortBy, sortDir = fs.sortDir
+                )
+                _uiState.update { it.copy(transactions = txns, isRefreshing = false) }
+            } else {
+                syncManager.syncNow()
+                _uiState.update { it.copy(isRefreshing = false) }
+            }
         }
     }
 
     fun delete(id: Long) {
+        if (sharedAccessState.isReadOnly) return
         viewModelScope.launch { transactionRepository.delete(id) }
     }
 }
