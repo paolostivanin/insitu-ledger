@@ -42,10 +42,10 @@ func main() {
 
 	router := api.NewRouter(server)
 
-	// Check for due scheduled transactions every hour
+	// Check for due scheduled transactions every minute
 	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
 	defer schedulerCancel()
-	scheduler.Start(schedulerCtx, conn, 1*time.Hour)
+	scheduler.Start(schedulerCtx, conn, 1*time.Minute)
 
 	srv := &http.Server{
 		Addr:    *addr,

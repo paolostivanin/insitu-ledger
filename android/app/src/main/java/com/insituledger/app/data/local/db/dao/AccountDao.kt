@@ -24,6 +24,9 @@ interface AccountDao {
     @Query("SELECT * FROM accounts WHERE deleted_at IS NULL ORDER BY name ASC")
     suspend fun getAllSync(): List<AccountEntity>
 
+    @Query("UPDATE accounts SET balance = balance + :delta WHERE id = :id")
+    suspend fun adjustBalance(id: Long, delta: Double)
+
     @Query("SELECT MIN(id) FROM accounts")
     suspend fun getMinId(): Long?
 

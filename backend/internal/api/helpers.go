@@ -25,6 +25,17 @@ func validateDate(s string) error {
 	return nil
 }
 
+// validateDatetime checks that a string is a valid YYYY-MM-DD or YYYY-MM-DDTHH:MM datetime.
+func validateDatetime(s string) error {
+	if _, err := time.Parse("2006-01-02", s); err == nil {
+		return nil
+	}
+	if _, err := time.Parse("2006-01-02T15:04", s); err == nil {
+		return nil
+	}
+	return fmt.Errorf("invalid format, expected YYYY-MM-DD or YYYY-MM-DDTHH:MM: %s", s)
+}
+
 // parsePagination parses limit/offset query params with bounds checking.
 // Returns clamped limit (1-500, default 50) and non-negative offset (default 0).
 // validateLength checks that a string does not exceed maxLen.

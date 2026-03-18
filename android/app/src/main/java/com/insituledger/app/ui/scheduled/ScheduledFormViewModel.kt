@@ -23,15 +23,38 @@ data class ScheduledFormUiState(
     val amount: String = "",
     val currency: String = "EUR",
     val description: String = "",
-    val rrule: String = "FREQ=MONTHLY;INTERVAL=1",
-    val nextOccurrence: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
+    val frequency: String = "monthly",
+    val nextDate: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
+    val nextTime: String = "09:00",
     val accounts: List<Account> = emptyList(),
     val categories: List<Category> = emptyList(),
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
     val error: String? = null,
     val saved: Boolean = false
-)
+) {
+    companion object {
+        val frequencyMap = mapOf(
+            "daily" to "FREQ=DAILY",
+            "weekly" to "FREQ=WEEKLY",
+            "biweekly" to "FREQ=WEEKLY;INTERVAL=2",
+            "monthly" to "FREQ=MONTHLY",
+            "quarterly" to "FREQ=MONTHLY;INTERVAL=3",
+            "yearly" to "FREQ=YEARLY"
+        )
+        val frequencyLabels = mapOf(
+            "daily" to "Daily",
+            "weekly" to "Weekly",
+            "biweekly" to "Biweekly",
+            "monthly" to "Monthly",
+            "quarterly" to "Quarterly",
+            "yearly" to "Yearly"
+        )
+    }
+
+    val rrule: String get() = frequencyMap[frequency] ?: "FREQ=MONTHLY"
+    val nextOccurrence: String get() = "${nextDate}T${nextTime}"
+}
 
 @HiltViewModel
 class ScheduledFormViewModel @Inject constructor(
@@ -58,12 +81,20 @@ class ScheduledFormViewModel @Inject constructor(
                 if (editId != null && _uiState.value.isLoading) {
                     val item = scheduledRepository.getById(editId)
                     if (item != null) {
+                        val freq = ScheduledFormUiState.frequencyMap.entries
+                            .find { it.value == item.rrule }?.key ?: "monthly"
+                        val (date, time) = if (item.nextOccurrence.contains("T")) {
+                            item.nextOccurrence.split("T", limit = 2)
+                                .let { it[0] to it[1] }
+                        } else {
+                            item.nextOccurrence to "09:00"
+                        }
                         _uiState.update {
                             it.copy(
                                 accountId = item.accountId, categoryId = item.categoryId,
                                 type = item.type, amount = item.amount.toString(),
                                 currency = item.currency, description = item.description ?: "",
-                                rrule = item.rrule, nextOccurrence = item.nextOccurrence,
+                                frequency = freq, nextDate = date, nextTime = time,
                                 isLoading = false
                             )
                         }
@@ -83,8 +114,9 @@ class ScheduledFormViewModel @Inject constructor(
     fun updateAmount(amount: String) { _uiState.update { it.copy(amount = amount) } }
     fun updateCurrency(currency: String) { _uiState.update { it.copy(currency = currency) } }
     fun updateDescription(desc: String) { _uiState.update { it.copy(description = desc) } }
-    fun updateRrule(rrule: String) { _uiState.update { it.copy(rrule = rrule) } }
-    fun updateNextOccurrence(date: String) { _uiState.update { it.copy(nextOccurrence = date) } }
+    fun updateFrequency(frequency: String) { _uiState.update { it.copy(frequency = frequency) } }
+    fun updateNextDate(date: String) { _uiState.update { it.copy(nextDate = date) } }
+    fun updateNextTime(time: String) { _uiState.update { it.copy(nextTime = time) } }
 
     fun createCategory(name: String, type: String) {
         viewModelScope.launch {
@@ -96,7 +128,7 @@ class ScheduledFormViewModel @Inject constructor(
     fun save() {
         val state = _uiState.value
         val amount = state.amount.toDoubleOrNull()
-        if (state.accountId == null || state.categoryId == null || amount == null || amount <= 0 || state.rrule.isBlank()) {
+        if (state.accountId == null || state.categoryId == null || amount == null || amount <= 0 || state.frequency.isBlank()) {
             _uiState.update { it.copy(error = "Please fill all required fields") }
             return
         }

@@ -31,12 +31,16 @@ func Start(ctx context.Context, db *sql.DB, interval time.Duration) {
 }
 
 func processDue(db *sql.DB) {
-	today := time.Now().Format("2006-01-02")
+	now := time.Now()
+	// Use datetime format so time-based scheduling works.
+	// Old date-only values (YYYY-MM-DD) sort before any YYYY-MM-DDTHH:MM on the same day,
+	// so they are treated as due at midnight.
+	nowStr := now.Format("2006-01-02T15:04")
 
 	rows, err := db.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency, description, rrule, next_occurrence
 		 FROM scheduled_transactions
-		 WHERE active = 1 AND deleted_at IS NULL AND next_occurrence <= ?`, today,
+		 WHERE active = 1 AND deleted_at IS NULL AND next_occurrence <= ?`, nowStr,
 	)
 	if err != nil {
 		log.Printf("scheduler: query error: %v", err)
@@ -75,10 +79,16 @@ func processDue(db *sql.DB) {
 			continue
 		}
 
+		// Use the date portion of next_occurrence for the transaction date
+		txDate := s.nextOccurrence
+		if len(txDate) > 10 {
+			txDate = txDate[:10]
+		}
+
 		_, err = tx.Exec(
 			`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, date)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			s.accountID, s.categoryID, s.userID, s.typ, s.amount, s.currency, s.description, s.nextOccurrence,
+			s.accountID, s.categoryID, s.userID, s.typ, s.amount, s.currency, s.description, txDate,
 		)
 		if err != nil {
 			tx.Rollback()
@@ -115,10 +125,17 @@ func processDue(db *sql.DB) {
 // advanceDate calculates the next occurrence from the current date and rrule.
 // Supports simplified RRULE: FREQ=DAILY, FREQ=WEEKLY, FREQ=MONTHLY, FREQ=YEARLY
 // with optional INTERVAL=n.
+// Preserves time component if present (e.g. 2026-03-18T09:00 -> 2026-04-18T09:00).
 func advanceDate(current string, rrule string) string {
-	t, err := time.Parse("2006-01-02", current)
+	// Try datetime first, then date-only
+	format := "2006-01-02T15:04"
+	t, err := time.Parse(format, current)
 	if err != nil {
-		return current
+		format = "2006-01-02"
+		t, err = time.Parse(format, current)
+		if err != nil {
+			return current
+		}
 	}
 
 	freq := ""
@@ -158,5 +175,5 @@ func advanceDate(current string, rrule string) string {
 		t = t.AddDate(0, 1, 0) // fallback: monthly
 	}
 
-	return t.Format("2006-01-02")
+	return t.Format(format)
 }

@@ -7,7 +7,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 - **Transactions** — record income and expenses across multiple accounts
 - **Accounts** — manage multiple accounts with independent balances and currencies (default EUR)
 - **Categories** — hierarchical categories (with parent/child, icons, and colors) for income and expense
-- **Scheduled transactions** — recurring transactions via RRULE (daily, weekly, monthly, yearly with configurable intervals), automatically materialized by a background scheduler
+- **Scheduled transactions** — recurring transactions with date and time (daily, weekly, monthly, yearly), automatically materialized by the backend scheduler (checks every minute) and by the Android local WorkManager (every 15 minutes)
 - **Reports** — spending by category, by month, and trend analysis (powered by ECharts)
 - **Multi-user** — admin-created users, shared access with read/write permissions
 - **Authentication** — bcrypt passwords, bearer-token sessions (30-day expiry), TOTP two-factor authentication
@@ -33,7 +33,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 | Charts   | ECharts 6                         |
 | Auth     | bcrypt + bearer tokens + TOTP (`pquerna/otp`) |
 | Tests    | Go `testing` + `httptest`, Vitest + jsdom |
-| Mobile   | Android (planned)                 |
+| Mobile   | Android (Kotlin, Jetpack Compose, Room, Hilt, WorkManager) |
 
 ## Project Structure
 
@@ -56,7 +56,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 │   │   └── routes/               # SvelteKit pages
 │   ├── static/                   # PWA manifest, service worker, icons
 │   └── package.json
-├── mobile/                       # Android app (planned)
+├── android/                      # Android app (Jetpack Compose, local-first with optional sync)
 ├── Dockerfile                    # Multi-stage build
 └── docker-compose.yml
 ```

@@ -16,6 +16,7 @@ class SyncManager @Inject constructor(
     companion object {
         const val PERIODIC_SYNC_WORK = "periodic_sync"
         const val ONE_TIME_SYNC_WORK = "one_time_sync"
+        const val SCHEDULED_TX_WORK = "scheduled_tx_check"
     }
 
     fun schedulePeriodicSync() {
@@ -62,8 +63,20 @@ class SyncManager @Inject constructor(
         return syncRepository.sync()
     }
 
+    fun scheduleScheduledTransactionCheck() {
+        val request = PeriodicWorkRequestBuilder<ScheduledTransactionWorker>(15, TimeUnit.MINUTES)
+            .build()
+
+        workManager.enqueueUniquePeriodicWork(
+            SCHEDULED_TX_WORK,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
+    }
+
     fun cancelAll() {
         workManager.cancelUniqueWork(PERIODIC_SYNC_WORK)
         workManager.cancelUniqueWork(ONE_TIME_SYNC_WORK)
+        workManager.cancelUniqueWork(SCHEDULED_TX_WORK)
     }
 }

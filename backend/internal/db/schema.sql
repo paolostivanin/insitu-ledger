@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     currency TEXT NOT NULL DEFAULT 'EUR',
     description TEXT,
     rrule TEXT NOT NULL,
-    next_occurrence DATE NOT NULL,
+    next_occurrence TEXT NOT NULL,  -- YYYY-MM-DD or YYYY-MM-DDTHH:MM
     active INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),

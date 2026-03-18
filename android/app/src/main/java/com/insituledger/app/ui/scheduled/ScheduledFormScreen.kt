@@ -86,12 +86,31 @@ fun ScheduledFormScreen(
             OutlinedTextField(value = uiState.description, onValueChange = viewModel::updateDescription,
                 label = { Text("Description") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 
-            OutlinedTextField(value = uiState.rrule, onValueChange = viewModel::updateRrule,
-                label = { Text("RRule (e.g. FREQ=MONTHLY;INTERVAL=1)") }, singleLine = true,
+            // Frequency dropdown
+            var freqExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(expanded = freqExpanded, onExpandedChange = { freqExpanded = it }) {
+                OutlinedTextField(
+                    value = ScheduledFormUiState.frequencyLabels[uiState.frequency] ?: uiState.frequency,
+                    onValueChange = {}, readOnly = true, label = { Text("Frequency") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = freqExpanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                )
+                ExposedDropdownMenu(expanded = freqExpanded, onDismissRequest = { freqExpanded = false }) {
+                    ScheduledFormUiState.frequencyLabels.forEach { (key, label) ->
+                        DropdownMenuItem(text = { Text(label) }, onClick = {
+                            viewModel.updateFrequency(key)
+                            freqExpanded = false
+                        })
+                    }
+                }
+            }
+
+            OutlinedTextField(value = uiState.nextDate, onValueChange = viewModel::updateNextDate,
+                label = { Text("Next Date (YYYY-MM-DD)") }, singleLine = true,
                 modifier = Modifier.fillMaxWidth())
 
-            OutlinedTextField(value = uiState.nextOccurrence, onValueChange = viewModel::updateNextOccurrence,
-                label = { Text("Next Occurrence (YYYY-MM-DD)") }, singleLine = true,
+            OutlinedTextField(value = uiState.nextTime, onValueChange = viewModel::updateNextTime,
+                label = { Text("Time (HH:MM)") }, singleLine = true,
                 modifier = Modifier.fillMaxWidth())
 
             uiState.error?.let {

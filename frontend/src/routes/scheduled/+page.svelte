@@ -25,7 +25,8 @@
 	let fCurrency = $state('EUR');
 	let fDescription = $state('');
 	let fFrequency = $state('monthly');
-	let fNextOccurrence = $state(new Date().toISOString().slice(0, 10));
+	let fNextDate = $state(new Date().toISOString().slice(0, 10));
+	let fNextTime = $state('09:00');
 
 	const frequencyMap: Record<string, string> = {
 		daily: 'FREQ=DAILY',
@@ -81,7 +82,8 @@
 		fCurrency = 'EUR';
 		fDescription = '';
 		fFrequency = 'monthly';
-		fNextOccurrence = new Date().toISOString().slice(0, 10);
+		fNextDate = new Date().toISOString().slice(0, 10);
+		fNextTime = '09:00';
 		if (accts.length) fAccountId = accts[0].id;
 		if (cats.length) fCategoryId = cats[0].id;
 	}
@@ -94,7 +96,15 @@
 		fAmount = item.amount;
 		fCurrency = item.currency;
 		fDescription = item.description || '';
-		fNextOccurrence = item.next_occurrence;
+		// Split next_occurrence into date and time parts
+		if (item.next_occurrence.includes('T')) {
+			const [d, t] = item.next_occurrence.split('T');
+			fNextDate = d;
+			fNextTime = t;
+		} else {
+			fNextDate = item.next_occurrence;
+			fNextTime = '09:00';
+		}
 		// reverse lookup frequency
 		fFrequency = Object.entries(frequencyMap).find(([, v]) => v === item.rrule)?.[0] || 'monthly';
 		showForm = true;
@@ -112,7 +122,7 @@
 			currency: fCurrency,
 			description: fDescription || undefined,
 			rrule: frequencyMap[fFrequency],
-			next_occurrence: fNextOccurrence
+			next_occurrence: `${fNextDate}T${fNextTime}`
 		};
 		try {
 			if (editId) {
@@ -207,8 +217,14 @@
 						/>
 					</div>
 					<div class="form-group">
-						<label for="next">Next Occurrence</label>
-						<input id="next" type="date" bind:value={fNextOccurrence} required />
+						<label for="next-date">Next Date</label>
+						<input id="next-date" type="date" bind:value={fNextDate} required />
+					</div>
+				</div>
+				<div class="form-row">
+					<div class="form-group">
+						<label for="next-time">Time</label>
+						<input id="next-time" type="time" bind:value={fNextTime} required />
 					</div>
 				</div>
 				<div class="form-group">
@@ -230,7 +246,8 @@
 				<thead>
 					<tr>
 						<th>Frequency</th>
-						<th>Next</th>
+						<th>Next Date</th>
+						<th>Time</th>
 						<th>Type</th>
 						<th>Category</th>
 						<th>Account</th>
@@ -244,7 +261,8 @@
 					{#each items as item}
 						<tr>
 							<td>{rruleLabel(item.rrule)}</td>
-							<td>{item.next_occurrence}</td>
+							<td>{item.next_occurrence.includes('T') ? item.next_occurrence.split('T')[0] : item.next_occurrence}</td>
+							<td>{item.next_occurrence.includes('T') ? item.next_occurrence.split('T')[1] : '—'}</td>
 							<td><span class="badge {item.type === 'income' ? 'badge-income' : 'badge-expense'}">{item.type}</span></td>
 							<td>{catName(item.category_id)}</td>
 							<td>{acctName(item.account_id)}</td>

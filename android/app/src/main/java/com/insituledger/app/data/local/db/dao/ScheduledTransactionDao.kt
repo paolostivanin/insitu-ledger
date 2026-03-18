@@ -24,6 +24,9 @@ interface ScheduledTransactionDao {
     @Query("DELETE FROM scheduled_transactions WHERE deleted_at IS NOT NULL")
     suspend fun purgeDeleted()
 
+    @Query("SELECT * FROM scheduled_transactions WHERE active = 1 AND deleted_at IS NULL AND next_occurrence <= :now")
+    suspend fun getDue(now: String): List<ScheduledTransactionEntity>
+
     @Query("SELECT MIN(id) FROM scheduled_transactions")
     suspend fun getMinId(): Long?
 

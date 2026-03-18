@@ -71,6 +71,7 @@ class LoginViewModel @Inject constructor(
                         // Set sync mode to webapp on successful login
                         prefs.saveSyncMode("webapp")
                         syncManager.schedulePeriodicSync()
+                        syncManager.scheduleScheduledTransactionCheck()
                         syncManager.triggerImmediateSync()
                         _uiState.update { it.copy(isLoading = false, loginSuccess = true) }
                     }

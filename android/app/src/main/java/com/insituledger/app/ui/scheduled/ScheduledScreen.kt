@@ -75,13 +75,24 @@ private fun ScheduledCard(item: ScheduledTransaction, onEdit: (() -> Unit)?, onD
                         text = item.description ?: item.type.replaceFirstChar { it.uppercase() },
                         style = MaterialTheme.typography.titleSmall
                     )
+                    val (nextDate, nextTime) = if (item.nextOccurrence.contains("T")) {
+                        val parts = item.nextOccurrence.split("T", limit = 2)
+                        parts[0] to parts[1]
+                    } else {
+                        item.nextOccurrence to null
+                    }
                     Text(
-                        text = "Next: ${item.nextOccurrence}",
+                        text = "Next: $nextDate" + (nextTime?.let { " at $it" } ?: ""),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    val rruleLabel = mapOf(
+                        "FREQ=DAILY" to "Daily", "FREQ=WEEKLY" to "Weekly",
+                        "FREQ=WEEKLY;INTERVAL=2" to "Biweekly", "FREQ=MONTHLY" to "Monthly",
+                        "FREQ=MONTHLY;INTERVAL=3" to "Quarterly", "FREQ=YEARLY" to "Yearly"
+                    )
                     Text(
-                        text = item.rrule,
+                        text = rruleLabel[item.rrule] ?: item.rrule,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

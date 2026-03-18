@@ -58,7 +58,7 @@ func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 		items = append(items, map[string]any{
 			"id": id, "account_id": accountID, "category_id": categoryID,
 			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
-			"description": description, "rrule": rrule, "next_occurrence": truncDate(nextOcc),
+			"description": description, "rrule": rrule, "next_occurrence": nextOcc,
 			"active": active == 1, "created_at": createdAt, "updated_at": updatedAt,
 			"sync_version": syncVersion,
 		})
@@ -99,7 +99,7 @@ func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 		req.Currency = "EUR"
 	}
 
-	if err := validateDate(req.NextOccurrence); err != nil {
+	if err := validateDatetime(req.NextOccurrence); err != nil {
 		http.Error(w, "invalid next_occurrence: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -149,7 +149,7 @@ func (s *Server) handleUpdateScheduled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := validateDate(req.NextOccurrence); err != nil {
+	if err := validateDatetime(req.NextOccurrence); err != nil {
 		http.Error(w, "invalid next_occurrence: "+err.Error(), http.StatusBadRequest)
 		return
 	}

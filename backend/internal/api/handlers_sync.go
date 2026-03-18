@@ -139,7 +139,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			scheds = append(scheds, map[string]any{
 				"id": id, "account_id": accountID, "category_id": categoryID,
 				"user_id": uid, "type": typ, "amount": amount, "currency": currency,
-				"description": description, "rrule": rrule, "next_occurrence": truncDate(nextOcc),
+				"description": description, "rrule": rrule, "next_occurrence": nextOcc,
 				"active": active == 1, "created_at": createdAt, "updated_at": updatedAt,
 				"deleted_at": deletedAt, "sync_version": sv,
 			})

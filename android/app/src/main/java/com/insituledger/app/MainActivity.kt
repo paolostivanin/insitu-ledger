@@ -30,6 +30,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Always schedule the local scheduled-transaction worker
+        syncManager.scheduleScheduledTransactionCheck()
+
         setContent {
             val themeMode by userPreferences.themeModeFlow.collectAsStateWithLifecycle(initialValue = "system")
             val biometricEnabled by userPreferences.biometricEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
