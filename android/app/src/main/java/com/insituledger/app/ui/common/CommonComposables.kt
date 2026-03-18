@@ -135,7 +135,7 @@ fun CategoryDropdownWithAdd(
             value = categories.find { it.id == selectedId }?.name ?: "",
             onValueChange = {}, readOnly = true, label = { Text("Category") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor()
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             filteredCats.forEach { cat ->

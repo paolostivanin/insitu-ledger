@@ -58,7 +58,7 @@ fun CategoryFormScreen(
                     value = uiState.allCategories.find { it.id == uiState.parentId }?.name ?: "None (top-level)",
                     onValueChange = {}, readOnly = true, label = { Text("Parent Category") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = parentExpanded) },
-                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
                 )
                 ExposedDropdownMenu(expanded = parentExpanded, onDismissRequest = { parentExpanded = false }) {
                     DropdownMenuItem(text = { Text("None (top-level)") },

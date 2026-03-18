@@ -59,7 +59,7 @@ fun ScheduledFormScreen(
                     value = uiState.accounts.find { it.id == uiState.accountId }?.name ?: "",
                     onValueChange = {}, readOnly = true, label = { Text("Account") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountExpanded) },
-                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
                 )
                 ExposedDropdownMenu(expanded = accountExpanded, onDismissRequest = { accountExpanded = false }) {
                     uiState.accounts.forEach { account ->
@@ -93,7 +93,7 @@ fun ScheduledFormScreen(
                     value = ScheduledFormUiState.frequencyLabels[uiState.frequency] ?: uiState.frequency,
                     onValueChange = {}, readOnly = true, label = { Text("Frequency") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = freqExpanded) },
-                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
                 )
                 ExposedDropdownMenu(expanded = freqExpanded, onDismissRequest = { freqExpanded = false }) {
                     ScheduledFormUiState.frequencyLabels.forEach { (key, label) ->
