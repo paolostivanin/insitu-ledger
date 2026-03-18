@@ -18,8 +18,7 @@ data class LoginUiState(
     val showTotp: Boolean = false,
     val isLoading: Boolean = false,
     val error: String? = null,
-    val loginSuccess: Boolean = false,
-    val forcePasswordChange: Boolean = false
+    val loginSuccess: Boolean = false
 )
 
 @HiltViewModel
@@ -69,15 +68,11 @@ class LoginViewModel @Inject constructor(
                     if (response.totpRequired == true && response.token == null) {
                         _uiState.update { it.copy(isLoading = false, showTotp = true) }
                     } else {
+                        // Set sync mode to webapp on successful login
+                        prefs.saveSyncMode("webapp")
                         syncManager.schedulePeriodicSync()
                         syncManager.triggerImmediateSync()
-                        _uiState.update {
-                            it.copy(
-                                isLoading = false,
-                                loginSuccess = true,
-                                forcePasswordChange = response.forcePasswordChange
-                            )
-                        }
+                        _uiState.update { it.copy(isLoading = false, loginSuccess = true) }
                     }
                 },
                 onFailure = { e ->

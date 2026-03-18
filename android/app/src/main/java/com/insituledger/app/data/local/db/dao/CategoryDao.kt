@@ -24,6 +24,9 @@ interface CategoryDao {
     @Query("DELETE FROM categories WHERE deleted_at IS NOT NULL")
     suspend fun purgeDeleted()
 
+    @Query("SELECT * FROM categories WHERE deleted_at IS NULL ORDER BY type ASC, name ASC")
+    suspend fun getAllSync(): List<CategoryEntity>
+
     @Query("SELECT MIN(id) FROM categories")
     suspend fun getMinId(): Long?
 

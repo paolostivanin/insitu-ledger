@@ -21,6 +21,9 @@ interface AccountDao {
     @Query("DELETE FROM accounts WHERE deleted_at IS NOT NULL")
     suspend fun purgeDeleted()
 
+    @Query("SELECT * FROM accounts WHERE deleted_at IS NULL ORDER BY name ASC")
+    suspend fun getAllSync(): List<AccountEntity>
+
     @Query("SELECT MIN(id) FROM accounts")
     suspend fun getMinId(): Long?
 

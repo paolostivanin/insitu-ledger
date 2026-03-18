@@ -1,5 +1,6 @@
 package com.insituledger.app.data.repository
 
+import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.dao.CategoryDao
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.entity.CategoryEntity
@@ -20,8 +21,11 @@ class CategoryRepository @Inject constructor(
     private val pendingOpDao: PendingOperationDao,
     private val categoryApi: CategoryApi,
     private val gson: Gson,
-    private val syncManager: SyncManager
+    private val syncManager: SyncManager,
+    private val prefs: UserPreferences
 ) {
+    private fun isSyncEnabled() = prefs.getSyncModeImmediate() == "webapp"
+
     fun getAll(): Flow<List<Category>> = categoryDao.getAll().map { list ->
         list.map { it.toDomain() }
     }
@@ -47,14 +51,16 @@ class CategoryRepository @Inject constructor(
         )
         categoryDao.upsert(entity)
 
-        val input = CategoryInput(parentId, name, type, icon, color)
-        pendingOpDao.insert(PendingOperationEntity(
-            entityType = "category",
-            operation = "CREATE",
-            entityId = localId,
-            payloadJson = gson.toJson(input)
-        ))
-        syncManager.triggerImmediateSync()
+        if (isSyncEnabled()) {
+            val input = CategoryInput(parentId, name, type, icon, color)
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "category",
+                operation = "CREATE",
+                entityId = localId,
+                payloadJson = gson.toJson(input)
+            ))
+            syncManager.triggerImmediateSync()
+        }
         return localId
     }
 
@@ -62,28 +68,32 @@ class CategoryRepository @Inject constructor(
         val existing = categoryDao.getById(id) ?: return
         categoryDao.upsert(existing.copy(name = name, type = type, parentId = parentId, icon = icon, color = color))
 
-        val input = CategoryInput(parentId, name, type, icon, color)
-        pendingOpDao.insert(PendingOperationEntity(
-            entityType = "category",
-            operation = "UPDATE",
-            entityId = id,
-            serverId = if (id > 0) id else null,
-            payloadJson = gson.toJson(input)
-        ))
-        syncManager.triggerImmediateSync()
+        if (isSyncEnabled()) {
+            val input = CategoryInput(parentId, name, type, icon, color)
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "category",
+                operation = "UPDATE",
+                entityId = id,
+                serverId = if (id > 0) id else null,
+                payloadJson = gson.toJson(input)
+            ))
+            syncManager.triggerImmediateSync()
+        }
     }
 
     suspend fun delete(id: Long) {
         val existing = categoryDao.getById(id) ?: return
         categoryDao.upsert(existing.copy(deletedAt = "deleted"))
 
-        pendingOpDao.insert(PendingOperationEntity(
-            entityType = "category",
-            operation = "DELETE",
-            entityId = id,
-            serverId = if (id > 0) id else null
-        ))
-        syncManager.triggerImmediateSync()
+        if (isSyncEnabled()) {
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "category",
+                operation = "DELETE",
+                entityId = id,
+                serverId = if (id > 0) id else null
+            ))
+            syncManager.triggerImmediateSync()
+        }
     }
 
     private fun CategoryEntity.toDomain() = Category(

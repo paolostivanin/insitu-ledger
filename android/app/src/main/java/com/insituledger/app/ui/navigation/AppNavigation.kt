@@ -46,7 +46,7 @@ private val bottomNavItems = listOf(
 private val bottomNavRoutes = bottomNavItems.map { it.screen.route }.toSet()
 
 @Composable
-fun AppNavigation(isLoggedIn: Boolean) {
+fun AppNavigation() {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -82,25 +82,9 @@ fun AppNavigation(isLoggedIn: Boolean) {
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = if (isLoggedIn) Screen.Dashboard.route else Screen.Login.route,
+            startDestination = Screen.Dashboard.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Screen.Login.route) {
-                LoginScreen(
-                    onLoginSuccess = { forcePasswordChange ->
-                        if (forcePasswordChange) {
-                            navController.navigate(Screen.ChangePassword.route) {
-                                popUpTo(Screen.Login.route) { inclusive = true }
-                            }
-                        } else {
-                            navController.navigate(Screen.Dashboard.route) {
-                                popUpTo(Screen.Login.route) { inclusive = true }
-                            }
-                        }
-                    }
-                )
-            }
-
             composable(Screen.Dashboard.route) {
                 DashboardScreen(
                     onTransactionClick = { id ->
@@ -180,25 +164,15 @@ fun AppNavigation(isLoggedIn: Boolean) {
             composable(Screen.Settings.route) {
                 SettingsScreen(
                     onBack = { navController.popBackStack() },
-                    onLogout = {
-                        navController.navigate(Screen.Login.route) {
-                            popUpTo(0) { inclusive = true }
-                        }
-                    }
+                    onConnectWebapp = { navController.navigate(Screen.Login.route) }
                 )
             }
 
-            composable(Screen.ChangePassword.route) {
-                SettingsScreen(
-                    onBack = {
-                        navController.navigate(Screen.Dashboard.route) {
-                            popUpTo(0) { inclusive = true }
-                        }
-                    },
-                    onLogout = {
-                        navController.navigate(Screen.Login.route) {
-                            popUpTo(0) { inclusive = true }
-                        }
+            // Login screen accessible from Settings for webapp sync setup
+            composable(Screen.Login.route) {
+                LoginScreen(
+                    onLoginSuccess = {
+                        navController.popBackStack()
                     }
                 )
             }

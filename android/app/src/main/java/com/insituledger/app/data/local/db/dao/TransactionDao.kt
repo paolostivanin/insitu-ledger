@@ -29,6 +29,9 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE deleted_at IS NULL ORDER BY date DESC LIMIT :limit")
     fun getRecent(limit: Int = 10): Flow<List<TransactionEntity>>
 
+    @Query("SELECT * FROM transactions WHERE deleted_at IS NULL ORDER BY date DESC, id DESC")
+    suspend fun getAllSync(): List<TransactionEntity>
+
     @Query("SELECT * FROM transactions WHERE id = :id")
     suspend fun getById(id: Long): TransactionEntity?
 

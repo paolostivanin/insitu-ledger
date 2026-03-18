@@ -1,5 +1,6 @@
 package com.insituledger.app.data.repository
 
+import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.dao.AccountDao
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.entity.AccountEntity
@@ -20,8 +21,11 @@ class AccountRepository @Inject constructor(
     private val pendingOpDao: PendingOperationDao,
     private val accountApi: AccountApi,
     private val gson: Gson,
-    private val syncManager: SyncManager
+    private val syncManager: SyncManager,
+    private val prefs: UserPreferences
 ) {
+    private fun isSyncEnabled() = prefs.getSyncModeImmediate() == "webapp"
+
     fun getAll(): Flow<List<Account>> = accountDao.getAll().map { list ->
         list.map { it.toDomain() }
     }
@@ -41,14 +45,16 @@ class AccountRepository @Inject constructor(
         )
         accountDao.upsert(entity)
 
-        val input = AccountInput(name, currency, balance)
-        pendingOpDao.insert(PendingOperationEntity(
-            entityType = "account",
-            operation = "CREATE",
-            entityId = localId,
-            payloadJson = gson.toJson(input)
-        ))
-        syncManager.triggerImmediateSync()
+        if (isSyncEnabled()) {
+            val input = AccountInput(name, currency, balance)
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "account",
+                operation = "CREATE",
+                entityId = localId,
+                payloadJson = gson.toJson(input)
+            ))
+            syncManager.triggerImmediateSync()
+        }
         return localId
     }
 
@@ -56,28 +62,32 @@ class AccountRepository @Inject constructor(
         val existing = accountDao.getById(id) ?: return
         accountDao.upsert(existing.copy(name = name, currency = currency, balance = balance))
 
-        val input = AccountInput(name, currency, balance)
-        pendingOpDao.insert(PendingOperationEntity(
-            entityType = "account",
-            operation = "UPDATE",
-            entityId = id,
-            serverId = if (id > 0) id else null,
-            payloadJson = gson.toJson(input)
-        ))
-        syncManager.triggerImmediateSync()
+        if (isSyncEnabled()) {
+            val input = AccountInput(name, currency, balance)
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "account",
+                operation = "UPDATE",
+                entityId = id,
+                serverId = if (id > 0) id else null,
+                payloadJson = gson.toJson(input)
+            ))
+            syncManager.triggerImmediateSync()
+        }
     }
 
     suspend fun delete(id: Long) {
         val existing = accountDao.getById(id) ?: return
         accountDao.upsert(existing.copy(deletedAt = "deleted"))
 
-        pendingOpDao.insert(PendingOperationEntity(
-            entityType = "account",
-            operation = "DELETE",
-            entityId = id,
-            serverId = if (id > 0) id else null
-        ))
-        syncManager.triggerImmediateSync()
+        if (isSyncEnabled()) {
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "account",
+                operation = "DELETE",
+                entityId = id,
+                serverId = if (id > 0) id else null
+            ))
+            syncManager.triggerImmediateSync()
+        }
     }
 
     private fun AccountEntity.toDomain() = Account(

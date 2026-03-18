@@ -8,9 +8,14 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,6 +35,7 @@ class UserPreferences @Inject constructor(
         val LAST_SYNC_VERSION = longPreferencesKey("last_sync_version")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
+        val SYNC_MODE = stringPreferencesKey("sync_mode") // "none", "webapp", "gdrive"
 
         private const val ENCRYPTED_PREFS_FILE = "secure_prefs"
         private const val KEY_TOKEN = "token"
@@ -58,6 +64,7 @@ class UserPreferences @Inject constructor(
     val lastSyncVersionFlow: Flow<Long> = context.dataStore.data.map { it[LAST_SYNC_VERSION] ?: 0L }
     val themeModeFlow: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "system" }
     val biometricEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[BIOMETRIC_ENABLED] ?: false }
+    val syncModeFlow: Flow<String> = context.dataStore.data.map { it[SYNC_MODE] ?: "none" }
 
     suspend fun saveToken(token: String) {
         encryptedPrefs.edit().putString(KEY_TOKEN, token).apply()
@@ -89,6 +96,21 @@ class UserPreferences @Inject constructor(
     suspend fun saveBiometricEnabled(enabled: Boolean) {
         context.dataStore.edit { it[BIOMETRIC_ENABLED] = enabled }
     }
+
+    suspend fun saveSyncMode(mode: String) {
+        context.dataStore.edit { it[SYNC_MODE] = mode }
+    }
+
+    @Volatile
+    private var _syncModeCache: String = "none"
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        syncModeFlow.onEach { _syncModeCache = it }.launchIn(scope)
+    }
+
+    fun getSyncModeImmediate(): String = _syncModeCache
 
     suspend fun clearAll() {
         encryptedPrefs.edit().remove(KEY_TOKEN).apply()

@@ -1,5 +1,6 @@
 package com.insituledger.app.data.repository
 
+import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
 import com.insituledger.app.data.local.db.entity.PendingOperationEntity
@@ -20,8 +21,11 @@ class TransactionRepository @Inject constructor(
     private val pendingOpDao: PendingOperationDao,
     private val transactionApi: TransactionApi,
     private val gson: Gson,
-    private val syncManager: SyncManager
+    private val syncManager: SyncManager,
+    private val prefs: UserPreferences
 ) {
+    private fun isSyncEnabled() = prefs.getSyncModeImmediate() == "webapp"
+
     fun getAll(): Flow<List<Transaction>> = transactionDao.getAll().map { list ->
         list.map { it.toDomain() }
     }
@@ -68,14 +72,16 @@ class TransactionRepository @Inject constructor(
         )
         transactionDao.upsert(entity)
 
-        val input = TransactionInput(accountId, categoryId, type, amount, currency, description, date)
-        pendingOpDao.insert(PendingOperationEntity(
-            entityType = "transaction",
-            operation = "CREATE",
-            entityId = localId,
-            payloadJson = gson.toJson(input)
-        ))
-        syncManager.triggerImmediateSync()
+        if (isSyncEnabled()) {
+            val input = TransactionInput(accountId, categoryId, type, amount, currency, description, date)
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "transaction",
+                operation = "CREATE",
+                entityId = localId,
+                payloadJson = gson.toJson(input)
+            ))
+            syncManager.triggerImmediateSync()
+        }
         return localId
     }
 
@@ -89,28 +95,32 @@ class TransactionRepository @Inject constructor(
             amount = amount, currency = currency, description = description, date = date
         ))
 
-        val input = TransactionInput(accountId, categoryId, type, amount, currency, description, date)
-        pendingOpDao.insert(PendingOperationEntity(
-            entityType = "transaction",
-            operation = "UPDATE",
-            entityId = id,
-            serverId = if (id > 0) id else null,
-            payloadJson = gson.toJson(input)
-        ))
-        syncManager.triggerImmediateSync()
+        if (isSyncEnabled()) {
+            val input = TransactionInput(accountId, categoryId, type, amount, currency, description, date)
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "transaction",
+                operation = "UPDATE",
+                entityId = id,
+                serverId = if (id > 0) id else null,
+                payloadJson = gson.toJson(input)
+            ))
+            syncManager.triggerImmediateSync()
+        }
     }
 
     suspend fun delete(id: Long) {
         val existing = transactionDao.getById(id) ?: return
         transactionDao.upsert(existing.copy(deletedAt = "deleted"))
 
-        pendingOpDao.insert(PendingOperationEntity(
-            entityType = "transaction",
-            operation = "DELETE",
-            entityId = id,
-            serverId = if (id > 0) id else null
-        ))
-        syncManager.triggerImmediateSync()
+        if (isSyncEnabled()) {
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "transaction",
+                operation = "DELETE",
+                entityId = id,
+                serverId = if (id > 0) id else null
+            ))
+            syncManager.triggerImmediateSync()
+        }
     }
 
     private fun TransactionEntity.toDomain() = Transaction(

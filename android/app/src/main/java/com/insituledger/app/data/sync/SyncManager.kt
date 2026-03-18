@@ -1,6 +1,7 @@
 package com.insituledger.app.data.sync
 
 import androidx.work.*
+import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.SyncRepository
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -9,7 +10,8 @@ import javax.inject.Singleton
 @Singleton
 class SyncManager @Inject constructor(
     private val workManager: WorkManager,
-    private val syncRepository: SyncRepository
+    private val syncRepository: SyncRepository,
+    private val prefs: UserPreferences
 ) {
     companion object {
         const val PERIODIC_SYNC_WORK = "periodic_sync"
@@ -17,6 +19,8 @@ class SyncManager @Inject constructor(
     }
 
     fun schedulePeriodicSync() {
+        if (prefs.getSyncModeImmediate() != "webapp") return
+
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
@@ -34,6 +38,8 @@ class SyncManager @Inject constructor(
     }
 
     fun triggerImmediateSync() {
+        if (prefs.getSyncModeImmediate() != "webapp") return
+
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
@@ -50,6 +56,9 @@ class SyncManager @Inject constructor(
     }
 
     suspend fun syncNow(): Result<Unit> {
+        if (prefs.getSyncModeImmediate() != "webapp") {
+            return Result.success(Unit)
+        }
         return syncRepository.sync()
     }
 

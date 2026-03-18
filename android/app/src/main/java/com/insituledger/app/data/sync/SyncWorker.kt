@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.SyncRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -12,10 +13,12 @@ import dagger.assisted.AssistedInject
 class SyncWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
-    private val syncRepository: SyncRepository
+    private val syncRepository: SyncRepository,
+    private val prefs: UserPreferences
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        if (prefs.getSyncModeImmediate() != "webapp") return Result.success()
         val result = syncRepository.sync()
         return if (result.isSuccess) Result.success() else Result.retry()
     }

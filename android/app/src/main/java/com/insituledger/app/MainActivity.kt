@@ -31,31 +31,21 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
 
         setContent {
-            // Use a sentinel to distinguish "not yet loaded" from "no token"
-            val token by userPreferences.tokenFlow.collectAsStateWithLifecycle(initialValue = "\u0000")
             val themeMode by userPreferences.themeModeFlow.collectAsStateWithLifecycle(initialValue = "system")
             val biometricEnabled by userPreferences.biometricEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
             val unlocked by biometricUnlocked
 
             InSituLedgerTheme(themeMode = themeMode) {
-                when {
-                    token == "\u0000" -> {
-                        // Still loading from DataStore
-                        LoadingIndicator()
-                    }
-                    token != null && biometricEnabled && !unlocked -> {
-                        // Has token + biometric enabled but not yet unlocked
-                        LoadingIndicator()
-                        LaunchedEffect(Unit) {
-                            if (!biometricPromptShown) {
-                                biometricPromptShown = true
-                                showBiometricPrompt()
-                            }
+                if (biometricEnabled && !unlocked) {
+                    LoadingIndicator()
+                    LaunchedEffect(Unit) {
+                        if (!biometricPromptShown) {
+                            biometricPromptShown = true
+                            showBiometricPrompt()
                         }
                     }
-                    else -> {
-                        AppNavigation(isLoggedIn = token != null)
-                    }
+                } else {
+                    AppNavigation()
                 }
             }
         }
@@ -68,7 +58,6 @@ class MainActivity : AppCompatActivity() {
         )
 
         if (canAuthenticate != BiometricManager.BIOMETRIC_SUCCESS) {
-            // No biometric hardware or not enrolled — skip biometric, go straight in
             biometricUnlocked.value = true
             return
         }
@@ -82,10 +71,8 @@ class MainActivity : AppCompatActivity() {
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                 if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
                     errorCode == BiometricPrompt.ERROR_USER_CANCELED) {
-                    // User cancelled — close the app
                     finish()
                 } else {
-                    // Other error (lockout, etc.) — let them in anyway
                     biometricUnlocked.value = true
                 }
             }
@@ -108,6 +95,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        syncManager.triggerImmediateSync()
+        // Only trigger sync if webapp sync is configured
+        if (userPreferences.getSyncModeImmediate() == "webapp") {
+            syncManager.triggerImmediateSync()
+        }
     }
 }

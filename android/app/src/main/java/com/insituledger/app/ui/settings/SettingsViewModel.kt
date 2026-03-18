@@ -1,10 +1,12 @@
 package com.insituledger.app.ui.settings
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.repository.AuthRepository
+import com.insituledger.app.data.repository.FileBackupRepository
 import com.insituledger.app.data.sync.SyncManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -12,22 +14,30 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class SettingsUiState(
-    val userName: String = "",
     val themeMode: String = "system",
     val biometricEnabled: Boolean = false,
+    val syncMode: String = "none",
+    // Webapp sync fields
+    val isWebappConnected: Boolean = false,
+    val userName: String = "",
     val pendingOps: Int = 0,
     val lastSyncVersion: Long = 0,
     val isSyncing: Boolean = false,
     val isChangingPassword: Boolean = false,
     val passwordError: String? = null,
     val passwordChanged: Boolean = false,
-    val loggedOut: Boolean = false
+    val disconnected: Boolean = false,
+    // File backup fields
+    val isExporting: Boolean = false,
+    val isImporting: Boolean = false,
+    val backupMessage: String? = null
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val syncManager: SyncManager,
+    private val fileBackupRepository: FileBackupRepository,
     private val prefs: UserPreferences,
     private val pendingOpDao: PendingOperationDao
 ) : ViewModel() {
@@ -38,20 +48,31 @@ class SettingsViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             combine(
-                prefs.userNameFlow,
                 prefs.themeModeFlow,
-                prefs.lastSyncVersionFlow,
-                pendingOpDao.getCount(),
-                prefs.biometricEnabledFlow
-            ) { values ->
+                prefs.biometricEnabledFlow,
+                prefs.syncModeFlow,
+                prefs.tokenFlow,
+                prefs.userNameFlow
+            ) { theme, biometric, syncMode, token, userName ->
                 _uiState.update {
                     it.copy(
-                        userName = (values[0] as? String) ?: "",
-                        themeMode = values[1] as String,
-                        lastSyncVersion = values[2] as Long,
-                        pendingOps = values[3] as Int,
-                        biometricEnabled = values[4] as Boolean
+                        themeMode = theme,
+                        biometricEnabled = biometric,
+                        syncMode = syncMode,
+                        isWebappConnected = token != null,
+                        userName = userName ?: ""
                     )
+                }
+            }.collect()
+        }
+
+        viewModelScope.launch {
+            combine(
+                prefs.lastSyncVersionFlow,
+                pendingOpDao.getCount()
+            ) { syncVersion, pending ->
+                _uiState.update {
+                    it.copy(lastSyncVersion = syncVersion, pendingOps = pending)
                 }
             }.collect()
         }
@@ -63,6 +84,15 @@ class SettingsViewModel @Inject constructor(
 
     fun setBiometric(enabled: Boolean) {
         viewModelScope.launch { prefs.saveBiometricEnabled(enabled) }
+    }
+
+    fun setSyncMode(mode: String) {
+        viewModelScope.launch {
+            prefs.saveSyncMode(mode)
+            if (mode != "webapp") {
+                syncManager.cancelAll()
+            }
+        }
     }
 
     fun forceSync() {
@@ -84,11 +114,44 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun logout() {
+    fun disconnect() {
         viewModelScope.launch {
             authRepository.logout()
             syncManager.cancelAll()
-            _uiState.update { it.copy(loggedOut = true) }
+            prefs.saveSyncMode("none")
+            _uiState.update { it.copy(disconnected = true) }
         }
+    }
+
+    fun exportData(uri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isExporting = true, backupMessage = null) }
+            fileBackupRepository.exportToUri(uri).fold(
+                onSuccess = { count ->
+                    _uiState.update { it.copy(isExporting = false, backupMessage = "Exported $count items") }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(isExporting = false, backupMessage = "Export failed: ${e.message}") }
+                }
+            )
+        }
+    }
+
+    fun importData(uri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isImporting = true, backupMessage = null) }
+            fileBackupRepository.importFromUri(uri).fold(
+                onSuccess = { count ->
+                    _uiState.update { it.copy(isImporting = false, backupMessage = "Imported $count items") }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(isImporting = false, backupMessage = "Import failed: ${e.message}") }
+                }
+            )
+        }
+    }
+
+    fun clearBackupMessage() {
+        _uiState.update { it.copy(backupMessage = null) }
     }
 }

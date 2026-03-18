@@ -9,6 +9,9 @@ interface ScheduledTransactionDao {
     @Query("SELECT * FROM scheduled_transactions WHERE deleted_at IS NULL ORDER BY next_occurrence ASC")
     fun getAll(): Flow<List<ScheduledTransactionEntity>>
 
+    @Query("SELECT * FROM scheduled_transactions WHERE deleted_at IS NULL ORDER BY next_occurrence ASC")
+    suspend fun getAllSync(): List<ScheduledTransactionEntity>
+
     @Query("SELECT * FROM scheduled_transactions WHERE id = :id")
     suspend fun getById(id: Long): ScheduledTransactionEntity?
 
