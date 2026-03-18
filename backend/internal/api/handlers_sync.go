@@ -123,24 +123,28 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// Fetch changed scheduled transactions
 	schedRows, err := s.DB.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency,
-		        description, rrule, next_occurrence, active, created_at, updated_at, deleted_at, sync_version
+		        description, rrule, next_occurrence, active, max_occurrences, occurrence_count,
+		        created_at, updated_at, deleted_at, sync_version
 		 FROM scheduled_transactions WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
 	)
 	if err == nil {
 		var scheds []map[string]any
 		for schedRows.Next() {
-			var id, accountID, categoryID, uid, sv int64
+			var id, accountID, categoryID, uid, sv, occurrenceCount int64
 			var active int
 			var typ, currency, rrule, nextOcc, createdAt, updatedAt string
 			var amount float64
 			var description, deletedAt *string
+			var maxOccurrences *int64
 			schedRows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
-				&description, &rrule, &nextOcc, &active, &createdAt, &updatedAt, &deletedAt, &sv)
+				&description, &rrule, &nextOcc, &active, &maxOccurrences, &occurrenceCount,
+				&createdAt, &updatedAt, &deletedAt, &sv)
 			scheds = append(scheds, map[string]any{
 				"id": id, "account_id": accountID, "category_id": categoryID,
 				"user_id": uid, "type": typ, "amount": amount, "currency": currency,
 				"description": description, "rrule": rrule, "next_occurrence": nextOcc,
-				"active": active == 1, "created_at": createdAt, "updated_at": updatedAt,
+				"active": active == 1, "max_occurrences": maxOccurrences, "occurrence_count": occurrenceCount,
+				"created_at": createdAt, "updated_at": updatedAt,
 				"deleted_at": deletedAt, "sync_version": sv,
 			})
 		}

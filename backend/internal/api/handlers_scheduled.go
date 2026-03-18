@@ -15,6 +15,7 @@ type scheduledRequest struct {
 	Description    *string `json:"description"`
 	RRule          string  `json:"rrule"`
 	NextOccurrence string  `json:"next_occurrence"`
+	MaxOccurrences *int64  `json:"max_occurrences"`
 }
 
 func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +33,8 @@ func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.DB.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency,
-		        description, rrule, next_occurrence, active, created_at, updated_at, sync_version
+		        description, rrule, next_occurrence, active, max_occurrences, occurrence_count,
+		        created_at, updated_at, sync_version
 		 FROM scheduled_transactions WHERE user_id = ? AND deleted_at IS NULL ORDER BY next_occurrence`,
 		targetUserID,
 	)
@@ -44,14 +46,16 @@ func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 
 	var items []map[string]any
 	for rows.Next() {
-		var id, accountID, categoryID, uid, syncVersion int64
+		var id, accountID, categoryID, uid, syncVersion, occurrenceCount int64
 		var active int
 		var typ, currency, rrule, nextOcc, createdAt, updatedAt string
 		var amount float64
 		var description *string
+		var maxOccurrences *int64
 
 		if err := rows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
-			&description, &rrule, &nextOcc, &active, &createdAt, &updatedAt, &syncVersion); err != nil {
+			&description, &rrule, &nextOcc, &active, &maxOccurrences, &occurrenceCount,
+			&createdAt, &updatedAt, &syncVersion); err != nil {
 			http.Error(w, "scan error", http.StatusInternalServerError)
 			return
 		}
@@ -59,7 +63,8 @@ func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 			"id": id, "account_id": accountID, "category_id": categoryID,
 			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
 			"description": description, "rrule": rrule, "next_occurrence": nextOcc,
-			"active": active == 1, "created_at": createdAt, "updated_at": updatedAt,
+			"active": active == 1, "max_occurrences": maxOccurrences, "occurrence_count": occurrenceCount,
+			"created_at": createdAt, "updated_at": updatedAt,
 			"sync_version": syncVersion,
 		})
 	}
@@ -105,9 +110,9 @@ func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.DB.Exec(
-		`INSERT INTO scheduled_transactions (account_id, category_id, user_id, type, amount, currency, description, rrule, next_occurrence)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.AccountID, req.CategoryID, targetUserID, req.Type, req.Amount, req.Currency, req.Description, req.RRule, req.NextOccurrence,
+		`INSERT INTO scheduled_transactions (account_id, category_id, user_id, type, amount, currency, description, rrule, next_occurrence, max_occurrences)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.AccountID, req.CategoryID, targetUserID, req.Type, req.Amount, req.Currency, req.Description, req.RRule, req.NextOccurrence, req.MaxOccurrences,
 	)
 	if err != nil {
 		http.Error(w, "failed to create scheduled transaction", http.StatusInternalServerError)
@@ -156,9 +161,9 @@ func (s *Server) handleUpdateScheduled(w http.ResponseWriter, r *http.Request) {
 
 	_, err = s.DB.Exec(
 		`UPDATE scheduled_transactions SET account_id=?, category_id=?, type=?, amount=?, currency=?,
-		 description=?, rrule=?, next_occurrence=? WHERE id=? AND user_id=?`,
+		 description=?, rrule=?, next_occurrence=?, max_occurrences=? WHERE id=? AND user_id=?`,
 		req.AccountID, req.CategoryID, req.Type, req.Amount, req.Currency,
-		req.Description, req.RRule, req.NextOccurrence, id, targetUserID,
+		req.Description, req.RRule, req.NextOccurrence, req.MaxOccurrences, id, targetUserID,
 	)
 	if err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)

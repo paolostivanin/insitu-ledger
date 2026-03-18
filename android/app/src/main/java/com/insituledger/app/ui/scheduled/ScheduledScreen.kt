@@ -96,6 +96,13 @@ private fun ScheduledCard(item: ScheduledTransaction, onEdit: (() -> Unit)?, onD
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (item.maxOccurrences != null) {
+                        Text(
+                            text = "${item.occurrenceCount}/${item.maxOccurrences} occurrences",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     if (!item.active) {
                         Text("Inactive", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                     }

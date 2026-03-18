@@ -105,6 +105,8 @@ func NewRouter(s *Server) http.Handler {
 	admin.HandleFunc("POST /api/admin/users/{id}/disable-totp", s.handleAdminDisableTOTP)
 	admin.HandleFunc("GET /api/admin/audit-logs", s.handleAdminAuditLogs)
 	admin.HandleFunc("GET /api/admin/backup", s.handleAdminBackup)
+	admin.HandleFunc("GET /api/admin/backup/settings", s.handleGetBackupSettings)
+	admin.HandleFunc("PUT /api/admin/backup/settings", s.handleUpdateBackupSettings)
 	protected.Handle("/api/admin/", s.AdminMiddleware(admin))
 
 	// Mount protected routes behind auth middleware

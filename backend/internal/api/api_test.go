@@ -108,6 +108,8 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     rrule TEXT NOT NULL,
     next_occurrence DATE NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
+    max_occurrences INTEGER,
+    occurrence_count INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,

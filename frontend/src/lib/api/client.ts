@@ -205,6 +205,8 @@ export interface ScheduledTransaction {
 	rrule: string;
 	next_occurrence: string;
 	active: boolean;
+	max_occurrences: number | null;
+	occurrence_count: number;
 	created_at: string;
 	updated_at: string;
 	sync_version: number;
@@ -219,6 +221,7 @@ export interface ScheduledInput {
 	description?: string;
 	rrule: string;
 	next_occurrence: string;
+	max_occurrences?: number | null;
 }
 
 export const scheduled = {
@@ -375,6 +378,14 @@ export interface AuditLog {
 	created_at: string;
 }
 
+// Backup settings
+export interface BackupSettings {
+	enabled: boolean;
+	frequency: string;
+	retention_count: number;
+	last_backup_at: string | null;
+}
+
 export const admin = {
 	listUsers: () => request<AdminUser[]>('/admin/users'),
 	createUser: (username: string, email: string, name: string, password: string) =>
@@ -390,6 +401,9 @@ export const admin = {
 		request<void>(`/admin/users/${id}/disable-totp`, { method: 'POST' }),
 	auditLogs: (params?: { limit?: string; offset?: string }) =>
 		request<AuditLog[]>('/admin/audit-logs', { params }),
+	getBackupSettings: () => request<BackupSettings>('/admin/backup/settings'),
+	updateBackupSettings: (data: { enabled: boolean; frequency: string; retention_count: number }) =>
+		request<void>('/admin/backup/settings', { method: 'PUT', body: data }),
 	backup: async () => {
 		const url = `${BASE}/admin/backup`;
 		const headers: Record<string, string> = {};

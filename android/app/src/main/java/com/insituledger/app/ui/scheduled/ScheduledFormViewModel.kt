@@ -26,6 +26,7 @@ data class ScheduledFormUiState(
     val frequency: String = "monthly",
     val nextDate: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
     val nextTime: String = "09:00",
+    val maxOccurrences: String = "",
     val accounts: List<Account> = emptyList(),
     val categories: List<Category> = emptyList(),
     val isLoading: Boolean = true,
@@ -95,6 +96,7 @@ class ScheduledFormViewModel @Inject constructor(
                                 type = item.type, amount = item.amount.toString(),
                                 currency = item.currency, description = item.description ?: "",
                                 frequency = freq, nextDate = date, nextTime = time,
+                                maxOccurrences = item.maxOccurrences?.toString() ?: "",
                                 isLoading = false
                             )
                         }
@@ -117,6 +119,7 @@ class ScheduledFormViewModel @Inject constructor(
     fun updateFrequency(frequency: String) { _uiState.update { it.copy(frequency = frequency) } }
     fun updateNextDate(date: String) { _uiState.update { it.copy(nextDate = date) } }
     fun updateNextTime(time: String) { _uiState.update { it.copy(nextTime = time) } }
+    fun updateMaxOccurrences(value: String) { _uiState.update { it.copy(maxOccurrences = value) } }
 
     fun createCategory(name: String, type: String) {
         viewModelScope.launch {
@@ -132,6 +135,7 @@ class ScheduledFormViewModel @Inject constructor(
             _uiState.update { it.copy(error = "Please fill all required fields") }
             return
         }
+        val maxOcc = state.maxOccurrences.toIntOrNull()?.takeIf { it > 0 }
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true) }
             try {
@@ -139,13 +143,13 @@ class ScheduledFormViewModel @Inject constructor(
                     scheduledRepository.update(
                         editId, state.accountId, state.categoryId, state.type,
                         amount, state.currency, state.description.ifBlank { null },
-                        state.rrule, state.nextOccurrence
+                        state.rrule, state.nextOccurrence, maxOcc
                     )
                 } else {
                     scheduledRepository.create(
                         state.accountId, state.categoryId, state.type,
                         amount, state.currency, state.description.ifBlank { null },
-                        state.rrule, state.nextOccurrence
+                        state.rrule, state.nextOccurrence, maxOcc
                     )
                 }
                 _uiState.update { it.copy(isSaving = false, saved = true) }

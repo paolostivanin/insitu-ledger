@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { admin, type AdminUser } from '$lib/api/client';
+	import { admin, type AdminUser, type BackupSettings } from '$lib/api/client';
 	import { isAdmin } from '$lib/stores/auth';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
@@ -33,7 +33,7 @@
 
 	onMount(async () => {
 		if (!$isAdmin) { goto('/'); return; }
-		await load();
+		await Promise.all([load(), loadBackupSettings()]);
 	});
 
 	async function load() {
@@ -100,6 +100,32 @@
 			try { await admin.disableTOTP(id); await load(); } catch (e: any) { error = e.message; }
 		};
 		confirmOpen = true;
+	}
+
+	// Backup settings
+	let backupSettings = $state<BackupSettings | null>(null);
+	let bkEnabled = $state(false);
+	let bkFrequency = $state('daily');
+	let bkRetention = $state(7);
+	let savingBackupSettings = $state(false);
+
+	async function loadBackupSettings() {
+		try {
+			backupSettings = await admin.getBackupSettings();
+			bkEnabled = backupSettings.enabled;
+			bkFrequency = backupSettings.frequency;
+			bkRetention = backupSettings.retention_count;
+		} catch (e: any) { error = e.message; }
+	}
+
+	async function saveBackupSettings() {
+		savingBackupSettings = true;
+		error = '';
+		try {
+			await admin.updateBackupSettings({ enabled: bkEnabled, frequency: bkFrequency, retention_count: bkRetention });
+			await loadBackupSettings();
+		} catch (e: any) { error = e.message; }
+		savingBackupSettings = false;
 	}
 
 	async function downloadBackup() {
@@ -240,6 +266,44 @@
 			</table>
 		</div>
 	{/if}
+
+	<div class="card backup-settings" style="margin-top: 1.5rem">
+		<h2>Automatic Backup Schedule</h2>
+		{#if backupSettings}
+			<div class="form-row">
+				<div class="form-group">
+					<label>
+						<input type="checkbox" bind:checked={bkEnabled} />
+						Enable automatic backups
+					</label>
+				</div>
+				<div class="form-group">
+					<label for="bk-freq">Frequency</label>
+					<select id="bk-freq" bind:value={bkFrequency} disabled={!bkEnabled}>
+						<option value="daily">Daily</option>
+						<option value="weekly">Weekly</option>
+						<option value="monthly">Monthly</option>
+					</select>
+				</div>
+				<div class="form-group">
+					<label for="bk-retention">Keep last N backups</label>
+					<input id="bk-retention" type="number" min="1" max="100" bind:value={bkRetention} disabled={!bkEnabled} />
+				</div>
+				<div class="form-group" style="align-self: flex-end">
+					<button class="btn-primary" onclick={saveBackupSettings} disabled={savingBackupSettings}>
+						{savingBackupSettings ? 'Saving...' : 'Save'}
+					</button>
+				</div>
+			</div>
+			{#if backupSettings.last_backup_at}
+				<p class="hint">Last automatic backup: {backupSettings.last_backup_at}</p>
+			{:else}
+				<p class="hint">No automatic backups yet.</p>
+			{/if}
+		{:else}
+			<p>Loading backup settings...</p>
+		{/if}
+	</div>
 </div>
 
 <ConfirmDialog bind:open={confirmOpen} message={confirmMessage} onconfirm={confirmAction} />

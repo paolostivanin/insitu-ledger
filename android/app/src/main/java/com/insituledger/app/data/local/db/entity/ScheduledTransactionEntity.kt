@@ -17,6 +17,8 @@ data class ScheduledTransactionEntity(
     val rrule: String,
     @ColumnInfo(name = "next_occurrence") val nextOccurrence: String,
     val active: Boolean = true,
+    @ColumnInfo(name = "max_occurrences") val maxOccurrences: Int? = null,
+    @ColumnInfo(name = "occurrence_count") val occurrenceCount: Int = 0,
     @ColumnInfo(name = "created_at") val createdAt: String = "",
     @ColumnInfo(name = "updated_at") val updatedAt: String = "",
     @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,

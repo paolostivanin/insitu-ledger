@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     rrule TEXT NOT NULL,
     next_occurrence TEXT NOT NULL,  -- YYYY-MM-DD or YYYY-MM-DDTHH:MM
     active INTEGER NOT NULL DEFAULT 1,
+    max_occurrences INTEGER,
+    occurrence_count INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,
@@ -121,6 +123,17 @@ CREATE INDEX IF NOT EXISTS idx_transactions_sync ON transactions(sync_version);
 CREATE INDEX IF NOT EXISTS idx_categories_sync ON categories(sync_version);
 CREATE INDEX IF NOT EXISTS idx_accounts_sync ON accounts(sync_version);
 CREATE INDEX IF NOT EXISTS idx_scheduled_sync ON scheduled_transactions(sync_version);
+
+-- Backup schedule settings (singleton row)
+CREATE TABLE IF NOT EXISTS backup_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled INTEGER NOT NULL DEFAULT 0,
+    frequency TEXT NOT NULL DEFAULT 'daily' CHECK (frequency IN ('daily', 'weekly', 'monthly')),
+    retention_count INTEGER NOT NULL DEFAULT 7,
+    last_backup_at DATETIME,
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+INSERT OR IGNORE INTO backup_settings (id) VALUES (1);
 
 -- Audit log for admin actions
 CREATE TABLE IF NOT EXISTS audit_logs (

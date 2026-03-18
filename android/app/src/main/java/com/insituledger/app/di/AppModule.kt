@@ -22,7 +22,7 @@ object AppModule {
             context,
             AppDatabase::class.java,
             "insitu_ledger.db"
-        ).build()
+        ).addMigrations(AppDatabase.MIGRATION_1_2).build()
     }
 
     @Provides fun provideAccountDao(db: AppDatabase): AccountDao = db.accountDao()

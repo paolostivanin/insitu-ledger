@@ -48,6 +48,8 @@ data class ScheduledBackup(
     val description: String?, val rrule: String,
     @SerializedName("next_occurrence") val nextOccurrence: String,
     val active: Boolean,
+    @SerializedName("max_occurrences") val maxOccurrences: Int? = null,
+    @SerializedName("occurrence_count") val occurrenceCount: Int = 0,
     @SerializedName("created_at") val createdAt: String,
     @SerializedName("updated_at") val updatedAt: String
 )
@@ -73,7 +75,7 @@ class FileBackupRepository @Inject constructor(
                 TransactionBackup(it.id, it.accountId, it.categoryId, it.type, it.amount, it.currency, it.description, it.date, it.createdAt, it.updatedAt)
             }
             val scheduled = scheduledDao.getAllSync().map {
-                ScheduledBackup(it.id, it.accountId, it.categoryId, it.type, it.amount, it.currency, it.description, it.rrule, it.nextOccurrence, it.active, it.createdAt, it.updatedAt)
+                ScheduledBackup(it.id, it.accountId, it.categoryId, it.type, it.amount, it.currency, it.description, it.rrule, it.nextOccurrence, it.active, it.maxOccurrences, it.occurrenceCount, it.createdAt, it.updatedAt)
             }
 
             val backup = BackupData(
@@ -144,6 +146,7 @@ class FileBackupRepository @Inject constructor(
                     userId = 0, type = it.type, amount = it.amount, currency = it.currency,
                     description = it.description, rrule = it.rrule,
                     nextOccurrence = it.nextOccurrence, active = it.active,
+                    maxOccurrences = it.maxOccurrences, occurrenceCount = it.occurrenceCount,
                     createdAt = it.createdAt, updatedAt = it.updatedAt,
                     isLocalOnly = true
                 )

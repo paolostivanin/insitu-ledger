@@ -38,7 +38,7 @@ func processDue(db *sql.DB) {
 	nowStr := now.Format("2006-01-02T15:04")
 
 	rows, err := db.Query(
-		`SELECT id, account_id, category_id, user_id, type, amount, currency, description, rrule, next_occurrence
+		`SELECT id, account_id, category_id, user_id, type, amount, currency, description, rrule, next_occurrence, max_occurrences, occurrence_count
 		 FROM scheduled_transactions
 		 WHERE active = 1 AND deleted_at IS NULL AND next_occurrence <= ?`, nowStr,
 	)
@@ -49,23 +49,26 @@ func processDue(db *sql.DB) {
 	defer rows.Close()
 
 	type scheduled struct {
-		id             int64
-		accountID      int64
-		categoryID     int64
-		userID         int64
-		typ            string
-		amount         float64
-		currency       string
-		description    *string
-		rrule          string
-		nextOccurrence string
+		id              int64
+		accountID       int64
+		categoryID      int64
+		userID          int64
+		typ             string
+		amount          float64
+		currency        string
+		description     *string
+		rrule           string
+		nextOccurrence  string
+		maxOccurrences  *int64
+		occurrenceCount int64
 	}
 
 	var due []scheduled
 	for rows.Next() {
 		var s scheduled
 		if err := rows.Scan(&s.id, &s.accountID, &s.categoryID, &s.userID, &s.typ,
-			&s.amount, &s.currency, &s.description, &s.rrule, &s.nextOccurrence); err != nil {
+			&s.amount, &s.currency, &s.description, &s.rrule, &s.nextOccurrence,
+			&s.maxOccurrences, &s.occurrenceCount); err != nil {
 			log.Printf("scheduler: scan error: %v", err)
 			continue
 		}
@@ -107,7 +110,18 @@ func processDue(db *sql.DB) {
 		}
 
 		next := advanceDate(s.nextOccurrence, s.rrule)
-		if _, err := tx.Exec("UPDATE scheduled_transactions SET next_occurrence = ? WHERE id = ?", next, s.id); err != nil {
+		newCount := s.occurrenceCount + 1
+		deactivate := s.maxOccurrences != nil && newCount >= *s.maxOccurrences
+
+		active := 1
+		if deactivate {
+			active = 0
+		}
+
+		if _, err := tx.Exec(
+			"UPDATE scheduled_transactions SET next_occurrence = ?, occurrence_count = ?, active = ? WHERE id = ?",
+			next, newCount, active, s.id,
+		); err != nil {
 			tx.Rollback()
 			log.Printf("scheduler: advance next_occurrence error for scheduled %d: %v", s.id, err)
 			continue
@@ -118,7 +132,11 @@ func processDue(db *sql.DB) {
 			continue
 		}
 
-		log.Printf("scheduler: materialized scheduled %d, next: %s", s.id, next)
+		if deactivate {
+			log.Printf("scheduler: materialized scheduled %d, deactivated after %d occurrences", s.id, newCount)
+		} else {
+			log.Printf("scheduler: materialized scheduled %d, next: %s (%d/%v)", s.id, next, newCount, s.maxOccurrences)
+		}
 	}
 }
 

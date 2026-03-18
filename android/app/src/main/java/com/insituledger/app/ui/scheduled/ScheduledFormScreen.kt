@@ -113,6 +113,11 @@ fun ScheduledFormScreen(
                 label = { Text("Time (HH:MM)") }, singleLine = true,
                 modifier = Modifier.fillMaxWidth())
 
+            OutlinedTextField(value = uiState.maxOccurrences, onValueChange = viewModel::updateMaxOccurrences,
+                label = { Text("Stop after N occurrences") }, placeholder = { Text("Unlimited") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true, modifier = Modifier.fillMaxWidth())
+
             uiState.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }

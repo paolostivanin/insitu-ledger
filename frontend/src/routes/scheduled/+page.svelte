@@ -27,6 +27,7 @@
 	let fFrequency = $state('monthly');
 	let fNextDate = $state(new Date().toISOString().slice(0, 10));
 	let fNextTime = $state('09:00');
+	let fMaxOccurrences = $state<string>('');
 
 	const frequencyMap: Record<string, string> = {
 		daily: 'FREQ=DAILY',
@@ -84,6 +85,7 @@
 		fFrequency = 'monthly';
 		fNextDate = new Date().toISOString().slice(0, 10);
 		fNextTime = '09:00';
+		fMaxOccurrences = '';
 		if (accts.length) fAccountId = accts[0].id;
 		if (cats.length) fCategoryId = cats[0].id;
 	}
@@ -107,6 +109,7 @@
 		}
 		// reverse lookup frequency
 		fFrequency = Object.entries(frequencyMap).find(([, v]) => v === item.rrule)?.[0] || 'monthly';
+		fMaxOccurrences = item.max_occurrences != null ? String(item.max_occurrences) : '';
 		showForm = true;
 	}
 
@@ -114,6 +117,7 @@
 		e.preventDefault();
 		error = '';
 		submitting = true;
+		const maxOcc = fMaxOccurrences ? parseInt(fMaxOccurrences, 10) : null;
 		const data = {
 			account_id: fAccountId,
 			category_id: fCategoryId,
@@ -122,7 +126,8 @@
 			currency: fCurrency,
 			description: fDescription || undefined,
 			rrule: frequencyMap[fFrequency],
-			next_occurrence: `${fNextDate}T${fNextTime}`
+			next_occurrence: `${fNextDate}T${fNextTime}`,
+			max_occurrences: maxOcc && maxOcc > 0 ? maxOcc : null
 		};
 		try {
 			if (editId) {
@@ -226,6 +231,10 @@
 						<label for="next-time">Time</label>
 						<input id="next-time" type="time" bind:value={fNextTime} required />
 					</div>
+					<div class="form-group">
+						<label for="max-occ">Stop after N occurrences</label>
+						<input id="max-occ" type="number" min="1" bind:value={fMaxOccurrences} placeholder="Unlimited" />
+					</div>
 				</div>
 				<div class="form-group">
 					<label for="desc">Description</label>
@@ -253,6 +262,7 @@
 						<th>Account</th>
 						<th>Description</th>
 						<th>Amount</th>
+						<th>Progress</th>
 						<th>Status</th>
 						<th></th>
 					</tr>
@@ -270,6 +280,7 @@
 							<td class={item.type === 'income' ? 'amount-income' : 'amount-expense'}>
 								{item.type === 'income' ? '+' : '-'}{fmt(item.amount)} {item.currency}
 							</td>
+							<td>{item.max_occurrences != null ? `${item.occurrence_count}/${item.max_occurrences}` : '∞'}</td>
 							<td>{item.active ? 'Active' : 'Paused'}</td>
 							<td class="actions">
 								<button class="btn-ghost" onclick={() => startEdit(item)}>Edit</button>

@@ -126,6 +126,8 @@ data class ScheduledTransactionDto(
     val rrule: String,
     @SerializedName("next_occurrence") val nextOccurrence: String,
     val active: Boolean,
+    @SerializedName("max_occurrences") val maxOccurrences: Int? = null,
+    @SerializedName("occurrence_count") val occurrenceCount: Int = 0,
     @SerializedName("created_at") val createdAt: String,
     @SerializedName("updated_at") val updatedAt: String,
     @SerializedName("deleted_at") val deletedAt: String?,
@@ -140,7 +142,8 @@ data class ScheduledInput(
     val currency: String = "EUR",
     val description: String? = null,
     val rrule: String,
-    @SerializedName("next_occurrence") val nextOccurrence: String
+    @SerializedName("next_occurrence") val nextOccurrence: String,
+    @SerializedName("max_occurrences") val maxOccurrences: Int? = null
 )
 
 data class SyncResponse(

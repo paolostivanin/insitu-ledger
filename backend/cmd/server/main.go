@@ -47,6 +47,9 @@ func main() {
 	defer schedulerCancel()
 	scheduler.Start(schedulerCtx, conn, 1*time.Minute)
 
+	// Check for due backups every hour
+	scheduler.StartBackup(schedulerCtx, conn, *dataDir, 1*time.Hour)
+
 	srv := &http.Server{
 		Addr:    *addr,
 		Handler: router,

@@ -45,6 +45,8 @@ data class ScheduledTransaction(
     val rrule: String,
     val nextOccurrence: String,
     val active: Boolean,
+    val maxOccurrences: Int? = null,
+    val occurrenceCount: Int = 0,
     val isLocalOnly: Boolean = false
 )
 

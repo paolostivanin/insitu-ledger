@@ -67,9 +67,15 @@ class ScheduledTransactionWorker @AssistedInject constructor(
             val delta = if (scheduled.type == "expense") -scheduled.amount else scheduled.amount
             accountDao.adjustBalance(scheduled.accountId, delta)
 
-            // Advance next_occurrence
+            // Advance next_occurrence and track occurrences
             val next = advanceDate(scheduled.nextOccurrence, scheduled.rrule)
-            scheduledDao.upsert(scheduled.copy(nextOccurrence = next))
+            val newCount = scheduled.occurrenceCount + 1
+            val deactivate = scheduled.maxOccurrences != null && newCount >= scheduled.maxOccurrences
+            scheduledDao.upsert(scheduled.copy(
+                nextOccurrence = next,
+                occurrenceCount = newCount,
+                active = if (deactivate) false else scheduled.active
+            ))
 
             Log.d(TAG, "Materialized scheduled ${scheduled.id}, next: $next")
         }

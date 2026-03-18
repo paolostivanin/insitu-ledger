@@ -1,5 +1,9 @@
 package com.insituledger.app.ui.navigation
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -173,7 +177,11 @@ fun AppNavigation() {
 
             NavHost(
                 navController = navController,
-                startDestination = Screen.Dashboard.route
+                startDestination = Screen.Dashboard.route,
+                enterTransition = { fadeIn(animationSpec = tween(300)) },
+                exitTransition = { fadeOut(animationSpec = tween(300)) },
+                popEnterTransition = { fadeIn(animationSpec = tween(300)) },
+                popExitTransition = { fadeOut(animationSpec = tween(300)) }
             ) {
                 composable(Screen.Dashboard.route) {
                     DashboardScreen(

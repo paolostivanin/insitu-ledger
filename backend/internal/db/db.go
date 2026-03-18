@@ -38,6 +38,15 @@ func Open(dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 
+	// Migrations for existing databases (ALTER TABLE ADD COLUMN is idempotent-safe: ignore "duplicate column" errors)
+	migrations := []string{
+		"ALTER TABLE scheduled_transactions ADD COLUMN max_occurrences INTEGER",
+		"ALTER TABLE scheduled_transactions ADD COLUMN occurrence_count INTEGER NOT NULL DEFAULT 0",
+	}
+	for _, m := range migrations {
+		conn.Exec(m) // ignore errors (column already exists)
+	}
+
 	seedDefaultAdmin(conn)
 
 	return conn, nil
