@@ -1,7 +1,9 @@
 package api
 
 import (
+	"database/sql"
 	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 )
@@ -31,6 +33,63 @@ func validateLength(field, value string, maxLen int) error {
 		return fmt.Errorf("%s must not exceed %d characters", field, maxLen)
 	}
 	return nil
+}
+
+// parseSortParams validates and returns safe SQL sort fragments.
+// Returns (column, direction, needsCategoryJoin, error).
+func parseSortParams(sortBy, sortDir string) (string, string, bool, error) {
+	columnMap := map[string]string{
+		"date":        "date",
+		"amount":      "amount",
+		"description": "description",
+		"category":    "c.name",
+	}
+	column, ok := columnMap[sortBy]
+	if sortBy == "" {
+		column = "date"
+	} else if !ok {
+		return "", "", false, fmt.Errorf("invalid sort_by: must be one of date, amount, description, category")
+	}
+
+	direction := "DESC"
+	if sortDir == "asc" {
+		direction = "ASC"
+	} else if sortDir != "" && sortDir != "desc" {
+		return "", "", false, fmt.Errorf("invalid sort_dir: must be 'asc' or 'desc'")
+	}
+
+	needsJoin := sortBy == "category"
+	return column, direction, needsJoin, nil
+}
+
+// resolveTargetUserID checks the owner_id query param.
+// If absent or equal to authUserID, returns (authUserID, "write", nil).
+// If different, checks shared_access and returns the permission or 403 error.
+func resolveTargetUserID(r *http.Request, authUserID int64, db interface{ QueryRow(string, ...any) *sql.Row }) (int64, string, error) {
+	ownerStr := r.URL.Query().Get("owner_id")
+	if ownerStr == "" {
+		return authUserID, "write", nil
+	}
+
+	ownerID, err := strconv.ParseInt(ownerStr, 10, 64)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid owner_id")
+	}
+
+	if ownerID == authUserID {
+		return authUserID, "write", nil
+	}
+
+	var permission string
+	err = db.QueryRow(
+		"SELECT permission FROM shared_access WHERE owner_user_id = ? AND guest_user_id = ?",
+		ownerID, authUserID,
+	).Scan(&permission)
+	if err != nil {
+		return 0, "", fmt.Errorf("forbidden: no shared access")
+	}
+
+	return ownerID, permission, nil
 }
 
 func parsePagination(limitStr, offsetStr string) (int, int, error) {

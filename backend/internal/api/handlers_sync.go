@@ -8,6 +8,17 @@ import (
 
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+
 	sinceStr := r.URL.Query().Get("since")
 	since, _ := strconv.ParseInt(sinceStr, 10, 64)
 
@@ -32,7 +43,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	txnRows, err := s.DB.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency,
 		        description, date, created_at, updated_at, deleted_at, sync_version
-		 FROM transactions WHERE user_id = ? AND sync_version > ?`, userID, since,
+		 FROM transactions WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
 	)
 	if err == nil {
 		var txns []map[string]any
@@ -60,7 +71,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// Fetch changed categories
 	catRows, err := s.DB.Query(
 		`SELECT id, user_id, parent_id, name, type, icon, color, created_at, updated_at, deleted_at, sync_version
-		 FROM categories WHERE user_id = ? AND sync_version > ?`, userID, since,
+		 FROM categories WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
 	)
 	if err == nil {
 		var cats []map[string]any
@@ -86,7 +97,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// Fetch changed accounts
 	acctRows, err := s.DB.Query(
 		`SELECT id, user_id, name, currency, balance, created_at, updated_at, deleted_at, sync_version
-		 FROM accounts WHERE user_id = ? AND sync_version > ?`, userID, since,
+		 FROM accounts WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
 	)
 	if err == nil {
 		var accts []map[string]any
@@ -113,7 +124,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	schedRows, err := s.DB.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency,
 		        description, rrule, next_occurrence, active, created_at, updated_at, deleted_at, sync_version
-		 FROM scheduled_transactions WHERE user_id = ? AND sync_version > ?`, userID, since,
+		 FROM scheduled_transactions WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
 	)
 	if err == nil {
 		var scheds []map[string]any

@@ -14,10 +14,20 @@ type accountRequest struct {
 func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
+	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+
 	rows, err := s.DB.Query(
 		`SELECT id, user_id, name, currency, balance, created_at, updated_at, sync_version
 		 FROM accounts WHERE user_id = ? AND deleted_at IS NULL ORDER BY name`,
-		userID,
+		targetUserID,
 	)
 	if err != nil {
 		http.Error(w, "query error", http.StatusInternalServerError)
@@ -52,6 +62,21 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	if permission != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+
 	var req accountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -68,7 +93,7 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.DB.Exec(
 		"INSERT INTO accounts (user_id, name, currency, balance) VALUES (?, ?, ?, 0)",
-		userID, req.Name, req.Currency,
+		targetUserID, req.Name, req.Currency,
 	)
 	if err != nil {
 		http.Error(w, "failed to create account", http.StatusInternalServerError)
@@ -83,6 +108,21 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	if permission != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
@@ -97,7 +137,7 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 
 	_, err = s.DB.Exec(
 		"UPDATE accounts SET name=?, currency=? WHERE id=? AND user_id=?",
-		req.Name, req.Currency, id, userID,
+		req.Name, req.Currency, id, targetUserID,
 	)
 	if err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
@@ -109,13 +149,28 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	if permission != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
 
-	result, err := s.DB.Exec("UPDATE accounts SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, userID)
+	result, err := s.DB.Exec("UPDATE accounts SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, targetUserID)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

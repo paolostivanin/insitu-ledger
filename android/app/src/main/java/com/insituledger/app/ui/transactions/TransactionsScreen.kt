@@ -52,51 +52,131 @@ fun TransactionsScreen(
             }
         }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (showFilters) {
-                FilterBar(
-                    from = uiState.filterFrom ?: "",
-                    to = uiState.filterTo ?: "",
-                    categories = uiState.categories,
-                    selectedCategoryId = uiState.filterCategoryId,
-                    onApply = { from, to, catId ->
-                        viewModel.setFilters(
-                            from.ifBlank { null },
-                            to.ifBlank { null },
-                            catId
-                        )
-                        showFilters = false
-                    }
-                )
-            }
+        PullToRefreshBox(
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = { viewModel.refresh() },
+            modifier = Modifier.fillMaxSize().padding(padding)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (showFilters) {
+                    FilterBar(
+                        from = uiState.filterFrom ?: "",
+                        to = uiState.filterTo ?: "",
+                        categories = uiState.categories,
+                        selectedCategoryId = uiState.filterCategoryId,
+                        onApply = { from, to, catId ->
+                            viewModel.setFilters(
+                                from.ifBlank { null },
+                                to.ifBlank { null },
+                                catId
+                            )
+                            showFilters = false
+                        }
+                    )
+                }
 
-            when {
-                uiState.isLoading -> LoadingIndicator()
-                uiState.transactions.isEmpty() -> EmptyState("No transactions")
-                else -> {
-                    val grouped = uiState.transactions.groupBy { it.date }
-                    LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        grouped.forEach { (date, txns) ->
-                            item(key = "header_$date") {
-                                Text(
-                                    text = date,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-                                )
+                SortBar(
+                    sortBy = uiState.sortBy,
+                    sortDir = uiState.sortDir,
+                    onSortChanged = { sortBy, sortDir -> viewModel.setSort(sortBy, sortDir) }
+                )
+
+                when {
+                    uiState.isLoading -> LoadingIndicator()
+                    uiState.transactions.isEmpty() -> EmptyState("No transactions")
+                    else -> {
+                        if (uiState.sortBy == "date") {
+                            val grouped = uiState.transactions.groupBy { it.date }
+                            LazyColumn(
+                                contentPadding = PaddingValues(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                grouped.forEach { (date, txns) ->
+                                    item(key = "header_$date") {
+                                        Text(
+                                            text = date,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                                        )
+                                    }
+                                    items(txns, key = { it.id }) { txn ->
+                                        TransactionRow(
+                                            txn = txn,
+                                            onClick = { onTransactionClick(txn.id) },
+                                            onDelete = { viewModel.delete(txn.id) }
+                                        )
+                                    }
+                                }
                             }
-                            items(txns, key = { it.id }) { txn ->
-                                TransactionRow(
-                                    txn = txn,
-                                    onClick = { onTransactionClick(txn.id) },
-                                    onDelete = { viewModel.delete(txn.id) }
-                                )
+                        } else {
+                            LazyColumn(
+                                contentPadding = PaddingValues(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                items(uiState.transactions, key = { it.id }) { txn ->
+                                    TransactionRow(
+                                        txn = txn,
+                                        onClick = { onTransactionClick(txn.id) },
+                                        onDelete = { viewModel.delete(txn.id) }
+                                    )
+                                }
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SortBar(
+    sortBy: String,
+    sortDir: String,
+    onSortChanged: (String, String) -> Unit
+) {
+    val sortOptions = listOf("date" to "Date", "amount" to "Amount", "description" to "Description")
+    var expanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("Sort:", style = MaterialTheme.typography.labelMedium)
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it },
+            modifier = Modifier.weight(1f)
+        ) {
+            FilterChip(
+                selected = true,
+                onClick = { expanded = true },
+                label = {
+                    val label = sortOptions.find { it.first == sortBy }?.second ?: "Date"
+                    val arrow = if (sortDir == "asc") "\u25B2" else "\u25BC"
+                    Text("$label $arrow")
+                },
+                modifier = Modifier.menuAnchor()
+            )
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                sortOptions.forEach { (value, label) ->
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        onClick = {
+                            val newDir = if (sortBy == value) {
+                                if (sortDir == "desc") "asc" else "desc"
+                            } else {
+                                "desc"
+                            }
+                            onSortChanged(value, newDir)
+                            expanded = false
+                        }
+                    )
                 }
             }
         }

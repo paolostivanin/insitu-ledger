@@ -4,6 +4,7 @@
 	import CategoryPicker from '$lib/components/CategoryPicker.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { addToast } from '$lib/stores/toast';
+	import { sharedOwnerUserId, sharedOwnerPermission } from '$lib/stores/shared';
 
 	let txns = $state<Transaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -23,6 +24,10 @@
 	let filterFrom = $state('');
 	let filterTo = $state('');
 	let filterCat = $state('');
+
+	// Sort
+	let sortBy = $state('date');
+	let sortDir = $state('desc');
 
 	// Form fields
 	let fType = $state<'income' | 'expense'>('expense');
@@ -56,7 +61,7 @@
 		debounceTimer = setTimeout(async () => {
 			abortController = new AbortController();
 			try {
-				suggestions = await transactions.autocomplete(value);
+				suggestions = await transactions.autocomplete(value, $sharedOwnerUserId || undefined);
 				showSuggestions = suggestions.length > 0;
 			} catch {
 				suggestions = [];
@@ -80,7 +85,20 @@
 	let hasMore = $state(true);
 	let loadingMore = $state(false);
 
+	let prevOwnerId: string | null = null;
+	let mounted = false;
+
+	$effect(() => {
+		const currentOwnerId = $sharedOwnerUserId;
+		if (mounted && currentOwnerId !== prevOwnerId) {
+			prevOwnerId = currentOwnerId;
+			load();
+		}
+	});
+
 	onMount(() => {
+		prevOwnerId = $sharedOwnerUserId;
+		mounted = true;
 		load();
 		window.addEventListener('shortcut-new', onShortcutNew);
 		window.addEventListener('shortcut-close', onShortcutClose);
@@ -98,11 +116,12 @@
 
 	async function load() {
 		loading = true;
+		const oid = $sharedOwnerUserId || undefined;
 		try {
 			const [t, c, a] = await Promise.all([
-				transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat, limit: PAGE_SIZE.toString() }),
-				categories.list(),
-				accounts.list()
+				transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat, limit: PAGE_SIZE.toString(), sort_by: sortBy, sort_dir: sortDir, owner_id: oid }),
+				categories.list(oid),
+				accounts.list(oid)
 			]);
 			txns = t;
 			cats = c;
@@ -119,10 +138,12 @@
 
 	async function loadMore() {
 		loadingMore = true;
+		const oid = $sharedOwnerUserId || undefined;
 		try {
 			const more = await transactions.list({
 				from: filterFrom, to: filterTo, category_id: filterCat,
-				limit: PAGE_SIZE.toString(), offset: txns.length.toString()
+				limit: PAGE_SIZE.toString(), offset: txns.length.toString(),
+				sort_by: sortBy, sort_dir: sortDir, owner_id: oid
 			});
 			txns = [...txns, ...more];
 			hasMore = more.length === PAGE_SIZE;
@@ -130,6 +151,21 @@
 			error = e.message;
 		}
 		loadingMore = false;
+	}
+
+	function toggleSort(column: string) {
+		if (sortBy === column) {
+			sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+		} else {
+			sortBy = column;
+			sortDir = 'desc';
+		}
+		load();
+	}
+
+	function sortIndicator(column: string): string {
+		if (sortBy !== column) return '';
+		return sortDir === 'asc' ? ' \u25B2' : ' \u25BC';
 	}
 
 	function catName(id: number): string {
@@ -186,11 +222,12 @@
 			description: fDescription || undefined,
 			date: fDate
 		};
+		const oid = $sharedOwnerUserId || undefined;
 		try {
 			if (editId) {
-				await transactions.update(editId, data);
+				await transactions.update(editId, data, oid);
 			} else {
-				await transactions.create(data);
+				await transactions.create(data, oid);
 			}
 			showForm = false;
 			resetForm();
@@ -204,7 +241,7 @@
 	function remove(id: number) {
 		confirmMessage = 'Delete this transaction?';
 		confirmAction = async () => {
-			await transactions.delete(id);
+			await transactions.delete(id, $sharedOwnerUserId || undefined);
 			await load();
 		};
 		confirmOpen = true;
@@ -239,7 +276,7 @@
 		confirmAction = async () => {
 			error = '';
 			try {
-				await batch.deleteTransactions([...selectedIds]);
+				await batch.deleteTransactions([...selectedIds], $sharedOwnerUserId || undefined);
 				await load();
 			} catch (e: any) {
 				error = e.message;
@@ -252,7 +289,7 @@
 		if (!batchCategoryId) return;
 		error = '';
 		try {
-			await batch.updateCategory([...selectedIds], batchCategoryId);
+			await batch.updateCategory([...selectedIds], batchCategoryId, $sharedOwnerUserId || undefined);
 			showBatchCategoryPicker = false;
 			await load();
 		} catch (e: any) {
@@ -291,11 +328,13 @@
 		<h1>Transactions</h1>
 		<div class="header-actions">
 			<button class="btn-ghost" onclick={exportCsv}>Export CSV</button>
-			<button class="btn-ghost" onclick={() => importInput.click()}>Import CSV</button>
-			<input type="file" accept=".csv" bind:this={importInput} onchange={importCsv} style="display:none" />
-			<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
-				{showForm ? 'Cancel' : '+ New Transaction'}
-			</button>
+			{#if $sharedOwnerPermission === 'write'}
+				<button class="btn-ghost" onclick={() => importInput.click()}>Import CSV</button>
+				<input type="file" accept=".csv" bind:this={importInput} onchange={importCsv} style="display:none" />
+				<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
+					{showForm ? 'Cancel' : '+ New Transaction'}
+				</button>
+			{/if}
 		</div>
 	</div>
 
@@ -467,13 +506,13 @@
 						<th class="check-col">
 							<input type="checkbox" checked={selectedIds.size === txns.length && txns.length > 0} onchange={toggleSelectAll} />
 						</th>
-						<th>Date</th>
+						<th class="sortable" onclick={() => toggleSort('date')}>Date{sortIndicator('date')}</th>
 						<th>Time</th>
 						<th>Type</th>
-						<th>Category</th>
+						<th class="sortable" onclick={() => toggleSort('category')}>Category{sortIndicator('category')}</th>
 						<th>Account</th>
-						<th>Description</th>
-						<th>Amount</th>
+						<th class="sortable" onclick={() => toggleSort('description')}>Description{sortIndicator('description')}</th>
+						<th class="sortable" onclick={() => toggleSort('amount')}>Amount{sortIndicator('amount')}</th>
 						<th></th>
 					</tr>
 				</thead>
@@ -493,8 +532,10 @@
 								{txn.type === 'income' ? '+' : '-'}{fmt(txn.amount)} {txn.currency}
 							</td>
 							<td class="actions">
-								<button class="btn-ghost" onclick={() => startEdit(txn)}>Edit</button>
-								<button class="btn-danger" onclick={() => remove(txn.id)}>Del</button>
+								{#if $sharedOwnerPermission === 'write'}
+									<button class="btn-ghost" onclick={() => startEdit(txn)}>Edit</button>
+									<button class="btn-danger" onclick={() => remove(txn.id)}>Del</button>
+								{/if}
 							</td>
 						</tr>
 					{/each}
@@ -561,6 +602,13 @@
 	@keyframes pulse {
 		0%, 100% { opacity: 0.4; }
 		50% { opacity: 0.8; }
+	}
+	.sortable {
+		cursor: pointer;
+		user-select: none;
+	}
+	.sortable:hover {
+		color: var(--primary);
 	}
 	.load-more {
 		text-align: center;

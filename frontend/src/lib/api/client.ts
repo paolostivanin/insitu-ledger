@@ -121,16 +121,16 @@ export interface AutocompleteSuggestion {
 }
 
 export const transactions = {
-	list: (params?: { from?: string; to?: string; category_id?: string; limit?: string; offset?: string }) =>
+	list: (params?: { from?: string; to?: string; category_id?: string; limit?: string; offset?: string; sort_by?: string; sort_dir?: string; owner_id?: string }) =>
 		request<Transaction[]>('/transactions', { params }),
-	create: (data: TransactionInput) =>
-		request<{ id: number }>('/transactions', { method: 'POST', body: data }),
-	update: (id: number, data: TransactionInput) =>
-		request<void>(`/transactions/${id}`, { method: 'PUT', body: data }),
-	delete: (id: number) =>
-		request<void>(`/transactions/${id}`, { method: 'DELETE' }),
-	autocomplete: (q: string) =>
-		request<AutocompleteSuggestion[]>('/transactions/autocomplete', { params: { q } })
+	create: (data: TransactionInput, owner_id?: string) =>
+		request<{ id: number }>('/transactions', { method: 'POST', body: data, params: owner_id ? { owner_id } : undefined }),
+	update: (id: number, data: TransactionInput, owner_id?: string) =>
+		request<void>(`/transactions/${id}`, { method: 'PUT', body: data, params: owner_id ? { owner_id } : undefined }),
+	delete: (id: number, owner_id?: string) =>
+		request<void>(`/transactions/${id}`, { method: 'DELETE', params: owner_id ? { owner_id } : undefined }),
+	autocomplete: (q: string, owner_id?: string) =>
+		request<AutocompleteSuggestion[]>('/transactions/autocomplete', { params: owner_id ? { q, owner_id } : { q } })
 };
 
 // Categories
@@ -156,13 +156,13 @@ export interface CategoryInput {
 }
 
 export const categories = {
-	list: () => request<Category[]>('/categories'),
-	create: (data: CategoryInput) =>
-		request<{ id: number }>('/categories', { method: 'POST', body: data }),
-	update: (id: number, data: CategoryInput) =>
-		request<void>(`/categories/${id}`, { method: 'PUT', body: data }),
-	delete: (id: number) =>
-		request<void>(`/categories/${id}`, { method: 'DELETE' })
+	list: (owner_id?: string) => request<Category[]>('/categories', { params: owner_id ? { owner_id } : undefined }),
+	create: (data: CategoryInput, owner_id?: string) =>
+		request<{ id: number }>('/categories', { method: 'POST', body: data, params: owner_id ? { owner_id } : undefined }),
+	update: (id: number, data: CategoryInput, owner_id?: string) =>
+		request<void>(`/categories/${id}`, { method: 'PUT', body: data, params: owner_id ? { owner_id } : undefined }),
+	delete: (id: number, owner_id?: string) =>
+		request<void>(`/categories/${id}`, { method: 'DELETE', params: owner_id ? { owner_id } : undefined })
 };
 
 // Accounts
@@ -183,13 +183,13 @@ export interface AccountInput {
 }
 
 export const accounts = {
-	list: () => request<Account[]>('/accounts'),
-	create: (data: AccountInput) =>
-		request<{ id: number }>('/accounts', { method: 'POST', body: data }),
-	update: (id: number, data: AccountInput) =>
-		request<void>(`/accounts/${id}`, { method: 'PUT', body: data }),
-	delete: (id: number) =>
-		request<void>(`/accounts/${id}`, { method: 'DELETE' })
+	list: (owner_id?: string) => request<Account[]>('/accounts', { params: owner_id ? { owner_id } : undefined }),
+	create: (data: AccountInput, owner_id?: string) =>
+		request<{ id: number }>('/accounts', { method: 'POST', body: data, params: owner_id ? { owner_id } : undefined }),
+	update: (id: number, data: AccountInput, owner_id?: string) =>
+		request<void>(`/accounts/${id}`, { method: 'PUT', body: data, params: owner_id ? { owner_id } : undefined }),
+	delete: (id: number, owner_id?: string) =>
+		request<void>(`/accounts/${id}`, { method: 'DELETE', params: owner_id ? { owner_id } : undefined })
 };
 
 // Scheduled transactions
@@ -222,13 +222,13 @@ export interface ScheduledInput {
 }
 
 export const scheduled = {
-	list: () => request<ScheduledTransaction[]>('/scheduled'),
-	create: (data: ScheduledInput) =>
-		request<{ id: number }>('/scheduled', { method: 'POST', body: data }),
-	update: (id: number, data: ScheduledInput) =>
-		request<void>(`/scheduled/${id}`, { method: 'PUT', body: data }),
-	delete: (id: number) =>
-		request<void>(`/scheduled/${id}`, { method: 'DELETE' })
+	list: (owner_id?: string) => request<ScheduledTransaction[]>('/scheduled', { params: owner_id ? { owner_id } : undefined }),
+	create: (data: ScheduledInput, owner_id?: string) =>
+		request<{ id: number }>('/scheduled', { method: 'POST', body: data, params: owner_id ? { owner_id } : undefined }),
+	update: (id: number, data: ScheduledInput, owner_id?: string) =>
+		request<void>(`/scheduled/${id}`, { method: 'PUT', body: data, params: owner_id ? { owner_id } : undefined }),
+	delete: (id: number, owner_id?: string) =>
+		request<void>(`/scheduled/${id}`, { method: 'DELETE', params: owner_id ? { owner_id } : undefined })
 };
 
 // Reports
@@ -253,11 +253,11 @@ export interface TrendReport {
 }
 
 export const reports = {
-	byCategory: (params?: { from?: string; to?: string; type?: string }) =>
+	byCategory: (params?: { from?: string; to?: string; type?: string; owner_id?: string }) =>
 		request<CategoryReport[]>('/reports/by-category', { params }),
-	byMonth: (params?: { year?: string }) =>
+	byMonth: (params?: { year?: string; owner_id?: string }) =>
 		request<MonthReport[]>('/reports/by-month', { params }),
-	trend: (params?: { from?: string; to?: string; group_by?: string }) =>
+	trend: (params?: { from?: string; to?: string; group_by?: string; owner_id?: string }) =>
 		request<TrendReport[]>('/reports/trend', { params })
 };
 
@@ -271,8 +271,16 @@ export interface SharedAccess {
 	guest_email: string;
 }
 
+export interface AccessibleOwner {
+	owner_user_id: number;
+	name: string;
+	email: string;
+	permission: string;
+}
+
 export const shared = {
 	list: () => request<SharedAccess[]>('/shared'),
+	accessible: () => request<AccessibleOwner[]>('/shared/accessible'),
 	create: (guest_email: string, permission: string) =>
 		request<{ id: number }>('/shared', { method: 'POST', body: { guest_email, permission } }),
 	delete: (id: number) => request<void>(`/shared/${id}`, { method: 'DELETE' })
@@ -314,10 +322,10 @@ export interface AdminUser {
 
 // Batch operations
 export const batch = {
-	deleteTransactions: (ids: number[]) =>
-		request<void>('/transactions/batch-delete', { method: 'POST', body: { ids } }),
-	updateCategory: (ids: number[], category_id: number) =>
-		request<void>('/transactions/batch-update-category', { method: 'POST', body: { ids, category_id } })
+	deleteTransactions: (ids: number[], owner_id?: string) =>
+		request<void>('/transactions/batch-delete', { method: 'POST', body: { ids }, params: owner_id ? { owner_id } : undefined }),
+	updateCategory: (ids: number[], category_id: number, owner_id?: string) =>
+		request<void>('/transactions/batch-update-category', { method: 'POST', body: { ids, category_id }, params: owner_id ? { owner_id } : undefined })
 };
 
 // CSV import/export

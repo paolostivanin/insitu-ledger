@@ -7,6 +7,17 @@ import (
 
 func (s *Server) handleReportByCategory(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 	typ := r.URL.Query().Get("type") // "income" or "expense"
@@ -15,7 +26,7 @@ func (s *Server) handleReportByCategory(w http.ResponseWriter, r *http.Request) 
 	          FROM transactions t
 	          JOIN categories c ON t.category_id = c.id
 	          WHERE t.user_id = ? AND t.deleted_at IS NULL`
-	args := []any{userID}
+	args := []any{targetUserID}
 
 	if from != "" {
 		query += " AND t.date >= ?"
@@ -62,12 +73,23 @@ func (s *Server) handleReportByCategory(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleReportByMonth(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+
 	year := r.URL.Query().Get("year")
 
 	query := `SELECT strftime('%Y-%m', date) as month, type, SUM(amount) as total
 	          FROM transactions
 	          WHERE user_id = ? AND deleted_at IS NULL`
-	args := []any{userID}
+	args := []any{targetUserID}
 
 	if year != "" {
 		query += " AND strftime('%Y', date) = ?"
@@ -103,6 +125,17 @@ func (s *Server) handleReportByMonth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleReportTrend(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 	groupBy := r.URL.Query().Get("group_by") // "day", "week", "month"
@@ -120,7 +153,7 @@ func (s *Server) handleReportTrend(w http.ResponseWriter, r *http.Request) {
 	query := `SELECT strftime('` + strftimeFmt + `', date) as period, type, SUM(amount) as total
 	          FROM transactions
 	          WHERE user_id = ? AND deleted_at IS NULL`
-	args := []any{userID}
+	args := []any{targetUserID}
 
 	if from != "" {
 		query += " AND date >= ?"

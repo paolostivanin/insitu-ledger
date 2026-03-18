@@ -89,6 +89,7 @@ func NewRouter(s *Server) http.Handler {
 	protected.HandleFunc("POST /api/transactions/import", s.handleImportTransactions)
 
 	// Shared access
+	protected.HandleFunc("GET /api/shared/accessible", s.handleListAccessibleOwners)
 	protected.HandleFunc("GET /api/shared", s.handleListSharedAccess)
 	protected.HandleFunc("POST /api/shared", s.handleCreateSharedAccess)
 	protected.HandleFunc("DELETE /api/shared/{id}", s.handleDeleteSharedAccess)

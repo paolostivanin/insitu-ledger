@@ -750,6 +750,460 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+// ===== Sort Options Tests =====
+
+func TestTransactionSortByDate(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	// Create transactions on different dates
+	for _, d := range []string{"2025-01-10", "2025-01-05", "2025-01-15"} {
+		body := fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"date":"%s"}`, acctID, catID, d)
+		req := authedRequest("POST", "/api/transactions", body, token)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+	}
+
+	// Default sort: date DESC
+	req := authedRequest("GET", "/api/transactions", "", token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var txns []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	if len(txns) != 3 {
+		t.Fatalf("expected 3 transactions, got %d", len(txns))
+	}
+	if txns[0]["date"] != "2025-01-15" {
+		t.Errorf("first txn date = %v, want 2025-01-15", txns[0]["date"])
+	}
+
+	// Sort date ASC
+	req = authedRequest("GET", "/api/transactions?sort_by=date&sort_dir=asc", "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	if txns[0]["date"] != "2025-01-05" {
+		t.Errorf("asc first txn date = %v, want 2025-01-05", txns[0]["date"])
+	}
+}
+
+func TestTransactionSortByAmount(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	for _, a := range []float64{100, 10, 50} {
+		body := fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":%.2f,"date":"2025-01-01"}`, acctID, catID, a)
+		req := authedRequest("POST", "/api/transactions", body, token)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+	}
+
+	// Sort amount DESC
+	req := authedRequest("GET", "/api/transactions?sort_by=amount&sort_dir=desc", "", token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var txns []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	if txns[0]["amount"].(float64) != 100 {
+		t.Errorf("first amount = %v, want 100", txns[0]["amount"])
+	}
+
+	// Sort amount ASC
+	req = authedRequest("GET", "/api/transactions?sort_by=amount&sort_dir=asc", "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	if txns[0]["amount"].(float64) != 10 {
+		t.Errorf("asc first amount = %v, want 10", txns[0]["amount"])
+	}
+}
+
+func TestTransactionSortByCategory(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, _ := createTestAccountAndCategory(t, handler, token)
+
+	// Create a second category
+	req := authedRequest("POST", "/api/categories", `{"name":"Zebra","type":"expense"}`, token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var cat2 map[string]any
+	json.Unmarshal(w.Body.Bytes(), &cat2)
+	cat2ID := int(cat2["id"].(float64))
+
+	req = authedRequest("POST", "/api/categories", `{"name":"Apple","type":"expense"}`, token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var cat3 map[string]any
+	json.Unmarshal(w.Body.Bytes(), &cat3)
+	cat3ID := int(cat3["id"].(float64))
+
+	// Create transactions with different categories
+	body := fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"date":"2025-01-01"}`, acctID, cat2ID)
+	req = authedRequest("POST", "/api/transactions", body, token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	body = fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":20,"date":"2025-01-01"}`, acctID, cat3ID)
+	req = authedRequest("POST", "/api/transactions", body, token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Sort by category ASC
+	req = authedRequest("GET", "/api/transactions?sort_by=category&sort_dir=asc", "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var txns []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	if len(txns) != 2 {
+		t.Fatalf("expected 2 transactions, got %d", len(txns))
+	}
+	// Apple < Zebra, so the Apple category transaction (amount=20) should be first
+	if txns[0]["amount"].(float64) != 20 {
+		t.Errorf("asc category sort: first amount = %v, want 20 (Apple)", txns[0]["amount"])
+	}
+}
+
+func TestTransactionSortInvalid(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+
+	// Invalid sort_by
+	req := authedRequest("GET", "/api/transactions?sort_by=invalid", "", token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("invalid sort_by: got %d, want 400", w.Code)
+	}
+
+	// Invalid sort_dir
+	req = authedRequest("GET", "/api/transactions?sort_dir=invalid", "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("invalid sort_dir: got %d, want 400", w.Code)
+	}
+}
+
+// ===== Shared Access Filtering Tests =====
+
+// setupTwoUsers creates admin + guest user and returns both tokens and guest user ID.
+func setupTwoUsers(t *testing.T, handler http.Handler) (adminToken, guestToken string, guestID int) {
+	t.Helper()
+	adminToken = loginAdmin(t, handler)
+
+	// Create guest user
+	body := `{"username":"guest","email":"guest@test.com","name":"Guest","password":"password123"}`
+	req := authedRequest("POST", "/api/admin/users", body, adminToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var created map[string]any
+	json.Unmarshal(w.Body.Bytes(), &created)
+	guestID = int(created["id"].(float64))
+
+	// Login guest
+	loginBody := `{"login":"guest","password":"password123"}`
+	req = httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var loginResp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &loginResp)
+	guestToken = loginResp["token"].(string)
+
+	return
+}
+
+func TestSharedAccessListAccessible(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	adminToken, guestToken, _ := setupTwoUsers(t, handler)
+
+	// Guest sees no accessible owners initially
+	req := authedRequest("GET", "/api/shared/accessible", "", guestToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("accessible: got %d", w.Code)
+	}
+	var owners []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &owners)
+	if len(owners) != 0 {
+		t.Errorf("expected 0 accessible owners, got %d", len(owners))
+	}
+
+	// Admin shares with guest (read)
+	req = authedRequest("POST", "/api/shared", `{"guest_email":"guest@test.com","permission":"read"}`, adminToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("create share: got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Guest now sees admin as accessible owner
+	req = authedRequest("GET", "/api/shared/accessible", "", guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	json.Unmarshal(w.Body.Bytes(), &owners)
+	if len(owners) != 1 {
+		t.Fatalf("expected 1 accessible owner, got %d", len(owners))
+	}
+	if owners[0]["permission"] != "read" {
+		t.Errorf("permission = %v, want read", owners[0]["permission"])
+	}
+}
+
+func TestSharedAccessReadOnly(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	adminToken, guestToken, _ := setupTwoUsers(t, handler)
+
+	// Admin creates data
+	acctID, catID := createTestAccountAndCategory(t, handler, adminToken)
+	body := fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":25,"date":"2025-01-01"}`, acctID, catID)
+	req := authedRequest("POST", "/api/transactions", body, adminToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var created map[string]any
+	json.Unmarshal(w.Body.Bytes(), &created)
+	txnID := int(created["id"].(float64))
+
+	// Share with read permission
+	req = authedRequest("POST", "/api/shared", `{"guest_email":"guest@test.com","permission":"read"}`, adminToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Guest can read admin's transactions
+	req = authedRequest("GET", "/api/transactions?owner_id=1", "", guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("guest read: got %d: %s", w.Code, w.Body.String())
+	}
+	var txns []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	if len(txns) != 1 {
+		t.Errorf("expected 1 transaction, got %d", len(txns))
+	}
+
+	// Guest can read admin's accounts
+	req = authedRequest("GET", "/api/accounts?owner_id=1", "", guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("guest read accounts: got %d", w.Code)
+	}
+
+	// Guest can read admin's categories
+	req = authedRequest("GET", "/api/categories?owner_id=1", "", guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("guest read categories: got %d", w.Code)
+	}
+
+	// Guest CANNOT create transactions for admin (read-only)
+	body = fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"date":"2025-01-02"}`, acctID, catID)
+	req = authedRequest("POST", "/api/transactions?owner_id=1", body, guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Errorf("guest create: got %d, want 403", w.Code)
+	}
+
+	// Guest CANNOT delete admin's transactions (read-only)
+	req = authedRequest("DELETE", fmt.Sprintf("/api/transactions/%d?owner_id=1", txnID), "", guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Errorf("guest delete: got %d, want 403", w.Code)
+	}
+
+	// Guest CANNOT create accounts for admin (read-only)
+	req = authedRequest("POST", "/api/accounts?owner_id=1", `{"name":"Hacked"}`, guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Errorf("guest create account: got %d, want 403", w.Code)
+	}
+}
+
+func TestSharedAccessWritePermission(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	adminToken, guestToken, _ := setupTwoUsers(t, handler)
+
+	// Admin creates data
+	acctID, catID := createTestAccountAndCategory(t, handler, adminToken)
+
+	// Share with write permission
+	req := authedRequest("POST", "/api/shared", `{"guest_email":"guest@test.com","permission":"write"}`, adminToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Guest CAN create transactions for admin
+	body := fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":30,"date":"2025-02-01"}`, acctID, catID)
+	req = authedRequest("POST", "/api/transactions?owner_id=1", body, guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Errorf("guest write create: got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify the transaction is visible under admin's data
+	req = authedRequest("GET", "/api/transactions", "", adminToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var txns []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	if len(txns) != 1 {
+		t.Errorf("admin should see 1 transaction, got %d", len(txns))
+	}
+}
+
+func TestSharedAccessNoShare(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	_, guestToken, _ := setupTwoUsers(t, handler)
+
+	// Guest tries to access admin's data without any share → 403
+	req := authedRequest("GET", "/api/transactions?owner_id=1", "", guestToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Errorf("no share access: got %d, want 403", w.Code)
+	}
+
+	req = authedRequest("GET", "/api/accounts?owner_id=1", "", guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Errorf("no share accounts: got %d, want 403", w.Code)
+	}
+}
+
+func TestSharedAccessBackwardCompatible(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	// Create a transaction
+	body := fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"date":"2025-01-01"}`, acctID, catID)
+	req := authedRequest("POST", "/api/transactions", body, token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Omitting owner_id returns own data (backward compatible)
+	req = authedRequest("GET", "/api/transactions", "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("backward compat: got %d", w.Code)
+	}
+	var txns []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	if len(txns) != 1 {
+		t.Errorf("expected 1 transaction, got %d", len(txns))
+	}
+}
+
+func TestSharedAccessReports(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	adminToken, guestToken, _ := setupTwoUsers(t, handler)
+
+	acctID, catID := createTestAccountAndCategory(t, handler, adminToken)
+	body := fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":50,"date":"2025-03-15"}`, acctID, catID)
+	req := authedRequest("POST", "/api/transactions", body, adminToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Share with read
+	req = authedRequest("POST", "/api/shared", `{"guest_email":"guest@test.com","permission":"read"}`, adminToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Guest can view reports for admin
+	req = authedRequest("GET", "/api/reports/by-category?owner_id=1", "", guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("guest reports by-category: got %d", w.Code)
+	}
+	var results []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &results)
+	if len(results) != 1 {
+		t.Errorf("expected 1 report row, got %d", len(results))
+	}
+
+	req = authedRequest("GET", "/api/reports/by-month?owner_id=1", "", guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("guest reports by-month: got %d", w.Code)
+	}
+}
+
+// ===== Helpers =====
+
+func TestParseSortParams(t *testing.T) {
+	tests := []struct {
+		sortBy, sortDir  string
+		wantCol, wantDir string
+		wantJoin         bool
+		wantErr          bool
+	}{
+		{"", "", "date", "DESC", false, false},
+		{"date", "asc", "date", "ASC", false, false},
+		{"amount", "desc", "amount", "DESC", false, false},
+		{"description", "", "description", "DESC", false, false},
+		{"category", "asc", "c.name", "ASC", true, false},
+		{"invalid", "", "", "", false, true},
+		{"date", "invalid", "", "", false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.sortBy+"/"+tt.sortDir, func(t *testing.T) {
+			col, dir, join, err := parseSortParams(tt.sortBy, tt.sortDir)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if col != tt.wantCol {
+				t.Errorf("col = %v, want %v", col, tt.wantCol)
+			}
+			if dir != tt.wantDir {
+				t.Errorf("dir = %v, want %v", dir, tt.wantDir)
+			}
+			if join != tt.wantJoin {
+				t.Errorf("join = %v, want %v", join, tt.wantJoin)
+			}
+		})
+	}
+}
+
 func TestChangePassword(t *testing.T) {
 	s, cleanup := setupTestServer(t)
 	defer cleanup()

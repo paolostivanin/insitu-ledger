@@ -17,10 +17,20 @@ type categoryRequest struct {
 func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
+	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+
 	rows, err := s.DB.Query(
 		`SELECT id, user_id, parent_id, name, type, icon, color, created_at, updated_at, sync_version
 		 FROM categories WHERE user_id = ? AND deleted_at IS NULL ORDER BY name`,
-		userID,
+		targetUserID,
 	)
 	if err != nil {
 		http.Error(w, "query error", http.StatusInternalServerError)
@@ -56,6 +66,21 @@ func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	if permission != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+
 	var req categoryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -74,7 +99,7 @@ func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 	result, err := s.DB.Exec(
 		`INSERT INTO categories (user_id, parent_id, name, type, icon, color)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
-		userID, req.ParentID, req.Name, req.Type, req.Icon, req.Color,
+		targetUserID, req.ParentID, req.Name, req.Type, req.Icon, req.Color,
 	)
 	if err != nil {
 		http.Error(w, "failed to create category", http.StatusInternalServerError)
@@ -89,6 +114,21 @@ func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	if permission != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
@@ -104,7 +144,7 @@ func (s *Server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 	_, err = s.DB.Exec(
 		`UPDATE categories SET parent_id=?, name=?, type=?, icon=?, color=?
 		 WHERE id=? AND user_id=?`,
-		req.ParentID, req.Name, req.Type, req.Icon, req.Color, id, userID,
+		req.ParentID, req.Name, req.Type, req.Icon, req.Color, id, targetUserID,
 	)
 	if err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
@@ -116,6 +156,21 @@ func (s *Server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	if permission != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
@@ -132,7 +187,7 @@ func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.DB.Exec("UPDATE categories SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, userID)
+	result, err := s.DB.Exec("UPDATE categories SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, targetUserID)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

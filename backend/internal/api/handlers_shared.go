@@ -86,6 +86,39 @@ func (s *Server) handleCreateSharedAccess(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]any{"id": id})
 }
 
+func (s *Server) handleListAccessibleOwners(w http.ResponseWriter, r *http.Request) {
+	userID := UserIDFromContext(r.Context())
+
+	rows, err := s.DB.Query(
+		`SELECT sa.owner_user_id, u.name, u.email, sa.permission
+		 FROM shared_access sa
+		 JOIN users u ON sa.owner_user_id = u.id
+		 WHERE sa.guest_user_id = ?`, userID,
+	)
+	if err != nil {
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var items []map[string]any
+	for rows.Next() {
+		var ownerID int64
+		var name, email, permission string
+		rows.Scan(&ownerID, &name, &email, &permission)
+		items = append(items, map[string]any{
+			"owner_user_id": ownerID, "name": name, "email": email, "permission": permission,
+		})
+	}
+
+	if items == nil {
+		items = []map[string]any{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(items)
+}
+
 func (s *Server) handleDeleteSharedAccess(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

@@ -1,5 +1,6 @@
 package com.insituledger.app.data.repository
 
+import androidx.sqlite.db.SimpleSQLiteQuery
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
@@ -42,6 +43,48 @@ class TransactionRepository @Inject constructor(
 
     fun getRecent(limit: Int = 10): Flow<List<Transaction>> = transactionDao.getRecent(limit).map { list ->
         list.map { it.toDomain() }
+    }
+
+    fun getSorted(
+        from: String? = null,
+        to: String? = null,
+        categoryId: Long? = null,
+        sortBy: String = "date",
+        sortDir: String = "desc",
+        limit: Int = 100,
+        offset: Int = 0
+    ): Flow<List<Transaction>> {
+        val columnMap = mapOf(
+            "date" to "date",
+            "amount" to "amount",
+            "description" to "description"
+        )
+        val column = columnMap[sortBy] ?: "date"
+        val dir = if (sortDir == "asc") "ASC" else "DESC"
+
+        val sb = StringBuilder("SELECT * FROM transactions WHERE deleted_at IS NULL")
+        val args = mutableListOf<Any>()
+
+        if (from != null) {
+            sb.append(" AND date >= ?")
+            args.add(from)
+        }
+        if (to != null) {
+            sb.append(" AND date <= ?")
+            args.add(to)
+        }
+        if (categoryId != null) {
+            sb.append(" AND category_id = ?")
+            args.add(categoryId)
+        }
+
+        sb.append(" ORDER BY $column $dir, id DESC LIMIT ? OFFSET ?")
+        args.add(limit)
+        args.add(offset)
+
+        return transactionDao.getSorted(SimpleSQLiteQuery(sb.toString(), args.toTypedArray())).map { list ->
+            list.map { it.toDomain() }
+        }
     }
 
     suspend fun getMonthlySummary(from: String, to: String) = transactionDao.getMonthlySummary(from, to)

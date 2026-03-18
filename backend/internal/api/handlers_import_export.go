@@ -13,6 +13,17 @@ import (
 
 func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 
@@ -22,7 +33,7 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 		LEFT JOIN categories c ON c.id = t.category_id
 		LEFT JOIN accounts a ON a.id = t.account_id
 		WHERE t.user_id = ? AND t.deleted_at IS NULL`
-	args := []any{userID}
+	args := []any{targetUserID}
 
 	if from != "" {
 		query += " AND t.date >= ?"
@@ -67,6 +78,20 @@ const maxImportSize = 10 << 20 // 10 MB
 func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
+	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	if permission != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxImportSize)
 	if err := r.ParseMultipartForm(maxImportSize); err != nil {
 		http.Error(w, "file too large or invalid multipart", http.StatusBadRequest)
@@ -104,7 +129,7 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 	catMap := map[string]int64{}
 	acctMap := map[string]int64{}
 
-	catRows, err := s.DB.Query("SELECT id, name FROM categories WHERE user_id = ? AND deleted_at IS NULL", userID)
+	catRows, err := s.DB.Query("SELECT id, name FROM categories WHERE user_id = ? AND deleted_at IS NULL", targetUserID)
 	if err == nil {
 		defer catRows.Close()
 		for catRows.Next() {
@@ -115,7 +140,7 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	acctRows, err := s.DB.Query("SELECT id, name FROM accounts WHERE user_id = ? AND deleted_at IS NULL", userID)
+	acctRows, err := s.DB.Query("SELECT id, name FROM accounts WHERE user_id = ? AND deleted_at IS NULL", targetUserID)
 	if err == nil {
 		defer acctRows.Close()
 		for acctRows.Next() {
@@ -194,7 +219,7 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		if _, err := tx.Exec(
 			`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, date)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			acctID, catID, userID, typ, amount, currency, desc, date,
+			acctID, catID, targetUserID, typ, amount, currency, desc, date,
 		); err != nil {
 			http.Error(w, fmt.Sprintf("row %d: insert error: %v", rowNum, err), http.StatusInternalServerError)
 			return

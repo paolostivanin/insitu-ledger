@@ -1,6 +1,8 @@
 package com.insituledger.app.data.local.db.dao
 
 import androidx.room.*
+import androidx.sqlite.db.SimpleSQLiteQuery
+import androidx.sqlite.db.SupportSQLiteQuery
 import com.insituledger.app.data.local.db.entity.TransactionEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -58,6 +60,9 @@ interface TransactionDao {
         LIMIT 10
     """)
     suspend fun autocomplete(query: String): List<LocalAutocompleteSuggestion>
+
+    @RawQuery(observedEntities = [TransactionEntity::class])
+    fun getSorted(query: SupportSQLiteQuery): Flow<List<TransactionEntity>>
 
     @Query("DELETE FROM transactions WHERE deleted_at IS NOT NULL")
     suspend fun purgeDeleted()

@@ -4,8 +4,9 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { authenticated, userName, isAdmin, forcePasswordChange, forceTotpSetup, initAuth, clearAuth } from '$lib/stores/auth';
-	import { auth as authApi, clearToken } from '$lib/api/client';
+	import { auth as authApi, shared as sharedApi, clearToken, type AccessibleOwner } from '$lib/api/client';
 	import { initTheme } from '$lib/stores/theme';
+	import { sharedOwnerUserId, setSharedOwner, clearSharedOwner } from '$lib/stores/shared';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import ToastContainer from '$lib/components/ToastContainer.svelte';
 
@@ -13,6 +14,7 @@
 	let showShortcutsHelp = $state(false);
 	let isOffline = $state(false);
 	let mobileMenuOpen = $state(false);
+	let accessibleOwners = $state<AccessibleOwner[]>([]);
 
 	onMount(() => {
 		initTheme();
@@ -23,6 +25,7 @@
 			} else if ($forceTotpSetup) {
 				goto('/setup-2fa');
 			}
+			loadAccessibleOwners();
 		}
 
 		const goOnline = () => { isOffline = false; };
@@ -36,6 +39,25 @@
 			window.removeEventListener('offline', goOffline);
 		};
 	});
+
+	async function loadAccessibleOwners() {
+		try {
+			accessibleOwners = await sharedApi.accessible();
+		} catch {
+			accessibleOwners = [];
+		}
+	}
+
+	function switchOwner(e: Event) {
+		const select = e.target as HTMLSelectElement;
+		const val = select.value;
+		if (val === '') {
+			clearSharedOwner();
+		} else {
+			const owner = accessibleOwners.find(o => o.owner_user_id.toString() === val);
+			setSharedOwner(val, owner?.permission || 'read');
+		}
+	}
 
 	const navItems = [
 		{ href: '/', label: 'Dashboard' },
@@ -117,6 +139,14 @@
 				{/if}
 			</div>
 			<div class="nav-right">
+				{#if accessibleOwners.length > 0}
+					<select class="owner-switcher" value={$sharedOwnerUserId || ''} onchange={switchOwner}>
+						<option value="">My Data</option>
+						{#each accessibleOwners as owner}
+							<option value={owner.owner_user_id.toString()}>{owner.name} ({owner.permission})</option>
+						{/each}
+					</select>
+				{/if}
 				<ThemeToggle />
 				<span class="user-name">{$userName}</span>
 				<button class="btn-ghost" onclick={logout}>Logout</button>
@@ -213,6 +243,15 @@
 		align-items: center;
 		gap: 0.75rem;
 		white-space: nowrap;
+	}
+	.owner-switcher {
+		background: var(--bg-hover);
+		color: var(--text);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 0.25rem 0.5rem;
+		font-size: 0.8rem;
+		cursor: pointer;
 	}
 	.user-name {
 		color: var(--text-muted);

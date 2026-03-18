@@ -19,6 +19,21 @@ type batchUpdateCategoryRequest struct {
 
 func (s *Server) handleBatchDeleteTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	if permission != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+
 	var req batchDeleteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -42,7 +57,7 @@ func (s *Server) handleBatchDeleteTransactions(w http.ResponseWriter, r *http.Re
 		var accountID int64
 		err := tx.QueryRow(
 			"SELECT amount, type, account_id FROM transactions WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
-			id, userID,
+			id, targetUserID,
 		).Scan(&amount, &typ, &accountID)
 		if err != nil {
 			continue
@@ -74,6 +89,21 @@ func (s *Server) handleBatchDeleteTransactions(w http.ResponseWriter, r *http.Re
 
 func (s *Server) handleBatchUpdateCategory(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	if err != nil {
+		if err.Error() == "forbidden: no shared access" {
+			http.Error(w, err.Error(), http.StatusForbidden)
+		} else {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		return
+	}
+	if permission != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+
 	var req batchUpdateCategoryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -86,7 +116,7 @@ func (s *Server) handleBatchUpdateCategory(w http.ResponseWriter, r *http.Reques
 
 	// Verify category belongs to user
 	var catExists bool
-	err := s.DB.QueryRow("SELECT 1 FROM categories WHERE id = ? AND user_id = ? AND deleted_at IS NULL", req.CategoryID, userID).Scan(&catExists)
+	err = s.DB.QueryRow("SELECT 1 FROM categories WHERE id = ? AND user_id = ? AND deleted_at IS NULL", req.CategoryID, targetUserID).Scan(&catExists)
 	if err != nil {
 		http.Error(w, "category not found", http.StatusBadRequest)
 		return
@@ -99,7 +129,7 @@ func (s *Server) handleBatchUpdateCategory(w http.ResponseWriter, r *http.Reques
 		placeholders[i] = "?"
 		args = append(args, id)
 	}
-	args = append(args, userID)
+	args = append(args, targetUserID)
 
 	query := fmt.Sprintf(
 		"UPDATE transactions SET category_id = ? WHERE id IN (%s) AND user_id = ? AND deleted_at IS NULL",
