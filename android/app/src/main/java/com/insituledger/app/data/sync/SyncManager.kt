@@ -9,7 +9,7 @@ import javax.inject.Singleton
 
 @Singleton
 class SyncManager @Inject constructor(
-    private val workManager: WorkManager,
+    private val workManager: dagger.Lazy<WorkManager>,
     private val syncRepository: SyncRepository,
     private val prefs: UserPreferences
 ) {
@@ -31,7 +31,7 @@ class SyncManager @Inject constructor(
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
             .build()
 
-        workManager.enqueueUniquePeriodicWork(
+        workManager.get().enqueueUniquePeriodicWork(
             PERIODIC_SYNC_WORK,
             ExistingPeriodicWorkPolicy.KEEP,
             request
@@ -49,7 +49,7 @@ class SyncManager @Inject constructor(
             .setConstraints(constraints)
             .build()
 
-        workManager.enqueueUniqueWork(
+        workManager.get().enqueueUniqueWork(
             ONE_TIME_SYNC_WORK,
             ExistingWorkPolicy.REPLACE,
             request
@@ -67,7 +67,7 @@ class SyncManager @Inject constructor(
         val request = PeriodicWorkRequestBuilder<ScheduledTransactionWorker>(15, TimeUnit.MINUTES)
             .build()
 
-        workManager.enqueueUniquePeriodicWork(
+        workManager.get().enqueueUniquePeriodicWork(
             SCHEDULED_TX_WORK,
             ExistingPeriodicWorkPolicy.KEEP,
             request
@@ -75,8 +75,8 @@ class SyncManager @Inject constructor(
     }
 
     fun cancelAll() {
-        workManager.cancelUniqueWork(PERIODIC_SYNC_WORK)
-        workManager.cancelUniqueWork(ONE_TIME_SYNC_WORK)
-        workManager.cancelUniqueWork(SCHEDULED_TX_WORK)
+        workManager.get().cancelUniqueWork(PERIODIC_SYNC_WORK)
+        workManager.get().cancelUniqueWork(ONE_TIME_SYNC_WORK)
+        workManager.get().cancelUniqueWork(SCHEDULED_TX_WORK)
     }
 }
