@@ -31,6 +31,10 @@ class AuthInterceptor @Inject constructor(
         userPreferences.tokenFlow.onEach { cachedToken = it }.launchIn(scope)
     }
 
+    fun setServerUrl(url: String) {
+        cachedServerUrl = url
+    }
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
         val serverUrl = cachedServerUrl

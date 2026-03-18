@@ -76,15 +76,20 @@ class SharedOwnerViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            prefs.syncModeFlow.collectLatest { mode ->
-                if (mode == "webapp") {
-                    val owners = sharedRepository.loadAccessibleOwners()
-                    // Restore persisted owner selection
-                    prefs.sharedOwnerIdFlow.first().let { savedId ->
-                        if (savedId != null) {
-                            val owner = owners.find { it.ownerUserId == savedId }
-                            if (owner != null) sharedAccessState.selectOwner(owner)
+            combine(prefs.syncModeFlow, prefs.tokenFlow) { mode, token -> mode to token }
+                .collectLatest { (mode, token) ->
+                if (mode == "webapp" && token != null) {
+                    try {
+                        val owners = sharedRepository.loadAccessibleOwners()
+                        // Restore persisted owner selection
+                        prefs.sharedOwnerIdFlow.first().let { savedId ->
+                            if (savedId != null) {
+                                val owner = owners.find { it.ownerUserId == savedId }
+                                if (owner != null) sharedAccessState.selectOwner(owner)
+                            }
                         }
+                    } catch (_: Exception) {
+                        // Network error — ignore, will retry on next emission
                     }
                 } else {
                     sharedAccessState.updateAccessibleOwners(emptyList())

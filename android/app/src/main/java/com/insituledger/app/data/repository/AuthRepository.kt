@@ -3,6 +3,7 @@ package com.insituledger.app.data.repository
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.remote.api.AuthApi
 import com.insituledger.app.data.remote.dto.*
+import com.insituledger.app.data.remote.interceptor.AuthInterceptor
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -10,14 +11,17 @@ import javax.inject.Singleton
 @Singleton
 class AuthRepository @Inject constructor(
     private val authApi: AuthApi,
-    private val prefs: UserPreferences
+    private val prefs: UserPreferences,
+    private val authInterceptor: AuthInterceptor
 ) {
     val isLoggedIn: Flow<String?> = prefs.tokenFlow
     val forcePasswordChange: Flow<Boolean> = prefs.forcePasswordChangeFlow
 
     suspend fun login(serverUrl: String, login: String, password: String, totpCode: String? = null): Result<LoginResponse> {
         return try {
-            prefs.saveServerUrl(serverUrl.trimEnd('/'))
+            val normalizedUrl = serverUrl.trimEnd('/')
+            authInterceptor.setServerUrl(normalizedUrl)
+            prefs.saveServerUrl(normalizedUrl)
             val response = authApi.login(LoginRequest(login, password, totpCode))
             if (response.isSuccessful) {
                 val body = response.body()!!
