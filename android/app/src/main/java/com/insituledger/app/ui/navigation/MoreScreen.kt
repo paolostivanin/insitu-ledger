@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -19,6 +20,7 @@ import androidx.compose.ui.unit.dp
 fun MoreScreen(
     onAccountsClick: () -> Unit,
     onCategoriesClick: () -> Unit,
+    onReportsClick: () -> Unit,
     onSharedClick: () -> Unit,
     onSettingsClick: () -> Unit
 ) {
@@ -34,6 +36,7 @@ fun MoreScreen(
         ) {
             MoreMenuItem(Icons.Default.AccountBalance, "Accounts", onAccountsClick)
             MoreMenuItem(Icons.AutoMirrored.Filled.List, "Categories", onCategoriesClick)
+            MoreMenuItem(Icons.Default.Assessment, "Reports", onReportsClick)
             MoreMenuItem(Icons.Default.Share, "Shared Access", onSharedClick)
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             MoreMenuItem(Icons.Default.Settings, "Settings", onSettingsClick)

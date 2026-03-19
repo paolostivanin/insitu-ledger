@@ -21,5 +21,6 @@ sealed class Screen(val route: String) {
     }
     data object Settings : Screen("settings")
     data object Shared : Screen("shared")
+    data object Reports : Screen("reports")
     data object More : Screen("more")
 }

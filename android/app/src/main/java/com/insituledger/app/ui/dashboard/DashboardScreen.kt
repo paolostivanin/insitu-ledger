@@ -94,7 +94,7 @@ fun DashboardScreen(
             }
 
             // Accounts
-            if (data.accounts.isNotEmpty()) {
+            if (data.accounts.size > 1) {
                 item {
                     Text("Accounts", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
                 }

@@ -15,10 +15,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AmountText
 import com.insituledger.app.ui.common.EmptyState
+import com.insituledger.app.ui.common.ExpenseColor
 import com.insituledger.app.ui.common.LoadingIndicator
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import java.text.NumberFormat
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,16 +105,31 @@ fun TransactionsScreen(
                             ) {
                                 grouped.forEach { (date, txns) ->
                                     item(key = "header_$date") {
-                                        Text(
-                                            text = date,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-                                        )
+                                        val dailyExpense = txns.filter { it.type == "expense" }.sumOf { it.amount }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = date,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            if (dailyExpense > 0) {
+                                                Text(
+                                                    text = "-${formatAmount(dailyExpense)}",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = ExpenseColor
+                                                )
+                                            }
+                                        }
                                     }
                                     items(txns, key = { it.id }) { txn ->
                                         TransactionRow(
                                             txn = txn,
+                                            categories = uiState.categories,
                                             onClick = { onTransactionClick(txn.id) },
                                             onDelete = if (uiState.isReadOnly) null else {{ viewModel.delete(txn.id) }}
                                         )
@@ -120,6 +144,7 @@ fun TransactionsScreen(
                                 items(uiState.transactions, key = { it.id }) { txn ->
                                     TransactionRow(
                                         txn = txn,
+                                        categories = uiState.categories,
                                         onClick = { onTransactionClick(txn.id) },
                                         onDelete = { viewModel.delete(txn.id) }
                                     )
@@ -243,14 +268,27 @@ private fun FilterBar(
 }
 
 @Composable
-private fun TransactionRow(txn: Transaction, onClick: () -> Unit, onDelete: (() -> Unit)?) {
+private fun TransactionRow(txn: Transaction, categories: List<Category>, onClick: () -> Unit, onDelete: (() -> Unit)?) {
     Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val categoryColor = categories.find { it.id == txn.categoryId }?.color
+                if (categoryColor != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clip(CircleShape)
+                            .background(parseColor(categoryColor))
+                    )
+                }
                 Text(
                     text = txn.description ?: txn.type.replaceFirstChar { it.uppercase() },
                     style = MaterialTheme.typography.bodyMedium
@@ -259,4 +297,19 @@ private fun TransactionRow(txn: Transaction, onClick: () -> Unit, onDelete: (() 
             AmountText(amount = txn.amount, type = txn.type, currency = txn.currency)
         }
     }
+}
+
+private fun parseColor(hex: String): Color {
+    return try {
+        Color(android.graphics.Color.parseColor(if (hex.startsWith("#")) hex else "#$hex"))
+    } catch (_: Exception) {
+        Color.Gray
+    }
+}
+
+private fun formatAmount(amount: Double): String {
+    return NumberFormat.getNumberInstance(Locale.getDefault()).apply {
+        minimumFractionDigits = 2
+        maximumFractionDigits = 2
+    }.format(amount)
 }

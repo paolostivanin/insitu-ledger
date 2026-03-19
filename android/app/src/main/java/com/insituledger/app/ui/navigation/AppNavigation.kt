@@ -39,6 +39,7 @@ import com.insituledger.app.ui.categories.CategoriesScreen
 import com.insituledger.app.ui.categories.CategoryFormScreen
 import com.insituledger.app.ui.dashboard.DashboardScreen
 import com.insituledger.app.ui.login.LoginScreen
+import com.insituledger.app.ui.reports.ReportsScreen
 import com.insituledger.app.ui.scheduled.ScheduledFormScreen
 import com.insituledger.app.ui.scheduled.ScheduledScreen
 import com.insituledger.app.ui.settings.SettingsScreen
@@ -232,6 +233,7 @@ fun AppNavigation() {
                     MoreScreen(
                         onAccountsClick = { navController.navigate(Screen.Accounts.route) },
                         onCategoriesClick = { navController.navigate(Screen.Categories.route) },
+                        onReportsClick = { navController.navigate(Screen.Reports.route) },
                         onSharedClick = { navController.navigate(Screen.Shared.route) },
                         onSettingsClick = { navController.navigate(Screen.Settings.route) }
                     )
@@ -265,6 +267,10 @@ fun AppNavigation() {
                     arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null })
                 ) {
                     CategoryFormScreen(onBack = { navController.popBackStack() })
+                }
+
+                composable(Screen.Reports.route) {
+                    ReportsScreen(onBack = { navController.popBackStack() })
                 }
 
                 composable(Screen.Shared.route) {

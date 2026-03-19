@@ -78,6 +78,16 @@ interface TransactionDao {
 
     @Query("UPDATE transactions SET category_id = :newId WHERE category_id = :oldId")
     suspend fun updateCategoryId(oldId: Long, newId: Long)
+
+    @Query("""
+        SELECT * FROM transactions
+        WHERE deleted_at IS NULL
+        AND (:from IS NULL OR date >= :from)
+        AND (:to IS NULL OR date <= :to)
+        AND (:categoryId IS NULL OR category_id = :categoryId)
+        ORDER BY date DESC, id DESC
+    """)
+    suspend fun getFilteredSync(from: String?, to: String?, categoryId: Long?): List<TransactionEntity>
 }
 
 data class MonthlySummary(
