@@ -173,6 +173,34 @@ class TransactionFormViewModel @Inject constructor(
 
     fun updateDate(date: String) { _uiState.update { it.copy(date = date) } }
 
+    fun createAccount(name: String, currency: String) {
+        viewModelScope.launch {
+            val id = accountRepository.create(name, currency, 0.0)
+            val owner = sharedAccessState.selectedOwner.value
+            val isShared = owner != null
+            val updatedAccounts = if (isShared) {
+                accountRepository.listFromServer(owner!!.ownerId)
+            } else {
+                accountRepository.getAll().first()
+            }
+            val updatedDisplays = updatedAccounts.map { acct ->
+                AccountDisplay(
+                    account = acct,
+                    label = if (isShared) "${acct.name} (shared)" else acct.name
+                )
+            }
+            _uiState.update {
+                it.copy(
+                    accounts = updatedAccounts,
+                    accountDisplays = updatedDisplays,
+                    accountId = id,
+                    currency = currency
+                )
+            }
+            prefs.saveLastUsedAccountId(id)
+        }
+    }
+
     fun createCategory(name: String, type: String) {
         viewModelScope.launch {
             val id = categoryRepository.create(name, type, null, null, null)

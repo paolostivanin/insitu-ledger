@@ -13,6 +13,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.ui.common.AccountDropdownWithAdd
 import com.insituledger.app.ui.common.CategoryDropdownWithAdd
 import com.insituledger.app.ui.common.IncomeExpenseToggle
 import com.insituledger.app.ui.common.LoadingIndicator
@@ -53,25 +54,15 @@ fun TransactionFormScreen(
 
             IncomeExpenseToggle(selected = uiState.type, onSelect = viewModel::updateType)
 
-            // Account selector
-            var accountExpanded by remember { mutableStateOf(false) }
-            ExposedDropdownMenuBox(expanded = accountExpanded, onExpandedChange = { accountExpanded = it }) {
-                OutlinedTextField(
-                    value = uiState.accountDisplays.find { it.account.id == uiState.accountId }?.label ?: "",
-                    onValueChange = {}, readOnly = true, label = { Text("Account") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountExpanded) },
-                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                )
-                ExposedDropdownMenu(expanded = accountExpanded, onDismissRequest = { accountExpanded = false }) {
-                    uiState.accountDisplays.forEach { display ->
-                        DropdownMenuItem(text = { Text("${display.label} (${display.account.currency})") }, onClick = {
-                            viewModel.updateAccountId(display.account.id)
-                            viewModel.updateCurrency(display.account.currency)
-                            accountExpanded = false
-                        })
-                    }
-                }
-            }
+            AccountDropdownWithAdd(
+                accountDisplays = uiState.accountDisplays,
+                selectedId = uiState.accountId,
+                onSelect = { id, currency ->
+                    viewModel.updateAccountId(id)
+                    viewModel.updateCurrency(currency)
+                },
+                onCreateAccount = viewModel::createAccount
+            )
 
             CategoryDropdownWithAdd(
                 categories = uiState.categories,
