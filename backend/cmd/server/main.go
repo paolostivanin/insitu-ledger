@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pstivanin/insitu-ledger/backend/internal"
 	"github.com/pstivanin/insitu-ledger/backend/internal/api"
 	"github.com/pstivanin/insitu-ledger/backend/internal/auth"
 	"github.com/pstivanin/insitu-ledger/backend/internal/db"
@@ -20,6 +21,8 @@ func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	dataDir := flag.String("data", "./data", "data directory for SQLite database")
 	flag.Parse()
+
+	log.Printf("InSitu Ledger v%s", internal.Version)
 
 	// Allow env override
 	if v := os.Getenv("INSITU_ADDR"); v != "" {
