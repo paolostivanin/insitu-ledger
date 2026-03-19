@@ -42,6 +42,7 @@ import com.insituledger.app.ui.login.LoginScreen
 import com.insituledger.app.ui.scheduled.ScheduledFormScreen
 import com.insituledger.app.ui.scheduled.ScheduledScreen
 import com.insituledger.app.ui.settings.SettingsScreen
+import com.insituledger.app.ui.shared.SharedScreen
 import com.insituledger.app.ui.transactions.TransactionFormScreen
 import com.insituledger.app.ui.transactions.TransactionsScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -192,7 +193,8 @@ fun AppNavigation() {
                     DashboardScreen(
                         onTransactionClick = { id ->
                             navController.navigate(Screen.TransactionForm.createRoute(id))
-                        }
+                        },
+                        onAddClick = { navController.navigate(Screen.TransactionForm.createRoute()) }
                     )
                 }
 
@@ -230,6 +232,7 @@ fun AppNavigation() {
                     MoreScreen(
                         onAccountsClick = { navController.navigate(Screen.Accounts.route) },
                         onCategoriesClick = { navController.navigate(Screen.Categories.route) },
+                        onSharedClick = { navController.navigate(Screen.Shared.route) },
                         onSettingsClick = { navController.navigate(Screen.Settings.route) }
                     )
                 }
@@ -262,6 +265,10 @@ fun AppNavigation() {
                     arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null })
                 ) {
                     CategoryFormScreen(onBack = { navController.popBackStack() })
+                }
+
+                composable(Screen.Shared.route) {
+                    SharedScreen(onBack = { navController.popBackStack() })
                 }
 
                 composable(Screen.Settings.route) {

@@ -1,11 +1,18 @@
 package com.insituledger.app.ui.categories
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -73,8 +80,7 @@ fun CategoryFormScreen(
             OutlinedTextField(value = uiState.icon, onValueChange = viewModel::updateIcon,
                 label = { Text("Icon (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 
-            OutlinedTextField(value = uiState.color, onValueChange = viewModel::updateColor,
-                label = { Text("Color (e.g. #FF5733)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            ColorPickerSection(selectedColor = uiState.color, onColorChange = viewModel::updateColor)
 
             uiState.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -85,5 +91,48 @@ fun CategoryFormScreen(
                 else Text(if (uiState.id != null) "Update" else "Create")
             }
         }
+    }
+}
+
+private val presetColors = listOf(
+    "#F44336", "#E91E63", "#9C27B0", "#673AB7",
+    "#3F51B5", "#2196F3", "#03A9F4", "#00BCD4",
+    "#009688", "#4CAF50", "#8BC34A", "#CDDC39",
+    "#FFC107", "#FF9800", "#FF5722", "#795548"
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ColorPickerSection(selectedColor: String, onColorChange: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Color", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            presetColors.forEach { hex ->
+                val color = try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Exception) { Color.Gray }
+                val isSelected = selectedColor.equals(hex, ignoreCase = true)
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(color)
+                        .then(
+                            if (isSelected) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
+                            else Modifier.border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                        )
+                        .clickable { onColorChange(hex) },
+                    contentAlignment = Alignment.Center
+                ) {}
+            }
+        }
+        OutlinedTextField(
+            value = selectedColor,
+            onValueChange = onColorChange,
+            label = { Text("Custom hex") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }

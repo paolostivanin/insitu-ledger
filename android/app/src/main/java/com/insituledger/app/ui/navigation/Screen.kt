@@ -20,5 +20,6 @@ sealed class Screen(val route: String) {
         fun createRoute(id: Long? = null) = if (id != null) "scheduled_form?id=$id" else "scheduled_form"
     }
     data object Settings : Screen("settings")
+    data object Shared : Screen("shared")
     data object More : Screen("more")
 }

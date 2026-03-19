@@ -176,7 +176,13 @@ class TransactionFormViewModel @Inject constructor(
     fun createCategory(name: String, type: String) {
         viewModelScope.launch {
             val id = categoryRepository.create(name, type, null, null, null)
-            _uiState.update { it.copy(categoryId = id) }
+            val owner = sharedAccessState.selectedOwner.value
+            val updatedCategories = if (owner != null) {
+                categoryRepository.listFromServer(owner.ownerId)
+            } else {
+                categoryRepository.getAll().first()
+            }
+            _uiState.update { it.copy(categories = updatedCategories, categoryId = id) }
         }
     }
 

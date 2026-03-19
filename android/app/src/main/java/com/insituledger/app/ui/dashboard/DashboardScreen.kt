@@ -17,6 +17,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AmountText
 import com.insituledger.app.ui.common.LoadingIndicator
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import java.text.NumberFormat
 import java.util.Currency
 import java.util.Locale
@@ -25,12 +27,20 @@ import java.util.Locale
 @Composable
 fun DashboardScreen(
     onTransactionClick: (Long) -> Unit,
+    onAddClick: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("InSitu Ledger") }) }
+        topBar = { TopAppBar(title = { Text("InSitu Ledger") }) },
+        floatingActionButton = {
+            if (!uiState.isReadOnly) {
+                FloatingActionButton(onClick = onAddClick) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Transaction")
+                }
+            }
+        }
     ) { padding ->
         if (uiState.isLoading) {
             LoadingIndicator(modifier = Modifier.padding(padding))
@@ -88,7 +98,7 @@ fun DashboardScreen(
                 item {
                     Text("Accounts", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
                 }
-                items(data.accounts, key = { it.id }) { account ->
+                items(data.accounts, key = { "account_${it.id}" }) { account ->
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -111,7 +121,7 @@ fun DashboardScreen(
                 item {
                     Text("Recent Transactions", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
                 }
-                items(data.recentTransactions, key = { it.id }) { txn ->
+                items(data.recentTransactions, key = { "txn_${it.id}" }) { txn ->
                     TransactionItem(txn = txn, onClick = { onTransactionClick(txn.id) })
                 }
             }

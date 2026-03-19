@@ -65,7 +65,7 @@ fun CategoriesScreen(
                             Text("Expense", style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp))
                         }
-                        items(uiState.expenseCategories, key = { it.id }) { cat ->
+                        items(uiState.expenseCategories, key = { "expense_${it.id}" }) { cat ->
                             CategoryRow(
                                 cat,
                                 onEdit = if (uiState.isReadOnly) null else {{ onEditClick(cat.id) }},
@@ -78,7 +78,7 @@ fun CategoriesScreen(
                             Text("Income", style = MaterialTheme.typography.titleSmall,
                                 color = Color(0xFF2E7D32), modifier = Modifier.padding(vertical = 8.dp))
                         }
-                        items(uiState.incomeCategories, key = { it.id }) { cat ->
+                        items(uiState.incomeCategories, key = { "income_${it.id}" }) { cat ->
                             CategoryRow(
                                 cat,
                                 onEdit = if (uiState.isReadOnly) null else {{ onEditClick(cat.id) }},
