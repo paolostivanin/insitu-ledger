@@ -2,6 +2,7 @@ package com.insituledger.app.ui.shared
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.remote.dto.SharedAccessDto
 import com.insituledger.app.data.repository.SharedRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -12,6 +13,7 @@ import javax.inject.Inject
 data class SharedUiState(
     val accesses: List<SharedAccessDto> = emptyList(),
     val isLoading: Boolean = true,
+    val isConnected: Boolean = false,
     val email: String = "",
     val permission: String = "read",
     val isSaving: Boolean = false,
@@ -20,7 +22,8 @@ data class SharedUiState(
 
 @HiltViewModel
 class SharedViewModel @Inject constructor(
-    private val sharedRepository: SharedRepository
+    private val sharedRepository: SharedRepository,
+    private val prefs: UserPreferences
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SharedUiState())
@@ -30,9 +33,22 @@ class SharedViewModel @Inject constructor(
 
     private fun load() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-            val list = sharedRepository.listSharedAccess()
-            _uiState.update { it.copy(accesses = list, isLoading = false) }
+            val syncMode = prefs.syncModeFlow.first()
+            val token = prefs.tokenFlow.first()
+            val connected = syncMode == "webapp" && token != null
+
+            if (!connected) {
+                _uiState.update { it.copy(isLoading = false, isConnected = false) }
+                return@launch
+            }
+
+            _uiState.update { it.copy(isLoading = true, isConnected = true, error = null) }
+            try {
+                val list = sharedRepository.listSharedAccess()
+                _uiState.update { it.copy(accesses = list, isLoading = false) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false, error = e.message ?: "Failed to load shared access") }
+            }
         }
     }
 
@@ -60,8 +76,12 @@ class SharedViewModel @Inject constructor(
 
     fun delete(id: Long) {
         viewModelScope.launch {
-            sharedRepository.deleteSharedAccess(id)
-            load()
+            try {
+                sharedRepository.deleteSharedAccess(id)
+                load()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message ?: "Failed to delete") }
+            }
         }
     }
 }
