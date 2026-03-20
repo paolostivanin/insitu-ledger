@@ -38,12 +38,7 @@ class ScheduledTransactionWorker @AssistedInject constructor(
         Log.d(TAG, "Found ${due.size} due scheduled transaction(s)")
 
         for (scheduled in due) {
-            // Extract date portion for the transaction
-            val txDate = if (scheduled.nextOccurrence.contains("T")) {
-                scheduled.nextOccurrence.substringBefore("T")
-            } else {
-                scheduled.nextOccurrence
-            }
+            val txDate = scheduled.nextOccurrence
 
             // Generate a local negative ID for the new transaction
             val minId = transactionDao.getMinId() ?: 0

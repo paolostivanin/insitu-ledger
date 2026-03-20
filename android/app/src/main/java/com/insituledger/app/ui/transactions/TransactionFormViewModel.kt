@@ -9,6 +9,7 @@ import com.insituledger.app.data.repository.CategoryRepository
 import com.insituledger.app.data.repository.ScheduledRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
+import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
@@ -60,6 +62,7 @@ class TransactionFormViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val categoryRepository: CategoryRepository,
     private val scheduledRepository: ScheduledRepository,
+    private val syncManager: SyncManager,
     private val sharedAccessState: SharedAccessState,
     private val prefs: UserPreferences
 ) : ViewModel() {
@@ -259,6 +262,16 @@ class TransactionFormViewModel @Inject constructor(
                             amount, state.currency, state.description.ifBlank { null },
                             rrule = "FREQ=DAILY", nextOccurrence = state.date, maxOccurrences = 1
                         )
+                        // Schedule a check at the exact future time
+                        val targetTime = if (state.date.contains("T")) {
+                            LocalDateTime.parse(state.date, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
+                        } else {
+                            LocalDate.parse(state.date).atStartOfDay()
+                        }
+                        val delayMs = targetTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() - System.currentTimeMillis()
+                        if (delayMs > 0) {
+                            syncManager.scheduleDelayedScheduledCheck(delayMs)
+                        }
                     } else {
                         transactionRepository.create(
                             state.accountId, state.categoryId, state.type,

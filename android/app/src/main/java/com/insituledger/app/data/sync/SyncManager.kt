@@ -74,6 +74,18 @@ class SyncManager @Inject constructor(
         )
     }
 
+    fun triggerImmediateScheduledCheck() {
+        val request = OneTimeWorkRequestBuilder<ScheduledTransactionWorker>().build()
+        workManager.get().enqueue(request)
+    }
+
+    fun scheduleDelayedScheduledCheck(delayMillis: Long) {
+        val request = OneTimeWorkRequestBuilder<ScheduledTransactionWorker>()
+            .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
+            .build()
+        workManager.get().enqueue(request)
+    }
+
     fun cancelAll() {
         workManager.get().cancelUniqueWork(PERIODIC_SYNC_WORK)
         workManager.get().cancelUniqueWork(ONE_TIME_SYNC_WORK)
