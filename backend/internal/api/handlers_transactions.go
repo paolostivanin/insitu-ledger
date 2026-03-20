@@ -78,11 +78,11 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 	args := []any{targetUserID}
 
 	if from != "" {
-		query += " AND t.date >= ?"
+		query += " AND SUBSTR(t.date, 1, 10) >= ?"
 		args = append(args, from)
 	}
 	if to != "" {
-		query += " AND t.date <= ?"
+		query += " AND SUBSTR(t.date, 1, 10) <= ?"
 		args = append(args, to)
 	}
 	if catID != "" {

@@ -14,8 +14,8 @@ interface TransactionDao {
     @Query("""
         SELECT * FROM transactions
         WHERE deleted_at IS NULL
-        AND (:from IS NULL OR date >= :from)
-        AND (:to IS NULL OR date <= :to)
+        AND (:from IS NULL OR SUBSTR(date, 1, 10) >= :from)
+        AND (:to IS NULL OR SUBSTR(date, 1, 10) <= :to)
         AND (:categoryId IS NULL OR category_id = :categoryId)
         ORDER BY date DESC, id DESC
         LIMIT :limit OFFSET :offset
@@ -41,7 +41,7 @@ interface TransactionDao {
         SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as income,
                COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as expense
         FROM transactions
-        WHERE deleted_at IS NULL AND date >= :from AND date <= :to
+        WHERE deleted_at IS NULL AND SUBSTR(date, 1, 10) >= :from AND SUBSTR(date, 1, 10) <= :to
     """)
     suspend fun getMonthlySummary(from: String, to: String): MonthlySummary
 
@@ -90,8 +90,8 @@ interface TransactionDao {
     @Query("""
         SELECT * FROM transactions
         WHERE deleted_at IS NULL
-        AND (:from IS NULL OR date >= :from)
-        AND (:to IS NULL OR date <= :to)
+        AND (:from IS NULL OR SUBSTR(date, 1, 10) >= :from)
+        AND (:to IS NULL OR SUBSTR(date, 1, 10) <= :to)
         AND (:categoryId IS NULL OR category_id = :categoryId)
         ORDER BY date DESC, id DESC
     """)
