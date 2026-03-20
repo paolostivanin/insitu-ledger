@@ -112,9 +112,14 @@ func processDue(db *sql.DB) {
 			active = 0
 		}
 
+		deletedAt := sql.NullTime{}
+		if deactivate {
+			deletedAt = sql.NullTime{Time: now, Valid: true}
+		}
+
 		if _, err := tx.Exec(
-			"UPDATE scheduled_transactions SET next_occurrence = ?, occurrence_count = ?, active = ? WHERE id = ?",
-			next, newCount, active, s.id,
+			"UPDATE scheduled_transactions SET next_occurrence = ?, occurrence_count = ?, active = ?, deleted_at = ? WHERE id = ?",
+			next, newCount, active, deletedAt, s.id,
 		); err != nil {
 			tx.Rollback()
 			log.Printf("scheduler: advance next_occurrence error for scheduled %d: %v", s.id, err)

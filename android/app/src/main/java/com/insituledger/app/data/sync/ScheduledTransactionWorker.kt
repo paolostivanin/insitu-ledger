@@ -69,7 +69,8 @@ class ScheduledTransactionWorker @AssistedInject constructor(
             scheduledDao.upsert(scheduled.copy(
                 nextOccurrence = next,
                 occurrenceCount = newCount,
-                active = if (deactivate) false else scheduled.active
+                active = if (deactivate) false else scheduled.active,
+                deletedAt = if (deactivate) nowStr else scheduled.deletedAt
             ))
 
             Log.d(TAG, "Materialized scheduled ${scheduled.id}, next: $next")
