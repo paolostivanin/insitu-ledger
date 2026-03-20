@@ -4,56 +4,37 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Ledger book body -->
+    <!-- Inner border glow effect -->
+    <path
+        android:pathData="M54,15.5 C40.5,15.5 33.75,15.5 28.63,18.31 C24.18,20.75 20.75,24.18 18.31,28.63 C15.5,33.75 15.5,40.5 15.5,54 C15.5,67.5 15.5,74.25 18.31,79.37 C20.75,83.82 24.18,87.25 28.63,89.69 C33.75,92.5 40.5,92.5 54,92.5 C67.5,92.5 74.25,92.5 79.37,89.69 C83.82,87.25 87.25,83.82 89.69,79.37 C92.5,74.25 92.5,67.5 92.5,54 C92.5,40.5 92.5,33.75 89.69,28.63 C87.25,24.18 83.82,20.75 79.37,18.31 C74.25,15.5 67.5,15.5 54,15.5 Z"
+        android:strokeWidth="1"
+        android:strokeColor="#2596be"
+        android:strokeAlpha="0.3"
+        android:fillColor="#2596be"
+        android:fillAlpha="0.1"/>
+    <!-- Left bar (gradient approximation - blue) -->
+    <path
+        android:fillColor="#3b82f6"
+        android:pathData="M34,43 L44,43 C45.1,43 46,43.9 46,45 L46,66 C46,67.1 45.1,68 44,68 L34,68 C32.9,68 32,67.1 32,66 L32,45 C32,43.9 32.9,43 34,43 Z"/>
+    <!-- Right bar (gradient approximation - cyan-blue) -->
+    <path
+        android:fillColor="#1a9dca"
+        android:pathData="M64,33 L74,33 C75.1,33 76,33.9 76,35 L76,66 C76,67.1 75.1,68 74,68 L64,68 C62.9,68 62,67.1 62,66 L62,35 C62,33.9 62.9,33 64,33 Z"/>
+    <!-- Middle bar (white) -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M30,28 L72,28 C74.2,28 76,29.8 76,32 L76,76 C76,78.2 74.2,80 72,80 L30,80 L30,28 Z"/>
-    <!-- Book spine -->
+        android:pathData="M49,50 L59,50 C60.1,50 61,50.9 61,52 L61,66 C61,67.1 60.1,68 59,68 L49,68 C47.9,68 47,67.1 47,66 L47,52 C47,50.9 47.9,50 49,50 Z"/>
+    <!-- Pin head (white circle) -->
     <path
-        android:fillColor="#E0E7FF"
-        android:pathData="M30,28 L36,28 L36,80 L30,80 C27.8,80 26,78.2 26,76 L26,32 C26,29.8 27.8,28 30,28 Z"/>
-    <!-- Horizontal lines (ledger rows) -->
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,40 m-7,0 a7,7 0 1,1 14,0 a7,7 0 1,1 -14,0"/>
+    <!-- Pin center dot (blue) -->
     <path
-        android:fillColor="#C7D2FE"
-        android:pathData="M40,40 L72,40"
-        android:strokeWidth="1.5"
-        android:strokeColor="#C7D2FE"/>
+        android:fillColor="#2596be"
+        android:pathData="M54,40 m-3,0 a3,3 0 1,1 6,0 a3,3 0 1,1 -6,0"/>
+    <!-- Bottom baseline -->
     <path
-        android:fillColor="#C7D2FE"
-        android:pathData="M40,48 L72,48"
-        android:strokeWidth="1.5"
-        android:strokeColor="#C7D2FE"/>
-    <path
-        android:fillColor="#C7D2FE"
-        android:pathData="M40,56 L72,56"
-        android:strokeWidth="1.5"
-        android:strokeColor="#C7D2FE"/>
-    <!-- Currency symbol -->
-    <path
-        android:fillColor="#6366F1"
-        android:pathData="M56,60 C56,60 52.5,60 50.5,62 C48.5,64 48.5,67 50.5,69 C52.5,71 56,71 56,71 C56,71 59.5,71 61.5,73 C63.5,75 63.5,78 61.5,80"
-        android:strokeWidth="2.5"
-        android:strokeColor="#6366F1"
-        android:strokeLineCap="round"/>
-    <!-- Coin circle -->
-    <path
-        android:fillColor="#6366F1"
-        android:pathData="M56,70 m-14,0 a14,14 0,1 1,28 0 a14,14 0,1 1,-28 0"
-        android:fillAlpha="0.15"/>
-    <path
-        android:pathData="M56,70 m-14,0 a14,14 0,1 1,28 0 a14,14 0,1 1,-28 0"
-        android:strokeWidth="2"
-        android:strokeColor="#6366F1"/>
-    <!-- Dollar sign in coin -->
-    <path
-        android:pathData="M56,61 L56,79"
-        android:strokeWidth="2"
-        android:strokeColor="#6366F1"
-        android:strokeLineCap="round"/>
-    <path
-        android:pathData="M52,64.5 C52,64.5 53,63 56,63 C59,63 60,64.5 60,65.5 C60,67 58,67.5 56,68 C54,68.5 52,69 52,71 C52,72.5 53.5,74 56,74 C59,74 60,72.5 60,72.5"
-        android:strokeWidth="2"
-        android:strokeColor="#6366F1"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"/>
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.3"
+        android:pathData="M30,73 L78,73 C79.1,73 80,73.4 80,74 C80,74.6 79.1,75 78,75 L30,75 C28.9,75 28,74.6 28,74 C28,73.4 28.9,73 30,73 Z"/>
 </vector>
