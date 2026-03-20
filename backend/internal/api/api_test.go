@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     amount REAL NOT NULL CHECK (amount > 0),
     currency TEXT NOT NULL DEFAULT 'EUR',
     description TEXT,
-    date DATE NOT NULL,
+    date TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,

@@ -1,12 +1,13 @@
 package com.insituledger.app.ui.transactions
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.FilterListOff
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -38,26 +39,72 @@ fun TransactionsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showFilters by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var pendingDeleteId by remember { mutableStateOf<Long?>(null) }
+    var showBatchDeleteDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Transactions") },
-                actions = {
-                    val hasFilters = uiState.filterFrom != null || uiState.filterTo != null || uiState.filterCategoryId != null
-                    IconButton(onClick = {
-                        if (hasFilters) viewModel.clearFilters() else showFilters = !showFilters
-                    }) {
-                        Icon(
-                            if (hasFilters) Icons.Default.FilterListOff else Icons.Default.FilterList,
-                            contentDescription = "Filters"
-                        )
+            if (uiState.isSelectionMode) {
+                TopAppBar(
+                    title = { Text("${uiState.selectedIds.size} selected") },
+                    navigationIcon = {
+                        IconButton(onClick = { viewModel.clearSelection() }) {
+                            Icon(Icons.Default.Close, contentDescription = "Exit selection")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.selectAll() }) {
+                            Icon(Icons.Default.SelectAll, contentDescription = "Select All")
+                        }
+                        IconButton(onClick = { showBatchDeleteDialog = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete selected")
+                        }
                     }
-                }
-            )
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        if (uiState.isSearchActive) {
+                            TextField(
+                                value = uiState.searchQuery,
+                                onValueChange = { viewModel.setSearchQuery(it) },
+                                placeholder = { Text("Search transactions...") },
+                                singleLine = true,
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            Text("Transactions")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.toggleSearch() }) {
+                            Icon(
+                                if (uiState.isSearchActive) Icons.Default.Close else Icons.Default.Search,
+                                contentDescription = "Search"
+                            )
+                        }
+                        val hasFilters = uiState.filterFrom != null || uiState.filterTo != null || uiState.filterCategoryId != null
+                        IconButton(onClick = {
+                            if (hasFilters) viewModel.clearFilters() else showFilters = !showFilters
+                        }) {
+                            Icon(
+                                if (hasFilters) Icons.Default.FilterListOff else Icons.Default.FilterList,
+                                contentDescription = "Filters"
+                            )
+                        }
+                    }
+                )
+            }
         },
         floatingActionButton = {
-            if (!uiState.isReadOnly) {
+            if (!uiState.isReadOnly && !uiState.isSelectionMode) {
                 FloatingActionButton(onClick = onAddClick) {
                     Icon(Icons.Default.Add, contentDescription = "Add Transaction")
                 }
@@ -98,7 +145,7 @@ fun TransactionsScreen(
                     uiState.transactions.isEmpty() -> EmptyState("No transactions")
                     else -> {
                         if (uiState.sortBy == "date") {
-                            val grouped = uiState.transactions.groupBy { it.date }
+                            val grouped = uiState.transactions.groupBy { it.date.take(10) }
                             LazyColumn(
                                 contentPadding = PaddingValues(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -127,11 +174,21 @@ fun TransactionsScreen(
                                         }
                                     }
                                     items(txns, key = { it.id }) { txn ->
-                                        TransactionRow(
+                                        SwipeableTransactionRow(
                                             txn = txn,
                                             categories = uiState.categories,
-                                            onClick = { onTransactionClick(txn.id) },
-                                            onDelete = if (uiState.isReadOnly) null else {{ viewModel.delete(txn.id) }}
+                                            isSelectionMode = uiState.isSelectionMode,
+                                            isSelected = uiState.selectedIds.contains(txn.id),
+                                            isReadOnly = uiState.isReadOnly,
+                                            onClick = {
+                                                if (uiState.isSelectionMode) viewModel.toggleSelect(txn.id)
+                                                else onTransactionClick(txn.id)
+                                            },
+                                            onLongClick = { viewModel.toggleSelect(txn.id) },
+                                            onSwipeDelete = {
+                                                pendingDeleteId = txn.id
+                                                showDeleteDialog = true
+                                            }
                                         )
                                     }
                                 }
@@ -142,11 +199,21 @@ fun TransactionsScreen(
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 items(uiState.transactions, key = { it.id }) { txn ->
-                                    TransactionRow(
+                                    SwipeableTransactionRow(
                                         txn = txn,
                                         categories = uiState.categories,
-                                        onClick = { onTransactionClick(txn.id) },
-                                        onDelete = { viewModel.delete(txn.id) }
+                                        isSelectionMode = uiState.isSelectionMode,
+                                        isSelected = uiState.selectedIds.contains(txn.id),
+                                        isReadOnly = uiState.isReadOnly,
+                                        onClick = {
+                                            if (uiState.isSelectionMode) viewModel.toggleSelect(txn.id)
+                                            else onTransactionClick(txn.id)
+                                        },
+                                        onLongClick = { viewModel.toggleSelect(txn.id) },
+                                        onSwipeDelete = {
+                                            pendingDeleteId = txn.id
+                                            showDeleteDialog = true
+                                        }
                                     )
                                 }
                             }
@@ -155,6 +222,147 @@ fun TransactionsScreen(
                 }
             }
         }
+    }
+
+    // Single delete confirmation dialog
+    if (showDeleteDialog && pendingDeleteId != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false; pendingDeleteId = null },
+            title = { Text("Delete Transaction") },
+            text = { Text("Delete this transaction?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.delete(pendingDeleteId!!)
+                    showDeleteDialog = false
+                    pendingDeleteId = null
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false; pendingDeleteId = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Batch delete confirmation dialog
+    if (showBatchDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showBatchDeleteDialog = false },
+            title = { Text("Delete Transactions") },
+            text = { Text("Delete ${uiState.selectedIds.size} transaction(s)?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteSelected()
+                    showBatchDeleteDialog = false
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatchDeleteDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+private fun SwipeableTransactionRow(
+    txn: Transaction,
+    categories: List<Category>,
+    isSelectionMode: Boolean,
+    isSelected: Boolean,
+    isReadOnly: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onSwipeDelete: () -> Unit
+) {
+    if (isReadOnly || isSelectionMode) {
+        Card(
+            modifier = Modifier.fillMaxWidth().combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
+        ) {
+            TransactionRowContent(txn, categories, isSelectionMode, isSelected)
+        }
+    } else {
+        val dismissState = rememberSwipeToDismissBoxState(
+            confirmValueChange = { value ->
+                if (value == SwipeToDismissBoxValue.EndToStart) {
+                    onSwipeDelete()
+                    false // Don't dismiss yet — wait for dialog confirmation
+                } else {
+                    false
+                }
+            }
+        )
+        SwipeToDismissBox(
+            state = dismissState,
+            backgroundContent = {
+                val color by animateColorAsState(
+                    targetValue = if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart)
+                        MaterialTheme.colorScheme.error else Color.Transparent,
+                    label = "swipe-bg"
+                )
+                Box(
+                    modifier = Modifier.fillMaxSize().background(color).padding(horizontal = 20.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
+                }
+            },
+            enableDismissFromStartToEnd = false,
+            enableDismissFromEndToStart = true
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth().combinedClickable(
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                )
+            ) {
+                TransactionRowContent(txn, categories, isSelectionMode, isSelected)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TransactionRowContent(
+    txn: Transaction,
+    categories: List<Category>,
+    isSelectionMode: Boolean,
+    isSelected: Boolean
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (isSelectionMode) {
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = null,
+                modifier = Modifier.padding(end = 8.dp)
+            )
+        }
+        Row(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val categoryColor = categories.find { it.id == txn.categoryId }?.color
+            if (categoryColor != null) {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(parseColor(categoryColor))
+                )
+            }
+            Text(
+                text = txn.description ?: txn.type.replaceFirstChar { it.uppercase() },
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        AmountText(amount = txn.amount, type = txn.type, currency = txn.currency)
     }
 }
 
@@ -263,38 +471,6 @@ private fun FilterBar(
                 }
                 Button(onClick = { onApply(fromText, toText, catId) }) { Text("Apply") }
             }
-        }
-    }
-}
-
-@Composable
-private fun TransactionRow(txn: Transaction, categories: List<Category>, onClick: () -> Unit, onDelete: (() -> Unit)?) {
-    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val categoryColor = categories.find { it.id == txn.categoryId }?.color
-                if (categoryColor != null) {
-                    Box(
-                        modifier = Modifier
-                            .size(12.dp)
-                            .clip(CircleShape)
-                            .background(parseColor(categoryColor))
-                    )
-                }
-                Text(
-                    text = txn.description ?: txn.type.replaceFirstChar { it.uppercase() },
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-            AmountText(amount = txn.amount, type = txn.type, currency = txn.currency)
         }
     }
 }

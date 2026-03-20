@@ -204,6 +204,10 @@ class TransactionRepository @Inject constructor(
         }
     }
 
+    fun search(query: String): Flow<List<Transaction>> = transactionDao.search(query).map { list ->
+        list.map { it.toDomain() }
+    }
+
     suspend fun getFilteredSync(from: String?, to: String?, categoryId: Long?): List<Transaction> =
         transactionDao.getFilteredSync(from, to, categoryId).map { it.toDomain() }
 

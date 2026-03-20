@@ -61,6 +61,14 @@ interface TransactionDao {
     """)
     suspend fun autocomplete(query: String): List<LocalAutocompleteSuggestion>
 
+    @Query("""
+        SELECT * FROM transactions
+        WHERE deleted_at IS NULL
+        AND description LIKE '%' || :query || '%' COLLATE NOCASE
+        ORDER BY date DESC, id DESC
+    """)
+    fun search(query: String): Flow<List<TransactionEntity>>
+
     @RawQuery(observedEntities = [TransactionEntity::class])
     fun getSorted(query: SupportSQLiteQuery): Flow<List<TransactionEntity>>
 

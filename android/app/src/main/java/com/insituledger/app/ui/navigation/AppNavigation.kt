@@ -44,6 +44,7 @@ import com.insituledger.app.ui.scheduled.ScheduledFormScreen
 import com.insituledger.app.ui.scheduled.ScheduledScreen
 import com.insituledger.app.ui.settings.SettingsScreen
 import com.insituledger.app.ui.shared.SharedScreen
+import com.insituledger.app.ui.about.AboutScreen
 import com.insituledger.app.ui.transactions.TransactionFormScreen
 import com.insituledger.app.ui.transactions.TransactionsScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -235,7 +236,8 @@ fun AppNavigation() {
                         onCategoriesClick = { navController.navigate(Screen.Categories.route) },
                         onReportsClick = { navController.navigate(Screen.Reports.route) },
                         onSharedClick = { navController.navigate(Screen.Shared.route) },
-                        onSettingsClick = { navController.navigate(Screen.Settings.route) }
+                        onSettingsClick = { navController.navigate(Screen.Settings.route) },
+                        onAboutClick = { navController.navigate(Screen.About.route) }
                     )
                 }
 
@@ -282,6 +284,10 @@ fun AppNavigation() {
                         onBack = { navController.popBackStack() },
                         onConnectWebapp = { navController.navigate(Screen.Login.route) }
                     )
+                }
+
+                composable(Screen.About.route) {
+                    AboutScreen(onBack = { navController.popBackStack() })
                 }
 
                 // Login screen accessible from Settings for webapp sync setup

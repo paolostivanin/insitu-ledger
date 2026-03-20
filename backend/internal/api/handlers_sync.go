@@ -57,7 +57,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			txns = append(txns, map[string]any{
 				"id": id, "account_id": accountID, "category_id": categoryID,
 				"user_id": uid, "type": typ, "amount": amount, "currency": currency,
-				"description": description, "date": truncDate(date), "created_at": createdAt,
+				"description": description, "date": date, "created_at": createdAt,
 				"updated_at": updatedAt, "deleted_at": deletedAt, "sync_version": sv,
 			})
 		}

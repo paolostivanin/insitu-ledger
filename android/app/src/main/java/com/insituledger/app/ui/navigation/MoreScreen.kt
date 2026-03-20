@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -22,7 +23,8 @@ fun MoreScreen(
     onCategoriesClick: () -> Unit,
     onReportsClick: () -> Unit,
     onSharedClick: () -> Unit,
-    onSettingsClick: () -> Unit
+    onSettingsClick: () -> Unit,
+    onAboutClick: () -> Unit
 ) {
     Scaffold(
         topBar = { TopAppBar(title = { Text("More") }) }
@@ -40,6 +42,7 @@ fun MoreScreen(
             MoreMenuItem(Icons.Default.Share, "Shared Access", onSharedClick)
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             MoreMenuItem(Icons.Default.Settings, "Settings", onSettingsClick)
+            MoreMenuItem(Icons.Default.Info, "About", onAboutClick)
         }
     }
 }
