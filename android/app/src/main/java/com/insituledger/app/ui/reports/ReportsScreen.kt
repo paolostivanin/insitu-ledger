@@ -2,6 +2,7 @@ package com.insituledger.app.ui.reports
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,6 +25,10 @@ import com.insituledger.app.ui.common.ExpenseColor
 import com.insituledger.app.ui.common.IncomeColor
 import com.insituledger.app.ui.common.LoadingIndicator
 import java.text.NumberFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Currency
 import java.util.Locale
 
@@ -88,26 +93,111 @@ private fun SummaryView(
                 }
             }
 
-            // Custom date range fields
+            // Custom date range fields with date pickers
             if (uiState.dateRangePreset == DateRangePreset.CUSTOM) {
                 item {
                     var fromText by remember { mutableStateOf(uiState.customFrom) }
                     var toText by remember { mutableStateOf(uiState.customTo) }
+                    var showFromPicker by remember { mutableStateOf(false) }
+                    var showToPicker by remember { mutableStateOf(false) }
+
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = fromText, onValueChange = { fromText = it },
-                            label = { Text("From") }, placeholder = { Text("YYYY-MM-DD") },
-                            singleLine = true, modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = toText, onValueChange = { toText = it },
-                            label = { Text("To") }, placeholder = { Text("YYYY-MM-DD") },
-                            singleLine = true, modifier = Modifier.weight(1f)
-                        )
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedTextField(
+                                value = fromText,
+                                onValueChange = {},
+                                label = { Text("From") },
+                                placeholder = { Text("YYYY-MM-DD") },
+                                readOnly = true,
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { showFromPicker = true }
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedTextField(
+                                value = toText,
+                                onValueChange = {},
+                                label = { Text("To") },
+                                placeholder = { Text("YYYY-MM-DD") },
+                                readOnly = true,
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { showToPicker = true }
+                            )
+                        }
                         Button(
                             onClick = { viewModel.setCustomDateRange(fromText, toText) },
                             modifier = Modifier.align(Alignment.CenterVertically)
                         ) { Text("Apply") }
+                    }
+
+                    if (showFromPicker) {
+                        val initialMillis = try {
+                            LocalDate.parse(fromText, DateTimeFormatter.ISO_LOCAL_DATE)
+                                .atStartOfDay(ZoneId.of("UTC"))
+                                .toInstant().toEpochMilli()
+                        } catch (_: Exception) {
+                            System.currentTimeMillis()
+                        }
+                        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+                        DatePickerDialog(
+                            onDismissRequest = { showFromPicker = false },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    datePickerState.selectedDateMillis?.let { millis ->
+                                        fromText = Instant.ofEpochMilli(millis)
+                                            .atZone(ZoneId.of("UTC"))
+                                            .toLocalDate()
+                                            .format(DateTimeFormatter.ISO_LOCAL_DATE)
+                                    }
+                                    showFromPicker = false
+                                }) { Text("OK") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showFromPicker = false }) { Text("Cancel") }
+                            }
+                        ) {
+                            DatePicker(state = datePickerState)
+                        }
+                    }
+
+                    if (showToPicker) {
+                        val initialMillis = try {
+                            LocalDate.parse(toText, DateTimeFormatter.ISO_LOCAL_DATE)
+                                .atStartOfDay(ZoneId.of("UTC"))
+                                .toInstant().toEpochMilli()
+                        } catch (_: Exception) {
+                            System.currentTimeMillis()
+                        }
+                        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+                        DatePickerDialog(
+                            onDismissRequest = { showToPicker = false },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    datePickerState.selectedDateMillis?.let { millis ->
+                                        toText = Instant.ofEpochMilli(millis)
+                                            .atZone(ZoneId.of("UTC"))
+                                            .toLocalDate()
+                                            .format(DateTimeFormatter.ISO_LOCAL_DATE)
+                                    }
+                                    showToPicker = false
+                                }) { Text("OK") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showToPicker = false }) { Text("Cancel") }
+                            }
+                        ) {
+                            DatePicker(state = datePickerState)
+                        }
                     }
                 }
             }
@@ -271,6 +361,8 @@ private fun SummaryCard(title: String, amount: Double, color: Color, modifier: M
 }
 
 private fun presetLabel(preset: DateRangePreset): String = when (preset) {
+    DateRangePreset.THIS_WEEK -> "This Week"
+    DateRangePreset.THIS_MONTH -> "This Month"
     DateRangePreset.LAST_WEEK -> "Last Week"
     DateRangePreset.LAST_MONTH -> "Last Month"
     DateRangePreset.LAST_3_MONTHS -> "Last 3 Months"

@@ -15,6 +15,7 @@ import javax.inject.Inject
 
 data class SettingsUiState(
     val themeMode: String = "system",
+    val weekStartDay: String = "monday",
     val biometricEnabled: Boolean = false,
     val syncMode: String = "none",
     // Webapp sync fields
@@ -67,6 +68,12 @@ class SettingsViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            prefs.weekStartDayFlow.collect { day ->
+                _uiState.update { it.copy(weekStartDay = day) }
+            }
+        }
+
+        viewModelScope.launch {
             combine(
                 prefs.lastSyncVersionFlow,
                 pendingOpDao.getCount()
@@ -80,6 +87,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setTheme(mode: String) {
         viewModelScope.launch { prefs.saveThemeMode(mode) }
+    }
+
+    fun setWeekStartDay(day: String) {
+        viewModelScope.launch { prefs.saveWeekStartDay(day) }
     }
 
     fun setBiometric(enabled: Boolean) {

@@ -83,6 +83,23 @@ fun SettingsScreen(
                 }
             }
 
+            // Week starts on
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Week starts on", style = MaterialTheme.typography.titleSmall)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("monday" to "Monday", "sunday" to "Sunday").forEach { (value, label) ->
+                            FilterChip(
+                                selected = uiState.weekStartDay == value,
+                                onClick = { viewModel.setWeekStartDay(value) },
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+                }
+            }
+
             // Biometric unlock
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(

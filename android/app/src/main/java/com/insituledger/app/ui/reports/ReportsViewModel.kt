@@ -2,6 +2,7 @@ package com.insituledger.app.ui.reports
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.CategoryRepository
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.domain.model.Category
@@ -9,8 +10,11 @@ import com.insituledger.app.domain.model.Transaction
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
 import javax.inject.Inject
 
 data class CategorySummary(
@@ -18,14 +22,14 @@ data class CategorySummary(
     val total: Double
 )
 
-enum class DateRangePreset { LAST_WEEK, LAST_MONTH, LAST_3_MONTHS, LAST_YEAR, CUSTOM }
+enum class DateRangePreset { THIS_WEEK, THIS_MONTH, LAST_WEEK, LAST_MONTH, LAST_3_MONTHS, LAST_YEAR, CUSTOM }
 
 data class ReportsUiState(
     val categories: List<Category> = emptyList(),
     val totalIncome: Double = 0.0,
     val totalExpense: Double = 0.0,
     val categoryBreakdown: List<CategorySummary> = emptyList(),
-    val dateRangePreset: DateRangePreset = DateRangePreset.LAST_MONTH,
+    val dateRangePreset: DateRangePreset = DateRangePreset.THIS_MONTH,
     val customFrom: String = "",
     val customTo: String = "",
     val isLoading: Boolean = true,
@@ -37,16 +41,26 @@ data class ReportsUiState(
 @HiltViewModel
 class ReportsViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
-    private val categoryRepository: CategoryRepository
+    private val categoryRepository: CategoryRepository,
+    private val prefs: UserPreferences
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReportsUiState())
     val uiState: StateFlow<ReportsUiState> = _uiState.asStateFlow()
 
+    private var weekStartDay: DayOfWeek = DayOfWeek.MONDAY
+
     init {
         viewModelScope.launch {
             categoryRepository.getAll().collect { cats ->
                 _uiState.update { it.copy(categories = cats) }
+                loadReport()
+            }
+        }
+
+        viewModelScope.launch {
+            prefs.weekStartDayFlow.collect { day ->
+                weekStartDay = if (day == "sunday") DayOfWeek.SUNDAY else DayOfWeek.MONDAY
                 loadReport()
             }
         }
@@ -115,10 +129,32 @@ class ReportsViewModel @Inject constructor(
         val now = LocalDate.now()
         val fmt = DateTimeFormatter.ISO_LOCAL_DATE
         return when (state.dateRangePreset) {
-            DateRangePreset.LAST_WEEK -> now.minusWeeks(1).format(fmt) to now.format(fmt)
-            DateRangePreset.LAST_MONTH -> now.minusMonths(1).format(fmt) to now.format(fmt)
-            DateRangePreset.LAST_3_MONTHS -> now.minusMonths(3).format(fmt) to now.format(fmt)
-            DateRangePreset.LAST_YEAR -> now.minusYears(1).format(fmt) to now.format(fmt)
+            DateRangePreset.THIS_WEEK -> {
+                val weekStart = now.with(TemporalAdjusters.previousOrSame(weekStartDay))
+                weekStart.format(fmt) to now.format(fmt)
+            }
+            DateRangePreset.THIS_MONTH -> {
+                now.withDayOfMonth(1).format(fmt) to now.format(fmt)
+            }
+            DateRangePreset.LAST_WEEK -> {
+                val thisWeekStart = now.with(TemporalAdjusters.previousOrSame(weekStartDay))
+                val lastWeekStart = thisWeekStart.minusWeeks(1)
+                val lastWeekEnd = thisWeekStart.minusDays(1)
+                lastWeekStart.format(fmt) to lastWeekEnd.format(fmt)
+            }
+            DateRangePreset.LAST_MONTH -> {
+                val lastMonth = YearMonth.from(now).minusMonths(1)
+                lastMonth.atDay(1).format(fmt) to lastMonth.atEndOfMonth().format(fmt)
+            }
+            DateRangePreset.LAST_3_MONTHS -> {
+                val threeMonthsAgo = YearMonth.from(now).minusMonths(3)
+                val lastMonth = YearMonth.from(now).minusMonths(1)
+                threeMonthsAgo.atDay(1).format(fmt) to lastMonth.atEndOfMonth().format(fmt)
+            }
+            DateRangePreset.LAST_YEAR -> {
+                val lastYear = now.year - 1
+                LocalDate.of(lastYear, 1, 1).format(fmt) to LocalDate.of(lastYear, 12, 31).format(fmt)
+            }
             DateRangePreset.CUSTOM -> {
                 val from = state.customFrom.ifBlank { null }
                 val to = state.customTo.ifBlank { null }

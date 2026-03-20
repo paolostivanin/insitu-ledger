@@ -38,6 +38,7 @@ class UserPreferences @Inject constructor(
         val SYNC_MODE = stringPreferencesKey("sync_mode") // "none", "webapp", "gdrive"
         val SHARED_OWNER_ID = longPreferencesKey("shared_owner_id")
         val LAST_USED_ACCOUNT_ID = longPreferencesKey("last_used_account_id")
+        val WEEK_START_DAY = stringPreferencesKey("week_start_day")
 
         private const val ENCRYPTED_PREFS_FILE = "secure_prefs"
         private const val KEY_TOKEN = "token"
@@ -69,6 +70,7 @@ class UserPreferences @Inject constructor(
     val syncModeFlow: Flow<String> = context.dataStore.data.map { it[SYNC_MODE] ?: "none" }
     val sharedOwnerIdFlow: Flow<Long?> = context.dataStore.data.map { it[SHARED_OWNER_ID] }
     val lastUsedAccountIdFlow: Flow<Long?> = context.dataStore.data.map { it[LAST_USED_ACCOUNT_ID] }
+    val weekStartDayFlow: Flow<String> = context.dataStore.data.map { it[WEEK_START_DAY] ?: "monday" }
 
     suspend fun saveToken(token: String) {
         encryptedPrefs.edit().putString(KEY_TOKEN, token).apply()
@@ -114,6 +116,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun saveLastUsedAccountId(accountId: Long) {
         context.dataStore.edit { it[LAST_USED_ACCOUNT_ID] = accountId }
+    }
+
+    suspend fun saveWeekStartDay(day: String) {
+        context.dataStore.edit { it[WEEK_START_DAY] = day }
     }
 
     @Volatile
