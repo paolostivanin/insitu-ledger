@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { transactions, categories, accounts, batch, csv, type Transaction, type Category, type Account, type AutocompleteSuggestion } from '$lib/api/client';
+	import { transactions, categories, accounts, batch, csv, scheduled, type Transaction, type Category, type Account, type AutocompleteSuggestion } from '$lib/api/client';
 	import CategoryPicker from '$lib/components/CategoryPicker.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { addToast } from '$lib/stores/toast';
@@ -36,6 +36,7 @@
 	let fAmount = $state(0);
 	let fDescription = $state('');
 	let fDate = $state(new Date().toISOString().slice(0, 10));
+	let fTime = $state(new Date().toTimeString().slice(0, 5));
 	let fCurrency = $state('EUR');
 
 	// Batch selection
@@ -201,6 +202,7 @@
 		fAmount = 0;
 		fDescription = '';
 		fDate = new Date().toISOString().slice(0, 10);
+		fTime = new Date().toTimeString().slice(0, 5);
 		fCurrency = 'EUR';
 		if (accts.length) fAccountId = getDefaultAccountId();
 		if (cats.length) fCategoryId = cats[0].id;
@@ -213,7 +215,13 @@
 		fCategoryId = txn.category_id;
 		fAmount = txn.amount;
 		fDescription = txn.description || '';
-		fDate = txn.date;
+		if (txn.date.includes('T')) {
+			fDate = txn.date.slice(0, 10);
+			fTime = txn.date.slice(11, 16);
+		} else {
+			fDate = txn.date;
+			fTime = '00:00';
+		}
 		fCurrency = txn.currency;
 		showForm = true;
 	}
@@ -229,7 +237,7 @@
 			amount: fAmount,
 			currency: fCurrency,
 			description: fDescription || undefined,
-			date: fDate
+			date: `${fDate}T${fTime}`
 		};
 		const oid = $sharedOwnerUserId || undefined;
 		try {
@@ -237,7 +245,23 @@
 			if (editId) {
 				await transactions.update(editId, data, oid);
 			} else {
-				await transactions.create(data, oid);
+				const isFuture = new Date(`${fDate}T${fTime}`) > new Date();
+				if (isFuture) {
+					await scheduled.create({
+						account_id: fAccountId,
+						category_id: fCategoryId,
+						type: fType,
+						amount: fAmount,
+						currency: fCurrency,
+						description: fDescription || undefined,
+						rrule: 'FREQ=DAILY',
+						next_occurrence: `${fDate}T${fTime}`,
+						max_occurrences: 1
+					}, oid);
+					addToast('Future-dated transaction scheduled — it will be created automatically on ' + fDate);
+				} else {
+					await transactions.create(data, oid);
+				}
 			}
 			showForm = false;
 			resetForm();
@@ -414,9 +438,13 @@
 						<label for="date">Date</label>
 						<input id="date" type="date" bind:value={fDate} required />
 					</div>
+					<div class="form-group">
+						<label for="time">Time</label>
+						<input id="time" type="time" bind:value={fTime} required />
+					</div>
 				</div>
 				<div class="form-group autocomplete-wrap">
-					<label for="desc">Description</label>
+					<label for="desc">Name</label>
 					<input id="desc" type="text" value={fDescription} maxlength="500"
 						oninput={(e) => onDescriptionInput((e.target as HTMLInputElement).value)}
 						onfocusout={() => setTimeout(() => { showSuggestions = false; }, 150)}
@@ -486,7 +514,7 @@
 				<thead>
 					<tr>
 						<th class="check-col"></th>
-						<th>Date</th><th>Time</th><th>Type</th><th>Category</th><th>Account</th><th>Description</th><th>Amount</th><th></th>
+						<th>Date</th><th>Time</th><th>Type</th><th>Category</th><th>Account</th><th>Name</th><th>Amount</th><th></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -521,7 +549,7 @@
 						<th>Type</th>
 						<th class="sortable" onclick={() => toggleSort('category')}>Category{sortIndicator('category')}</th>
 						<th>Account</th>
-						<th class="sortable" onclick={() => toggleSort('description')}>Description{sortIndicator('description')}</th>
+						<th class="sortable" onclick={() => toggleSort('description')}>Name{sortIndicator('description')}</th>
 						<th class="sortable" onclick={() => toggleSort('amount')}>Amount{sortIndicator('amount')}</th>
 						<th></th>
 					</tr>
@@ -532,8 +560,8 @@
 							<td class="check-col">
 								<input type="checkbox" checked={selectedIds.has(txn.id)} onchange={() => toggleSelect(txn.id)} />
 							</td>
-							<td>{txn.date}</td>
-							<td class="time-cell">{fmtTime(txn.created_at)}</td>
+							<td>{txn.date.slice(0, 10)}</td>
+							<td class="time-cell">{txn.date.includes('T') ? txn.date.slice(11, 16) : ''}</td>
 							<td><span class="badge {txn.type === 'income' ? 'badge-income' : 'badge-expense'}">{txn.type}</span></td>
 							<td>{catName(txn.category_id)}</td>
 							<td>{acctName(txn.account_id)}</td>

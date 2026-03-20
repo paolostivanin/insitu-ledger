@@ -82,16 +82,10 @@ func processDue(db *sql.DB) {
 			continue
 		}
 
-		// Use the date portion of next_occurrence for the transaction date
-		txDate := s.nextOccurrence
-		if len(txDate) > 10 {
-			txDate = txDate[:10]
-		}
-
 		_, err = tx.Exec(
 			`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, date)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			s.accountID, s.categoryID, s.userID, s.typ, s.amount, s.currency, s.description, txDate,
+			s.accountID, s.categoryID, s.userID, s.typ, s.amount, s.currency, s.description, s.nextOccurrence,
 		)
 		if err != nil {
 			tx.Rollback()

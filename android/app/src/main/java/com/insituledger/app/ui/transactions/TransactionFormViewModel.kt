@@ -6,16 +6,20 @@ import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.CategoryRepository
+import com.insituledger.app.data.repository.ScheduledRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
@@ -37,7 +41,7 @@ data class TransactionFormUiState(
     val amount: String = "",
     val currency: String = "EUR",
     val description: String = "",
-    val date: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
+    val date: String = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")),
     val accounts: List<Account> = emptyList(),
     val accountDisplays: List<AccountDisplay> = emptyList(),
     val categories: List<Category> = emptyList(),
@@ -55,6 +59,7 @@ class TransactionFormViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val accountRepository: AccountRepository,
     private val categoryRepository: CategoryRepository,
+    private val scheduledRepository: ScheduledRepository,
     private val sharedAccessState: SharedAccessState,
     private val prefs: UserPreferences
 ) : ViewModel() {
@@ -73,12 +78,18 @@ class TransactionFormViewModel @Inject constructor(
             val accounts: List<Account>
             val categories: List<Category>
 
-            if (isShared) {
-                accounts = accountRepository.listFromServer(owner!!.ownerId)
-                categories = categoryRepository.listFromServer(owner.ownerId)
-            } else {
-                accounts = accountRepository.getAll().first()
-                categories = categoryRepository.getAll().first()
+            coroutineScope {
+                if (isShared) {
+                    val accountsDeferred = async { accountRepository.listFromServer(owner!!.ownerId) }
+                    val categoriesDeferred = async { categoryRepository.listFromServer(owner!!.ownerId) }
+                    accounts = accountsDeferred.await()
+                    categories = categoriesDeferred.await()
+                } else {
+                    val accountsDeferred = async { accountRepository.getAll().first() }
+                    val categoriesDeferred = async { categoryRepository.getAll().first() }
+                    accounts = accountsDeferred.await()
+                    categories = categoriesDeferred.await()
+                }
             }
 
             val displays = accounts.map { acct ->
@@ -233,10 +244,27 @@ class TransactionFormViewModel @Inject constructor(
                         amount, state.currency, state.description.ifBlank { null }, state.date
                     )
                 } else {
-                    transactionRepository.create(
-                        state.accountId, state.categoryId, state.type,
-                        amount, state.currency, state.description.ifBlank { null }, state.date
-                    )
+                    val isFuture = try {
+                        if (state.date.contains("T")) {
+                            LocalDateTime.parse(state.date, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
+                                .isAfter(LocalDateTime.now())
+                        } else {
+                            LocalDate.parse(state.date).isAfter(LocalDate.now())
+                        }
+                    } catch (_: Exception) { false }
+
+                    if (isFuture) {
+                        scheduledRepository.create(
+                            state.accountId, state.categoryId, state.type,
+                            amount, state.currency, state.description.ifBlank { null },
+                            rrule = "FREQ=DAILY", nextOccurrence = state.date, maxOccurrences = 1
+                        )
+                    } else {
+                        transactionRepository.create(
+                            state.accountId, state.categoryId, state.type,
+                            amount, state.currency, state.description.ifBlank { null }, state.date
+                        )
+                    }
                 }
                 _uiState.update { it.copy(isSaving = false, saved = true) }
             } catch (e: Exception) {

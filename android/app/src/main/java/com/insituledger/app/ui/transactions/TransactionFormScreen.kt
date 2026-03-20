@@ -6,17 +6,24 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.insituledger.app.ui.common.AccountDropdownWithAdd
 import com.insituledger.app.ui.common.CategoryDropdownWithAdd
+import com.insituledger.app.ui.common.CompactAccountChip
 import com.insituledger.app.ui.common.IncomeExpenseToggle
 import com.insituledger.app.ui.common.LoadingIndicator
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,6 +34,15 @@ fun TransactionFormScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.saved) { if (uiState.saved) onBack() }
+
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    // Parse date and time from the state string
+    val datePart = if (uiState.date.contains("T")) uiState.date.substringBefore("T") else uiState.date
+    val timePart = if (uiState.date.contains("T")) uiState.date.substringAfter("T") else "00:00"
+    val hour = timePart.substringBefore(":").toIntOrNull() ?: 0
+    val minute = timePart.substringAfter(":").toIntOrNull() ?: 0
 
     Scaffold(
         topBar = {
@@ -54,28 +70,7 @@ fun TransactionFormScreen(
 
             IncomeExpenseToggle(selected = uiState.type, onSelect = viewModel::updateType)
 
-            AccountDropdownWithAdd(
-                accountDisplays = uiState.accountDisplays,
-                selectedId = uiState.accountId,
-                onSelect = { id, currency ->
-                    viewModel.updateAccountId(id)
-                    viewModel.updateCurrency(currency)
-                },
-                onCreateAccount = viewModel::createAccount
-            )
-
-            CategoryDropdownWithAdd(
-                categories = uiState.categories,
-                selectedId = uiState.categoryId,
-                type = uiState.type,
-                onSelect = viewModel::updateCategoryId,
-                onCreateCategory = viewModel::createCategory
-            )
-
-            OutlinedTextField(value = uiState.amount, onValueChange = viewModel::updateAmount,
-                label = { Text("Amount") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true, modifier = Modifier.fillMaxWidth())
-
+            // Name field (with autocomplete)
             ExposedDropdownMenuBox(
                 expanded = uiState.showSuggestions,
                 onExpandedChange = { if (!it) viewModel.dismissSuggestions() }
@@ -83,7 +78,7 @@ fun TransactionFormScreen(
                 OutlinedTextField(
                     value = uiState.description,
                     onValueChange = viewModel::updateDescription,
-                    label = { Text("Description") },
+                    label = { Text("Name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable)
                 )
@@ -117,8 +112,46 @@ fun TransactionFormScreen(
                 }
             }
 
-            OutlinedTextField(value = uiState.date, onValueChange = viewModel::updateDate,
-                label = { Text("Date (YYYY-MM-DD)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = uiState.amount, onValueChange = viewModel::updateAmount,
+                label = { Text("Amount") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true, modifier = Modifier.fillMaxWidth())
+
+            CategoryDropdownWithAdd(
+                categories = uiState.categories,
+                selectedId = uiState.categoryId,
+                type = uiState.type,
+                onSelect = viewModel::updateCategoryId,
+                onCreateCategory = viewModel::createCategory
+            )
+
+            CompactAccountChip(
+                accountDisplays = uiState.accountDisplays,
+                selectedId = uiState.accountId,
+                onSelect = { id, currency ->
+                    viewModel.updateAccountId(id)
+                    viewModel.updateCurrency(currency)
+                },
+                onCreateAccount = viewModel::createAccount
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AssistChip(
+                    onClick = { showDatePicker = true },
+                    label = { Text(datePart) },
+                    leadingIcon = { Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    modifier = Modifier.weight(1f)
+                )
+                AssistChip(
+                    onClick = { showTimePicker = true },
+                    label = { Text(timePart) },
+                    leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
 
             uiState.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -138,5 +171,57 @@ fun TransactionFormScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+
+    // Date picker dialog
+    if (showDatePicker) {
+        val initialMillis = try {
+            LocalDate.parse(datePart, DateTimeFormatter.ISO_LOCAL_DATE)
+                .atStartOfDay(ZoneId.of("UTC"))
+                .toInstant().toEpochMilli()
+        } catch (_: Exception) {
+            System.currentTimeMillis()
+        }
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val selectedDate = Instant.ofEpochMilli(millis)
+                            .atZone(ZoneId.of("UTC"))
+                            .toLocalDate()
+                            .format(DateTimeFormatter.ISO_LOCAL_DATE)
+                        viewModel.updateDate("${selectedDate}T${timePart}")
+                    }
+                    showDatePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    // Time picker dialog
+    if (showTimePicker) {
+        val timePickerState = rememberTimePickerState(initialHour = hour, initialMinute = minute)
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            title = { Text("Select Time") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val newTime = "%02d:%02d".format(timePickerState.hour, timePickerState.minute)
+                    viewModel.updateDate("${datePart}T${newTime}")
+                    showTimePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
+            }
+        )
     }
 }

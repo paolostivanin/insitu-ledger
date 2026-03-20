@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -177,6 +178,113 @@ fun CategoryDropdownWithAdd(
                     onClick = {
                         if (newName.isNotBlank()) {
                             onCreateCategory(newName.trim(), type)
+                            showAddDialog = false
+                        }
+                    },
+                    enabled = newName.isNotBlank()
+                ) { Text("Create") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CompactAccountChip(
+    accountDisplays: List<com.insituledger.app.ui.transactions.AccountDisplay>,
+    selectedId: Long?,
+    onSelect: (id: Long, currency: String) -> Unit,
+    onCreateAccount: (name: String, currency: String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    val selectedDisplay = accountDisplays.find { it.account.id == selectedId }
+    val chipLabel = if (selectedDisplay != null) {
+        "${selectedDisplay.label} (${selectedDisplay.account.currency})"
+    } else {
+        "Account"
+    }
+
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
+        AssistChip(
+            onClick = { expanded = true },
+            label = { Text(chipLabel, maxLines = 1) },
+            trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable)
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            accountDisplays.forEach { display ->
+                DropdownMenuItem(
+                    text = { Text("${display.label} (${display.account.currency})") },
+                    onClick = {
+                        onSelect(display.account.id, display.account.currency)
+                        expanded = false
+                    }
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text("New account", color = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                onClick = { expanded = false; showAddDialog = true }
+            )
+        }
+    }
+
+    if (showAddDialog) {
+        var newName by remember { mutableStateOf("") }
+        var newCurrency by remember { mutableStateOf("EUR") }
+        var currencyExpanded by remember { mutableStateOf(false) }
+        val currencies = listOf("EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD", "BRL", "CNY", "INR")
+
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text("New Account") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("Account name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    ExposedDropdownMenuBox(
+                        expanded = currencyExpanded,
+                        onExpandedChange = { currencyExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = newCurrency,
+                            onValueChange = {}, readOnly = true,
+                            label = { Text("Currency") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = currencyExpanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                        )
+                        ExposedDropdownMenu(expanded = currencyExpanded, onDismissRequest = { currencyExpanded = false }) {
+                            currencies.forEach { cur ->
+                                DropdownMenuItem(
+                                    text = { Text(cur) },
+                                    onClick = { newCurrency = cur; currencyExpanded = false }
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newName.isNotBlank()) {
+                            onCreateAccount(newName.trim(), newCurrency)
                             showAddDialog = false
                         }
                     },

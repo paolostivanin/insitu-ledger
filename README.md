@@ -1,20 +1,23 @@
 # InSitu Ledger
 
-A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, and mobile sync support.
+> **in situ** (Latin) — "in its original place." Your financial data stays where it belongs: on your own server, under your control.
+
+A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, and Android app with offline-first local storage and optional sync.
 
 ## Features
 
-- **Transactions** — record income and expenses across multiple accounts
+- **Transactions** — record income and expenses across multiple accounts with date and time
+- **Search** — free-text search across transaction descriptions (Android)
 - **Accounts** — manage multiple accounts with independent balances and currencies (default EUR)
 - **Categories** — hierarchical categories (with parent/child, icons, and colors) for income and expense
-- **Scheduled transactions** — recurring transactions with date and time (daily, weekly, monthly, yearly), automatically materialized by the backend scheduler (checks every minute) and by the Android local WorkManager (every 15 minutes)
+- **Scheduled transactions** — recurring transactions with date and time (daily, weekly, monthly, yearly), automatically materialized by the backend scheduler (checks every minute) and by the Android local WorkManager (every 15 minutes). Future-dated transactions are automatically converted to one-time scheduled entries
 - **Reports** — spending by category, by month, and trend analysis (powered by ECharts)
 - **Multi-user** — admin-created users, shared access with read/write permissions
 - **Authentication** — bcrypt passwords, bearer-token sessions (30-day expiry), TOTP two-factor authentication
 - **Mobile sync** — version-based incremental sync API for offline-first mobile clients
 - **Dark/Light mode** — theme toggle with localStorage persistence and FOUC prevention
 - **Keyboard shortcuts** — `n` (new item), `Escape` (close), `?` (help)
-- **Batch operations** — multi-select transactions for bulk delete or category change
+- **Batch operations** — multi-select transactions for bulk delete or category change; swipe-to-delete on Android
 - **CSV import/export** — export filtered transactions; import with category/account name matching
 - **Audit logging** — all admin actions are logged with timestamps, IP addresses, and target users
 - **Database backup** — one-click backup download via `VACUUM INTO` (admin only)

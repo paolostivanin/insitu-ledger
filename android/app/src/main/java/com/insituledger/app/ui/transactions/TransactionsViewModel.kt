@@ -10,6 +10,7 @@ import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.Transaction
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -24,7 +25,11 @@ data class TransactionsUiState(
     val filterCategoryId: Long? = null,
     val sortBy: String = "date",
     val sortDir: String = "desc",
-    val isReadOnly: Boolean = false
+    val isReadOnly: Boolean = false,
+    val searchQuery: String = "",
+    val isSearchActive: Boolean = false,
+    val selectedIds: Set<Long> = emptySet(),
+    val isSelectionMode: Boolean = false
 )
 
 data class FilterAndSort(
@@ -32,10 +37,11 @@ data class FilterAndSort(
     val to: String? = null,
     val categoryId: Long? = null,
     val sortBy: String = "date",
-    val sortDir: String = "desc"
+    val sortDir: String = "desc",
+    val searchQuery: String = ""
 )
 
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 @HiltViewModel
 class TransactionsViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
@@ -48,8 +54,15 @@ class TransactionsViewModel @Inject constructor(
     val uiState: StateFlow<TransactionsUiState> = _uiState.asStateFlow()
 
     private val _filterAndSort = MutableStateFlow(FilterAndSort())
+    private val _searchInput = MutableStateFlow("")
 
     init {
+        viewModelScope.launch {
+            _searchInput.debounce(300).collectLatest { query ->
+                _filterAndSort.update { it.copy(searchQuery = query) }
+            }
+        }
+
         // Load categories - either from local DB or server depending on shared state
         viewModelScope.launch {
             sharedAccessState.selectedOwner.collectLatest { owner ->
@@ -64,7 +77,7 @@ class TransactionsViewModel @Inject constructor(
             }
         }
 
-        // Load transactions reactively based on filters, sort, and shared owner
+        // Load transactions reactively based on filters, sort, search, and shared owner
         viewModelScope.launch {
             combine(
                 _filterAndSort,
@@ -72,7 +85,11 @@ class TransactionsViewModel @Inject constructor(
             ) { fs, owner -> Pair(fs, owner) }
                 .collectLatest { (fs, owner) ->
                     _uiState.update { it.copy(isLoading = true) }
-                    if (owner != null) {
+                    if (fs.searchQuery.isNotBlank() && owner == null) {
+                        transactionRepository.search(fs.searchQuery).collect { txns ->
+                            _uiState.update { it.copy(transactions = txns, isLoading = false) }
+                        }
+                    } else if (owner != null) {
                         val txns = transactionRepository.listFromServer(
                             ownerId = owner.ownerId,
                             from = fs.from, to = fs.to, categoryId = fs.categoryId,
@@ -121,6 +138,46 @@ class TransactionsViewModel @Inject constructor(
                 syncManager.syncNow()
                 _uiState.update { it.copy(isRefreshing = false) }
             }
+        }
+    }
+
+    fun setSearchQuery(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+        _searchInput.value = query
+    }
+
+    fun toggleSearch() {
+        val newActive = !_uiState.value.isSearchActive
+        _uiState.update { it.copy(isSearchActive = newActive, searchQuery = if (!newActive) "" else it.searchQuery) }
+        if (!newActive) {
+            _searchInput.value = ""
+            _filterAndSort.update { it.copy(searchQuery = "") }
+        }
+    }
+
+    fun toggleSelect(id: Long) {
+        _uiState.update {
+            val newIds = it.selectedIds.toMutableSet()
+            if (newIds.contains(id)) newIds.remove(id) else newIds.add(id)
+            it.copy(selectedIds = newIds, isSelectionMode = newIds.isNotEmpty())
+        }
+    }
+
+    fun selectAll() {
+        _uiState.update {
+            it.copy(selectedIds = it.transactions.map { t -> t.id }.toSet(), isSelectionMode = true)
+        }
+    }
+
+    fun clearSelection() {
+        _uiState.update { it.copy(selectedIds = emptySet(), isSelectionMode = false) }
+    }
+
+    fun deleteSelected() {
+        if (sharedAccessState.isReadOnly) return
+        viewModelScope.launch {
+            _uiState.value.selectedIds.forEach { id -> transactionRepository.delete(id) }
+            clearSelection()
         }
     }
 

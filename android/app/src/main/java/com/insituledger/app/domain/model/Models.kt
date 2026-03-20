@@ -1,5 +1,8 @@
 package com.insituledger.app.domain.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class Account(
     val id: Long,
     val userId: Long,
@@ -9,6 +12,7 @@ data class Account(
     val isLocalOnly: Boolean = false
 )
 
+@Immutable
 data class Category(
     val id: Long,
     val userId: Long,
@@ -20,6 +24,7 @@ data class Category(
     val isLocalOnly: Boolean = false
 )
 
+@Immutable
 data class Transaction(
     val id: Long,
     val accountId: Long,
@@ -33,6 +38,7 @@ data class Transaction(
     val isLocalOnly: Boolean = false
 )
 
+@Immutable
 data class ScheduledTransaction(
     val id: Long,
     val accountId: Long,
@@ -50,6 +56,7 @@ data class ScheduledTransaction(
     val isLocalOnly: Boolean = false
 )
 
+@Immutable
 data class DashboardData(
     val totalBalance: Double,
     val monthIncome: Double,

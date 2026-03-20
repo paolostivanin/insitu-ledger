@@ -7,6 +7,8 @@ import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.domain.model.DashboardData
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -45,27 +47,38 @@ class DashboardViewModel @Inject constructor(
     }
 
     private suspend fun loadFromServer(ownerId: Long, readOnly: Boolean) {
-        val accounts = accountRepository.listFromServer(ownerId)
-        val recentTxns = transactionRepository.listFromServer(
-            ownerId = ownerId, sortBy = "date", sortDir = "desc", limit = 10
-        )
-        val totalBalance = accounts.sumOf { it.balance }
-
         val now = LocalDate.now()
         val monthStart = now.withDayOfMonth(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
         val monthEnd = now.format(DateTimeFormatter.ISO_LOCAL_DATE)
-        val monthTxns = transactionRepository.listFromServer(
-            ownerId = ownerId, from = monthStart, to = monthEnd, limit = 500
-        )
-        val monthIncome = monthTxns.filter { it.type == "income" }.sumOf { it.amount }
-        val monthExpense = monthTxns.filter { it.type == "expense" }.sumOf { it.amount }
 
-        _uiState.update {
-            it.copy(
-                data = DashboardData(totalBalance, monthIncome, monthExpense, recentTxns, accounts),
-                isLoading = false,
-                isReadOnly = readOnly
-            )
+        coroutineScope {
+            val accountsDeferred = async { accountRepository.listFromServer(ownerId) }
+            val recentDeferred = async {
+                transactionRepository.listFromServer(
+                    ownerId = ownerId, sortBy = "date", sortDir = "desc", limit = 10
+                )
+            }
+            val monthDeferred = async {
+                transactionRepository.listFromServer(
+                    ownerId = ownerId, from = monthStart, to = monthEnd, limit = 500
+                )
+            }
+
+            val accounts = accountsDeferred.await()
+            val recentTxns = recentDeferred.await()
+            val monthTxns = monthDeferred.await()
+
+            val totalBalance = accounts.sumOf { it.balance }
+            val monthIncome = monthTxns.filter { it.type == "income" }.sumOf { it.amount }
+            val monthExpense = monthTxns.filter { it.type == "expense" }.sumOf { it.amount }
+
+            _uiState.update {
+                it.copy(
+                    data = DashboardData(totalBalance, monthIncome, monthExpense, recentTxns, accounts),
+                    isLoading = false,
+                    isReadOnly = readOnly
+                )
+            }
         }
     }
 

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 type createTransactionRequest struct {
@@ -114,7 +115,7 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 		txns = append(txns, map[string]any{
 			"id": id, "account_id": accountID, "category_id": categoryID,
 			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
-			"description": description, "date": truncDate(date),
+			"description": description, "date": date,
 			"created_at": createdAt, "updated_at": updatedAt, "sync_version": syncVersion,
 		})
 	}
@@ -158,7 +159,7 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "amount must be positive", http.StatusBadRequest)
 		return
 	}
-	if err := validateDate(req.Date); err != nil {
+	if err := validateDatetime(req.Date); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -170,6 +171,32 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Currency == "" {
 		req.Currency = "EUR"
+	}
+
+	// If the datetime is in the future, create a one-time scheduled transaction instead
+	now := time.Now()
+	isFuture := false
+	if t, err := time.Parse("2006-01-02T15:04", req.Date); err == nil {
+		isFuture = t.After(now)
+	} else if t, err := time.Parse("2006-01-02", req.Date); err == nil {
+		// Date-only: treat as start of day, future only if the entire day is tomorrow+
+		isFuture = t.After(now.Truncate(24 * time.Hour))
+	}
+	if isFuture {
+		result, err := s.DB.Exec(
+			`INSERT INTO scheduled_transactions (account_id, category_id, user_id, type, amount, currency, description, rrule, next_occurrence, max_occurrences)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			req.AccountID, req.CategoryID, targetUserID, req.Type, req.Amount, req.Currency, req.Description, "FREQ=DAILY", req.Date, 1,
+		)
+		if err != nil {
+			http.Error(w, "failed to create scheduled transaction", http.StatusInternalServerError)
+			return
+		}
+		id, _ := result.LastInsertId()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{"id": id, "scheduled": true})
+		return
 	}
 
 	tx, err := s.DB.Begin()
@@ -239,7 +266,7 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := validateDate(req.Date); err != nil {
+	if err := validateDatetime(req.Date); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
