@@ -149,8 +149,13 @@ fun TransactionsScreen(
                     uiState.isLoading -> LoadingIndicator()
                     uiState.transactions.isEmpty() -> EmptyState("No transactions")
                     else -> {
+                        val categoryMap = remember(uiState.categories) {
+                            uiState.categories.associateBy { it.id }
+                        }
                         if (uiState.sortBy == "date") {
-                            val grouped = uiState.transactions.groupBy { it.date.take(10) }
+                            val grouped = remember(uiState.transactions) {
+                                uiState.transactions.groupBy { it.date.take(10) }
+                            }
                             LazyColumn(
                                 contentPadding = PaddingValues(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -181,7 +186,7 @@ fun TransactionsScreen(
                                     items(txns, key = { it.id }) { txn ->
                                         SwipeableTransactionRow(
                                             txn = txn,
-                                            categories = uiState.categories,
+                                            categoryMap = categoryMap,
                                             isSelectionMode = uiState.isSelectionMode,
                                             isSelected = uiState.selectedIds.contains(txn.id),
                                             isReadOnly = uiState.isReadOnly,
@@ -206,7 +211,7 @@ fun TransactionsScreen(
                                 items(uiState.transactions, key = { it.id }) { txn ->
                                     SwipeableTransactionRow(
                                         txn = txn,
-                                        categories = uiState.categories,
+                                        categoryMap = categoryMap,
                                         isSelectionMode = uiState.isSelectionMode,
                                         isSelected = uiState.selectedIds.contains(txn.id),
                                         isReadOnly = uiState.isReadOnly,
@@ -271,7 +276,7 @@ fun TransactionsScreen(
 @Composable
 private fun SwipeableTransactionRow(
     txn: Transaction,
-    categories: List<Category>,
+    categoryMap: Map<Long, Category>,
     isSelectionMode: Boolean,
     isSelected: Boolean,
     isReadOnly: Boolean,
@@ -286,7 +291,7 @@ private fun SwipeableTransactionRow(
                 onLongClick = onLongClick
             )
         ) {
-            TransactionRowContent(txn, categories, isSelectionMode, isSelected)
+            TransactionRowContent(txn, categoryMap, isSelectionMode, isSelected)
         }
     } else {
         val dismissState = rememberSwipeToDismissBoxState(
@@ -323,7 +328,7 @@ private fun SwipeableTransactionRow(
                     onLongClick = onLongClick
                 )
             ) {
-                TransactionRowContent(txn, categories, isSelectionMode, isSelected)
+                TransactionRowContent(txn, categoryMap, isSelectionMode, isSelected)
             }
         }
     }
@@ -332,7 +337,7 @@ private fun SwipeableTransactionRow(
 @Composable
 private fun TransactionRowContent(
     txn: Transaction,
-    categories: List<Category>,
+    categoryMap: Map<Long, Category>,
     isSelectionMode: Boolean,
     isSelected: Boolean
 ) {
@@ -353,7 +358,7 @@ private fun TransactionRowContent(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val categoryColor = categories.find { it.id == txn.categoryId }?.color
+            val categoryColor = categoryMap[txn.categoryId]?.color
             if (categoryColor != null) {
                 Box(
                     modifier = Modifier

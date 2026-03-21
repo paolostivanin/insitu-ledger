@@ -17,6 +17,7 @@ data class SettingsUiState(
     val themeMode: String = "system",
     val weekStartDay: String = "monday",
     val biometricEnabled: Boolean = false,
+    val screenSecure: Boolean = true,
     val syncMode: String = "none",
     // Webapp sync fields
     val isWebappConnected: Boolean = false,
@@ -74,6 +75,12 @@ class SettingsViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            prefs.screenSecureFlow.collect { secure ->
+                _uiState.update { it.copy(screenSecure = secure) }
+            }
+        }
+
+        viewModelScope.launch {
             combine(
                 prefs.lastSyncVersionFlow,
                 pendingOpDao.getCount()
@@ -95,6 +102,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setBiometric(enabled: Boolean) {
         viewModelScope.launch { prefs.saveBiometricEnabled(enabled) }
+    }
+
+    fun setScreenSecure(enabled: Boolean) {
+        viewModelScope.launch { prefs.saveScreenSecure(enabled) }
     }
 
     fun setSyncMode(mode: String) {

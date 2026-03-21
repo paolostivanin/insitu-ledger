@@ -21,16 +21,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AmountText
+import com.insituledger.app.ui.common.CurrencyFormatter
 import com.insituledger.app.ui.common.ExpenseColor
 import com.insituledger.app.ui.common.IncomeColor
 import com.insituledger.app.ui.common.LoadingIndicator
-import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Currency
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -281,7 +279,9 @@ private fun DrillDownView(uiState: ReportsUiState, onBack: () -> Unit) {
             )
         }
     ) { padding ->
-        val grouped = uiState.selectedCategoryTransactions.groupBy { it.date }
+        val grouped = remember(uiState.selectedCategoryTransactions) {
+            uiState.selectedCategoryTransactions.groupBy { it.date }
+        }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -380,11 +380,5 @@ private fun parseColor(hex: String?): Color {
 }
 
 private fun formatCurrency(amount: Double): String {
-    return try {
-        val fmt = NumberFormat.getCurrencyInstance(Locale.getDefault())
-        fmt.currency = Currency.getInstance("EUR")
-        fmt.format(amount)
-    } catch (_: Exception) {
-        "EUR %.2f".format(amount)
-    }
+    return CurrencyFormatter.format(amount, "EUR")
 }

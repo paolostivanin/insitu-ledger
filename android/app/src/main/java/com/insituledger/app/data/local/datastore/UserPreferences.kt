@@ -39,6 +39,7 @@ class UserPreferences @Inject constructor(
         val SHARED_OWNER_ID = longPreferencesKey("shared_owner_id")
         val LAST_USED_ACCOUNT_ID = longPreferencesKey("last_used_account_id")
         val WEEK_START_DAY = stringPreferencesKey("week_start_day")
+        val SCREEN_SECURE = booleanPreferencesKey("screen_secure")
 
         private const val ENCRYPTED_PREFS_FILE = "secure_prefs"
         private const val KEY_TOKEN = "token"
@@ -71,6 +72,7 @@ class UserPreferences @Inject constructor(
     val sharedOwnerIdFlow: Flow<Long?> = context.dataStore.data.map { it[SHARED_OWNER_ID] }
     val lastUsedAccountIdFlow: Flow<Long?> = context.dataStore.data.map { it[LAST_USED_ACCOUNT_ID] }
     val weekStartDayFlow: Flow<String> = context.dataStore.data.map { it[WEEK_START_DAY] ?: "monday" }
+    val screenSecureFlow: Flow<Boolean> = context.dataStore.data.map { it[SCREEN_SECURE] ?: true }
 
     suspend fun saveToken(token: String) {
         encryptedPrefs.edit().putString(KEY_TOKEN, token).apply()
@@ -120,6 +122,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun saveWeekStartDay(day: String) {
         context.dataStore.edit { it[WEEK_START_DAY] = day }
+    }
+
+    suspend fun saveScreenSecure(enabled: Boolean) {
+        context.dataStore.edit { it[SCREEN_SECURE] = enabled }
     }
 
     @Volatile

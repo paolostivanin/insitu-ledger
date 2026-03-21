@@ -116,6 +116,22 @@ fun SettingsScreen(
                 }
             }
 
+            // Prevent screenshots
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.ScreenLockPortrait, contentDescription = null)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("Prevent screenshots", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = uiState.screenSecure,
+                        onCheckedChange = viewModel::setScreenSecure
+                    )
+                }
+            }
+
             // Data backup (always available)
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {

@@ -1,13 +1,14 @@
 package com.insituledger.app.ui.transactions
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Calculate
+import com.insituledger.app.ui.common.CalculatorDialog
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,10 +38,15 @@ fun TransactionFormScreen(
 
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
+    var showCalculator by remember { mutableStateOf(false) }
 
     // Parse date and time from the state string
     val datePart = if (uiState.date.contains("T")) uiState.date.substringBefore("T") else uiState.date
     val timePart = if (uiState.date.contains("T")) uiState.date.substringAfter("T") else "00:00"
+    val formattedDate = try {
+        LocalDate.parse(datePart, DateTimeFormatter.ISO_LOCAL_DATE)
+            .format(DateTimeFormatter.ofPattern("d MMMM yyyy"))
+    } catch (_: Exception) { datePart }
     val hour = timePart.substringBefore(":").toIntOrNull() ?: 0
     val minute = timePart.substringAfter(":").toIntOrNull() ?: 0
 
@@ -112,9 +118,33 @@ fun TransactionFormScreen(
                 }
             }
 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = formattedDate,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { showDatePicker = true }
+                )
+                Text(
+                    text = timePart,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { showTimePicker = true }
+                )
+            }
+
             OutlinedTextField(value = uiState.amount, onValueChange = viewModel::updateAmount,
                 label = { Text("Amount") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true, modifier = Modifier.fillMaxWidth())
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    IconButton(onClick = { showCalculator = true }) {
+                        Icon(Icons.Default.Calculate, contentDescription = "Calculator")
+                    }
+                })
 
             CategoryDropdownWithAdd(
                 categories = uiState.categories,
@@ -133,25 +163,6 @@ fun TransactionFormScreen(
                 },
                 onCreateAccount = viewModel::createAccount
             )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                AssistChip(
-                    onClick = { showDatePicker = true },
-                    label = { Text(datePart) },
-                    leadingIcon = { Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    modifier = Modifier.weight(1f)
-                )
-                AssistChip(
-                    onClick = { showTimePicker = true },
-                    label = { Text(timePart) },
-                    leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
 
             uiState.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -203,6 +214,18 @@ fun TransactionFormScreen(
         ) {
             DatePicker(state = datePickerState)
         }
+    }
+
+    // Calculator dialog
+    if (showCalculator) {
+        CalculatorDialog(
+            initialValue = uiState.amount,
+            onDismiss = { showCalculator = false },
+            onConfirm = { result ->
+                viewModel.updateAmount(result)
+                showCalculator = false
+            }
+        )
     }
 
     // Time picker dialog

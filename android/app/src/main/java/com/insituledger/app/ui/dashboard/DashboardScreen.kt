@@ -19,9 +19,7 @@ import com.insituledger.app.ui.common.AmountText
 import com.insituledger.app.ui.common.LoadingIndicator
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import java.text.NumberFormat
-import java.util.Currency
-import java.util.Locale
+import com.insituledger.app.ui.common.CurrencyFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -166,11 +164,5 @@ private fun TransactionItem(txn: Transaction, onClick: () -> Unit) {
 }
 
 private fun formatCurrency(amount: Double, currency: String): String {
-    return try {
-        val fmt = NumberFormat.getCurrencyInstance(Locale.getDefault())
-        fmt.currency = Currency.getInstance(currency)
-        fmt.format(amount)
-    } catch (_: Exception) {
-        "$currency %.2f".format(amount)
-    }
+    return CurrencyFormatter.format(amount, currency)
 }

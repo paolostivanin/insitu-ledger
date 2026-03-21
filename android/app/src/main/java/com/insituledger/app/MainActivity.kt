@@ -1,6 +1,7 @@
 package com.insituledger.app
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -36,7 +37,16 @@ class MainActivity : AppCompatActivity() {
         setContent {
             val themeMode by userPreferences.themeModeFlow.collectAsStateWithLifecycle(initialValue = "system")
             val biometricEnabled by userPreferences.biometricEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
+            val screenSecure by userPreferences.screenSecureFlow.collectAsStateWithLifecycle(initialValue = true)
             val unlocked by biometricUnlocked
+
+            LaunchedEffect(screenSecure) {
+                if (screenSecure) {
+                    window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                }
+            }
 
             InSituLedgerTheme(themeMode = themeMode) {
                 if (biometricEnabled && !unlocked) {
