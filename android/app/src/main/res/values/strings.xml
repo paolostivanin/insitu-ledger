@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">InSitu Ledger</string>
+    <string name="shortcut_new_transaction_short">New Transaction</string>
+    <string name="shortcut_new_transaction_long">Add New Transaction</string>
+    <string name="widget_description">Quickly add a new transaction</string>
 </resources>

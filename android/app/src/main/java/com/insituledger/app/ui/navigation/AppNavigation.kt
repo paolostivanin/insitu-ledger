@@ -113,7 +113,10 @@ class SharedOwnerViewModel @Inject constructor(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppNavigation() {
+fun AppNavigation(
+    openNewTransaction: Boolean = false,
+    onNewTransactionConsumed: () -> Unit = {}
+) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute by remember {
@@ -125,6 +128,15 @@ fun AppNavigation() {
     val accessibleOwners by sharedOwnerViewModel.accessibleOwners.collectAsStateWithLifecycle()
     val selectedOwner by sharedOwnerViewModel.selectedOwner.collectAsStateWithLifecycle()
     val syncMode by sharedOwnerViewModel.syncMode.collectAsStateWithLifecycle(initialValue = "none")
+
+    LaunchedEffect(openNewTransaction) {
+        if (openNewTransaction) {
+            navController.navigate(Screen.TransactionForm.createRoute()) {
+                launchSingleTop = true
+            }
+            onNewTransactionConsumed()
+        }
+    }
 
     Scaffold(
         bottomBar = {

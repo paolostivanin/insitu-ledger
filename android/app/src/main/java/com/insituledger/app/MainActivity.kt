@@ -1,5 +1,6 @@
 package com.insituledger.app
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
@@ -26,10 +27,13 @@ class MainActivity : AppCompatActivity() {
 
     private var biometricUnlocked = mutableStateOf(false)
     private var biometricPromptShown = false
+    private var openNewTransaction = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        openNewTransaction.value = isNewTransactionIntent(intent)
 
         // Always schedule the local scheduled-transaction worker
         syncManager.scheduleScheduledTransactionCheck()
@@ -39,6 +43,7 @@ class MainActivity : AppCompatActivity() {
             val biometricEnabled by userPreferences.biometricEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
             val screenSecure by userPreferences.screenSecureFlow.collectAsStateWithLifecycle(initialValue = true)
             val unlocked by biometricUnlocked
+            val navigateToNewTransaction by openNewTransaction
 
             LaunchedEffect(screenSecure) {
                 if (screenSecure) {
@@ -58,10 +63,24 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 } else {
-                    AppNavigation()
+                    AppNavigation(
+                        openNewTransaction = navigateToNewTransaction,
+                        onNewTransactionConsumed = { openNewTransaction.value = false }
+                    )
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (isNewTransactionIntent(intent)) {
+            openNewTransaction.value = true
+        }
+    }
+
+    private fun isNewTransactionIntent(intent: Intent?): Boolean {
+        return intent?.action == ACTION_NEW_TRANSACTION
     }
 
     private fun showBiometricPrompt() {
@@ -112,5 +131,9 @@ class MainActivity : AppCompatActivity() {
         if (userPreferences.getSyncModeImmediate() == "webapp") {
             syncManager.triggerImmediateSync()
         }
+    }
+
+    companion object {
+        const val ACTION_NEW_TRANSACTION = "com.insituledger.app.ACTION_NEW_TRANSACTION"
     }
 }

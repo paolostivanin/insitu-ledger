@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_transaction"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_add_transaction"
+        android:shortcutShortLabel="@string/shortcut_new_transaction_short"
+        android:shortcutLongLabel="@string/shortcut_new_transaction_long">
+        <intent
+            android:action="com.insituledger.app.ACTION_NEW_TRANSACTION"
+            android:targetPackage="com.insituledger.app"
+            android:targetClass="com.insituledger.app.MainActivity" />
+    </shortcut>
+</shortcuts>
