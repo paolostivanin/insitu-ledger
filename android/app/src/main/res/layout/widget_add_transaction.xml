@@ -7,11 +7,9 @@
 
     <ImageView
         android:id="@+id/widget_icon"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:layout_gravity="center"
-        android:src="@drawable/ic_shortcut_add_transaction_fg"
-        android:background="@drawable/widget_icon_background"
-        android:contentDescription="@string/widget_description"
-        android:clipToOutline="true" />
+        android:src="@drawable/ic_widget_add_transaction"
+        android:contentDescription="@string/widget_description" />
 </FrameLayout>
