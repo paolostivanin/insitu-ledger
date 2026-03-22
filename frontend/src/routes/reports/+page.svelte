@@ -50,8 +50,15 @@
 		}
 	});
 
+	function handleResize() {
+		if (pieChart) pieChart.resize();
+		if (barChart) barChart.resize();
+		if (trendChart) trendChart.resize();
+	}
+
 	onDestroy(() => {
 		unsubTheme();
+		window.removeEventListener('resize', handleResize);
 		if (pieChart) pieChart.dispose();
 		if (barChart) barChart.dispose();
 		if (trendChart) trendChart.dispose();
@@ -63,11 +70,7 @@
 		barChart = echarts.init(barChartEl, echartsTheme);
 		trendChart = echarts.init(trendChartEl, echartsTheme);
 
-		window.addEventListener('resize', () => {
-			pieChart.resize();
-			barChart.resize();
-			trendChart.resize();
-		});
+		window.addEventListener('resize', handleResize);
 
 		await loadAll();
 	});

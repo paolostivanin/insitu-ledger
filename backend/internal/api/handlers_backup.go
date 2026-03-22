@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -81,11 +82,28 @@ func (s *Server) handleAdminBackup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "backup failed", http.StatusInternalServerError)
 		return
 	}
-	defer os.Remove(backupPath)
+
+	// Open the file, then remove the directory entry. The OS keeps the data
+	// accessible via the file handle until it is closed, avoiding a race
+	// between serving and cleanup.
+	f, err := os.Open(backupPath)
+	if err != nil {
+		http.Error(w, "backup failed", http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+	os.Remove(backupPath)
+
+	fi, err := f.Stat()
+	if err != nil {
+		http.Error(w, "backup failed", http.StatusInternalServerError)
+		return
+	}
 
 	writeAuditLog(s.DB, adminID, "backup_download", nil, "", clientIP(r))
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=insitu-backup-%s.db", time.Now().Format("2006-01-02")))
-	http.ServeFile(w, r, backupPath)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", fi.Size()))
+	io.Copy(w, f)
 }

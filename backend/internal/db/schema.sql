@@ -124,6 +124,12 @@ CREATE INDEX IF NOT EXISTS idx_categories_sync ON categories(sync_version);
 CREATE INDEX IF NOT EXISTS idx_accounts_sync ON accounts(sync_version);
 CREATE INDEX IF NOT EXISTS idx_scheduled_sync ON scheduled_transactions(sync_version);
 
+-- Composite indexes for sync queries filtering by user_id + sync_version
+CREATE INDEX IF NOT EXISTS idx_transactions_user_sync ON transactions(user_id, sync_version);
+CREATE INDEX IF NOT EXISTS idx_categories_user_sync ON categories(user_id, sync_version);
+CREATE INDEX IF NOT EXISTS idx_accounts_user_sync ON accounts(user_id, sync_version);
+CREATE INDEX IF NOT EXISTS idx_scheduled_user_sync ON scheduled_transactions(user_id, sync_version);
+
 -- Backup schedule settings (singleton row)
 CREATE TABLE IF NOT EXISTS backup_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),

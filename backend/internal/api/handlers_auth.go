@@ -64,6 +64,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		 FROM users WHERE email = ? OR username = ?`, req.Login, req.Login,
 	).Scan(&userID, &name, &passwordHash, &isAdmin, &forcePasswordChange, &totpEnabled, &totpSecret)
 	if err == sql.ErrNoRows {
+		// Prevent timing-based user enumeration: run bcrypt against a dummy
+		// hash so the response time is similar to a valid-user-wrong-password path.
+		auth.CheckPassword(req.Password, "$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012")
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
@@ -228,7 +231,10 @@ func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
 	var email string
-	s.DB.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&email)
+	if err := s.DB.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&email); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "InSitu Ledger",
@@ -279,7 +285,10 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var secret *string
-	s.DB.QueryRow("SELECT totp_secret FROM users WHERE id = ?", userID).Scan(&secret)
+	if err := s.DB.QueryRow("SELECT totp_secret FROM users WHERE id = ?", userID).Scan(&secret); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	if secret == nil {
 		http.Error(w, "2FA not set up yet", http.StatusBadRequest)
 		return
@@ -312,7 +321,10 @@ func (s *Server) handleTOTPReset(w http.ResponseWriter, r *http.Request) {
 
 	// Require password confirmation
 	var hash, email string
-	s.DB.QueryRow("SELECT password_hash, email FROM users WHERE id = ?", userID).Scan(&hash, &email)
+	if err := s.DB.QueryRow("SELECT password_hash, email FROM users WHERE id = ?", userID).Scan(&hash, &email); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	if !auth.CheckPassword(req.Password, hash) {
 		http.Error(w, "incorrect password", http.StatusUnauthorized)
 		return

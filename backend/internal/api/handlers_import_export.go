@@ -74,6 +74,7 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 }
 
 const maxImportSize = 10 << 20 // 10 MB
+const maxImportRows = 50000
 
 func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
@@ -130,25 +131,43 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 	acctMap := map[string]int64{}
 
 	catRows, err := s.DB.Query("SELECT id, name FROM categories WHERE user_id = ? AND deleted_at IS NULL", targetUserID)
-	if err == nil {
-		defer catRows.Close()
-		for catRows.Next() {
-			var id int64
-			var name string
-			catRows.Scan(&id, &name)
-			catMap[strings.ToLower(name)] = id
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer catRows.Close()
+	for catRows.Next() {
+		var id int64
+		var name string
+		if err := catRows.Scan(&id, &name); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
 		}
+		catMap[strings.ToLower(name)] = id
+	}
+	if err := catRows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
 	acctRows, err := s.DB.Query("SELECT id, name FROM accounts WHERE user_id = ? AND deleted_at IS NULL", targetUserID)
-	if err == nil {
-		defer acctRows.Close()
-		for acctRows.Next() {
-			var id int64
-			var name string
-			acctRows.Scan(&id, &name)
-			acctMap[strings.ToLower(name)] = id
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer acctRows.Close()
+	for acctRows.Next() {
+		var id int64
+		var name string
+		if err := acctRows.Scan(&id, &name); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
 		}
+		acctMap[strings.ToLower(name)] = id
+	}
+	if err := acctRows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
 	tx, err := s.DB.Begin()
@@ -171,6 +190,11 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		}
 		rowNum++
 
+		if rowNum > maxImportRows+1 {
+			http.Error(w, fmt.Sprintf("import limited to %d rows", maxImportRows), http.StatusBadRequest)
+			return
+		}
+
 		if len(record) != 7 {
 			http.Error(w, fmt.Sprintf("row %d: expected 7 columns, got %d", rowNum, len(record)), http.StatusBadRequest)
 			return
@@ -183,6 +207,11 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		description := strings.TrimSpace(record[4])
 		catName := strings.TrimSpace(record[5])
 		acctName := strings.TrimSpace(record[6])
+
+		if len(description) > 500 {
+			http.Error(w, fmt.Sprintf("row %d: description exceeds 500 characters", rowNum), http.StatusBadRequest)
+			return
+		}
 
 		if typ != "income" && typ != "expense" {
 			http.Error(w, fmt.Sprintf("row %d: type must be 'income' or 'expense'", rowNum), http.StatusBadRequest)

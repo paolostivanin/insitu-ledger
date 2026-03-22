@@ -52,7 +52,9 @@
 		{:else}
 			<p class="desc">Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)</p>
 			<div class="qr-wrap">
-				<img src={totpQR} alt="TOTP QR Code" />
+				{#if totpQR?.startsWith('data:image/')}
+					<img src={totpQR} alt="TOTP QR Code" />
+				{/if}
 			</div>
 			<p class="manual-key">Manual key: <code>{totpSecret}</code></p>
 			<form onsubmit={verify}>

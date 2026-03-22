@@ -48,19 +48,16 @@
 	let suggestions = $state<AutocompleteSuggestion[]>([]);
 	let showSuggestions = $state(false);
 	let debounceTimer: ReturnType<typeof setTimeout>;
-	let abortController: AbortController | null = null;
 
 	async function onDescriptionInput(value: string) {
 		fDescription = value;
 		clearTimeout(debounceTimer);
-		if (abortController) abortController.abort();
 		if (value.length < 2) {
 			suggestions = [];
 			showSuggestions = false;
 			return;
 		}
 		debounceTimer = setTimeout(async () => {
-			abortController = new AbortController();
 			try {
 				suggestions = await transactions.autocomplete(value, $sharedOwnerUserId || undefined);
 				showSuggestions = suggestions.length > 0;
@@ -93,19 +90,20 @@
 		const currentOwnerId = $sharedOwnerUserId;
 		if (mounted && currentOwnerId !== prevOwnerId) {
 			prevOwnerId = currentOwnerId;
-			load();
+			loadAll();
 		}
 	});
 
 	onMount(() => {
 		prevOwnerId = $sharedOwnerUserId;
 		mounted = true;
-		load();
+		loadAll();
 		window.addEventListener('shortcut-new', onShortcutNew);
 		window.addEventListener('shortcut-close', onShortcutClose);
 	});
 
 	onDestroy(() => {
+		clearTimeout(debounceTimer);
 		if (typeof window !== 'undefined') {
 			window.removeEventListener('shortcut-new', onShortcutNew);
 			window.removeEventListener('shortcut-close', onShortcutClose);
@@ -115,25 +113,39 @@
 	function onShortcutNew() { resetForm(); showForm = true; }
 	function onShortcutClose() { showForm = false; showBatchCategoryPicker = false; }
 
-	async function load() {
-		loading = true;
+	async function loadReferenceData() {
 		const oid = $sharedOwnerUserId || undefined;
+		const [c, a] = await Promise.all([categories.list(oid), accounts.list(oid)]);
+		cats = c;
+		accts = a;
+		if (accts.length && !fAccountId) fAccountId = getDefaultAccountId();
+		if (cats.length && !fCategoryId) fCategoryId = cats[0].id;
+	}
+
+	async function loadAll() {
+		loading = true;
 		try {
-			const [t, c, a] = await Promise.all([
-				transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat, limit: PAGE_SIZE.toString(), sort_by: sortBy, sort_dir: sortDir, owner_id: oid }),
-				categories.list(oid),
-				accounts.list(oid)
-			]);
-			txns = t;
-			cats = c;
-			accts = a;
-			hasMore = t.length === PAGE_SIZE;
-			if (accts.length && !fAccountId) fAccountId = getDefaultAccountId();
-			if (cats.length && !fCategoryId) fCategoryId = cats[0].id;
+			await Promise.all([loadTransactions(), loadReferenceData()]);
 		} catch (e: any) {
 			error = e.message;
 		}
 		loading = false;
+	}
+
+	async function load() {
+		loading = true;
+		try {
+			await loadTransactions();
+		} catch (e: any) {
+			error = e.message;
+		}
+		loading = false;
+	}
+
+	async function loadTransactions() {
+		const oid = $sharedOwnerUserId || undefined;
+		txns = await transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat, limit: PAGE_SIZE.toString(), sort_by: sortBy, sort_dir: sortDir, owner_id: oid });
+		hasMore = txns.length === PAGE_SIZE;
 		selectedIds = new Set();
 	}
 

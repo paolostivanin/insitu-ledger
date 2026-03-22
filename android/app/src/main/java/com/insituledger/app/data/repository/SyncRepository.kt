@@ -230,6 +230,60 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    suspend fun enqueueLocalDataForSync() {
+        // Enqueue accounts first (transactions/scheduled reference them)
+        val accounts = accountDao.getAllSync()
+        for (a in accounts) {
+            if (!a.isLocalOnly) continue
+            val input = AccountInput(a.name, a.currency, a.balance)
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "account",
+                operation = "CREATE",
+                entityId = a.id,
+                payloadJson = gson.toJson(input)
+            ))
+        }
+
+        // Enqueue categories next (transactions/scheduled reference them)
+        val categories = categoryDao.getAllSync()
+        for (c in categories) {
+            if (!c.isLocalOnly) continue
+            val input = CategoryInput(c.parentId, c.name, c.type, c.icon, c.color)
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "category",
+                operation = "CREATE",
+                entityId = c.id,
+                payloadJson = gson.toJson(input)
+            ))
+        }
+
+        // Enqueue transactions
+        val transactions = transactionDao.getAllSync()
+        for (t in transactions) {
+            if (!t.isLocalOnly) continue
+            val input = TransactionInput(t.accountId, t.categoryId, t.type, t.amount, t.currency, t.description, t.date)
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "transaction",
+                operation = "CREATE",
+                entityId = t.id,
+                payloadJson = gson.toJson(input)
+            ))
+        }
+
+        // Enqueue scheduled transactions
+        val scheduled = scheduledDao.getAllSync()
+        for (s in scheduled) {
+            if (!s.isLocalOnly) continue
+            val input = ScheduledInput(s.accountId, s.categoryId, s.type, s.amount, s.currency, s.description, s.rrule, s.nextOccurrence, s.maxOccurrences)
+            pendingOpDao.insert(PendingOperationEntity(
+                entityType = "scheduled",
+                operation = "CREATE",
+                entityId = s.id,
+                payloadJson = gson.toJson(input)
+            ))
+        }
+    }
+
     suspend fun sync(): Result<Unit> {
         val pushResult = pushPendingOperations()
         if (pushResult.isFailure) return pushResult

@@ -140,13 +140,13 @@ func (s *Server) handleReportTrend(w http.ResponseWriter, r *http.Request) {
 	to := r.URL.Query().Get("to")
 	groupBy := r.URL.Query().Get("group_by") // "day", "week", "month"
 
-	var strftimeFmt string
-	switch groupBy {
-	case "day":
-		strftimeFmt = "%Y-%m-%d"
-	case "week":
-		strftimeFmt = "%Y-W%W"
-	default:
+	// strftimeFmts is a strict whitelist — never add user-controlled values here.
+	strftimeFmts := map[string]string{
+		"day":  "%Y-%m-%d",
+		"week": "%Y-W%W",
+	}
+	strftimeFmt, ok := strftimeFmts[groupBy]
+	if !ok {
 		strftimeFmt = "%Y-%m"
 	}
 

@@ -2,14 +2,14 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:gravity="center"
-    android:padding="4dp">
+    android:gravity="center">
 
     <ImageView
         android:id="@+id/widget_icon"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:layout_gravity="center"
+        android:scaleType="fitCenter"
         android:src="@drawable/ic_widget_add_transaction"
         android:contentDescription="@string/widget_description" />
 </FrameLayout>

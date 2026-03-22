@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AuthRepository
+import com.insituledger.app.data.repository.SyncRepository
 import com.insituledger.app.data.sync.SyncManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -24,6 +25,7 @@ data class LoginUiState(
 @HiltViewModel
 class LoginViewModel @Inject constructor(
     private val authRepository: AuthRepository,
+    private val syncRepository: SyncRepository,
     private val syncManager: SyncManager,
     private val prefs: UserPreferences
 ) : ViewModel() {
@@ -70,6 +72,8 @@ class LoginViewModel @Inject constructor(
                     } else {
                         // Set sync mode to webapp on successful login
                         prefs.saveSyncMode("webapp")
+                        // Push any pre-existing local data to the server
+                        syncRepository.enqueueLocalDataForSync()
                         syncManager.schedulePeriodicSync()
                         syncManager.scheduleScheduledTransactionCheck()
                         syncManager.triggerImmediateSync()

@@ -179,9 +179,12 @@ func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 
 	// Check if category has transactions
 	var count int
-	s.DB.QueryRow(
+	if err := s.DB.QueryRow(
 		"SELECT COUNT(*) FROM transactions WHERE category_id = ? AND deleted_at IS NULL", id,
-	).Scan(&count)
+	).Scan(&count); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	if count > 0 {
 		http.Error(w, "cannot delete category with existing transactions", http.StatusConflict)
 		return
@@ -192,7 +195,11 @@ func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	if rows == 0 {
 		http.Error(w, "category not found", http.StatusNotFound)
 		return

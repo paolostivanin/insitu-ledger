@@ -115,6 +115,6 @@ func NewRouter(s *Server) http.Handler {
 	// Serve frontend static files
 	mux.Handle("/", http.FileServer(http.Dir("static")))
 
-	// Wrap entire mux with logging and body limit
-	return LoggingMiddleware(BodyLimitMiddleware(mux))
+	// Wrap entire mux with logging, body limit, and security headers
+	return LoggingMiddleware(SecurityHeadersMiddleware(BodyLimitMiddleware(mux)))
 }
