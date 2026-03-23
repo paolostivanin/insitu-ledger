@@ -76,6 +76,43 @@ fun TransactionFormScreen(
 
             IncomeExpenseToggle(selected = uiState.type, onSelect = viewModel::updateType)
 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = formattedDate,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { showDatePicker = true }
+                )
+                Text(
+                    text = timePart,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { showTimePicker = true }
+                )
+            }
+
+            CompactAccountChip(
+                accountDisplays = uiState.accountDisplays,
+                selectedId = uiState.accountId,
+                onSelect = { id, currency ->
+                    viewModel.updateAccountId(id)
+                    viewModel.updateCurrency(currency)
+                },
+                onCreateAccount = viewModel::createAccount
+            )
+
+            CategoryDropdownWithAdd(
+                categories = uiState.categories,
+                selectedId = uiState.categoryId,
+                type = uiState.type,
+                onSelect = viewModel::updateCategoryId,
+                onCreateCategory = viewModel::createCategory
+            )
+
             // Name field (with autocomplete)
             ExposedDropdownMenuBox(
                 expanded = uiState.showSuggestions,
@@ -118,25 +155,6 @@ fun TransactionFormScreen(
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = formattedDate,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { showDatePicker = true }
-                )
-                Text(
-                    text = timePart,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { showTimePicker = true }
-                )
-            }
-
             OutlinedTextField(value = uiState.amount, onValueChange = viewModel::updateAmount,
                 label = { Text("Amount") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -145,24 +163,6 @@ fun TransactionFormScreen(
                         Icon(Icons.Default.Calculate, contentDescription = "Calculator")
                     }
                 })
-
-            CategoryDropdownWithAdd(
-                categories = uiState.categories,
-                selectedId = uiState.categoryId,
-                type = uiState.type,
-                onSelect = viewModel::updateCategoryId,
-                onCreateCategory = viewModel::createCategory
-            )
-
-            CompactAccountChip(
-                accountDisplays = uiState.accountDisplays,
-                selectedId = uiState.accountId,
-                onSelect = { id, currency ->
-                    viewModel.updateAccountId(id)
-                    viewModel.updateCurrency(currency)
-                },
-                onCreateAccount = viewModel::createAccount
-            )
 
             uiState.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)

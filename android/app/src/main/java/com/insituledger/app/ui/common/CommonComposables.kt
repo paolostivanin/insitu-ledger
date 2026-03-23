@@ -1,17 +1,30 @@
+@file:OptIn(ExperimentalLayoutApi::class)
+
 package com.insituledger.app.ui.common
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.text.NumberFormat
 import java.util.Currency
 import java.util.Locale
@@ -117,6 +130,15 @@ fun IncomeExpenseToggle(
     }
 }
 
+private fun parseColor(hex: String?): Color {
+    if (hex == null) return Color(0xFF6366F1)
+    return try {
+        Color(android.graphics.Color.parseColor(hex))
+    } catch (_: Exception) {
+        Color(0xFF6366F1)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryDropdownWithAdd(
@@ -128,37 +150,235 @@ fun CategoryDropdownWithAdd(
     modifier: Modifier = Modifier
 ) {
     val filteredCats = categories.filter { it.type == type }
-    var expanded by remember { mutableStateOf(false) }
+    val selectedCat = categories.find { it.id == selectedId }
+    val parentCat = selectedCat?.parentId?.let { pid -> categories.find { it.id == pid } }
+
+    var showModal by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
 
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
-        OutlinedTextField(
-            value = categories.find { it.id == selectedId }?.name ?: "",
-            onValueChange = {}, readOnly = true, label = { Text("Category") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
+    // Compact clickable text trigger (matches date/time style)
+    val displayText = if (parentCat != null) {
+        "${parentCat.name} > ${selectedCat?.name ?: ""}"
+    } else {
+        selectedCat?.name ?: "Category"
+    }
+    Row(
+        modifier = modifier.fillMaxWidth().clickable { showModal = true },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(parseColor(parentCat?.color ?: selectedCat?.color))
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            filteredCats.forEach { cat ->
-                val indent = if (cat.parentId != null) "    " else ""
-                DropdownMenuItem(
-                    text = { Text("$indent${cat.name}") },
-                    onClick = { onSelect(cat.id); expanded = false }
-                )
-            }
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                        Text("New category", color = MaterialTheme.colorScheme.primary)
+        Text(
+            text = displayText,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+
+    // Bottom sheet modal
+    if (showModal) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        var searchQuery by remember { mutableStateOf("") }
+
+        val topLevel = filteredCats.filter { it.parentId == null }
+
+        fun matchesSearch(cat: com.insituledger.app.domain.model.Category): Boolean {
+            if (searchQuery.isBlank()) return true
+            return cat.name.contains(searchQuery, ignoreCase = true)
+        }
+
+        val filteredGroups = topLevel.filter { parent ->
+            matchesSearch(parent) || filteredCats.any { it.parentId == parent.id && matchesSearch(it) }
+        }
+
+        ModalBottomSheet(
+            onDismissRequest = { showModal = false },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Select Category",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    IconButton(onClick = { showModal = false }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
                     }
-                },
-                onClick = { expanded = false; showAddDialog = true }
-            )
+                }
+
+                // Search + New row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    FilledTonalButton(
+                        onClick = { showModal = false; showAddDialog = true }
+                    ) {
+                        Text("New")
+                    }
+                }
+
+                // Category groups
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(filteredGroups, key = { it.id }) { parent ->
+                        val children = filteredCats.filter { it.parentId == parent.id && matchesSearch(it) }
+                        // Also show parent's own children if parent matches search but children don't
+                        val allChildren = if (searchQuery.isBlank()) {
+                            filteredCats.filter { it.parentId == parent.id }
+                        } else {
+                            children.ifEmpty {
+                                filteredCats.filter { it.parentId == parent.id }
+                            }
+                        }
+
+                        if (allChildren.isNotEmpty()) {
+                            // Parent as group header
+                            Column {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(bottom = 6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(parseColor(parent.color))
+                                    )
+                                    Text(
+                                        text = parent.name,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                // Subcategory chips
+                                FlowRow(
+                                    modifier = Modifier.padding(start = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    allChildren.forEach { child ->
+                                        val isSelected = child.id == selectedId
+                                        Surface(
+                                            onClick = {
+                                                onSelect(child.id)
+                                                showModal = false
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isSelected)
+                                                MaterialTheme.colorScheme.primaryContainer
+                                            else
+                                                MaterialTheme.colorScheme.surfaceVariant,
+                                            border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
+                                        ) {
+                                            Text(
+                                                text = child.name,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (isSelected)
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                else
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Standalone parent (no children)
+                            val isSelected = parent.id == selectedId
+                            Surface(
+                                onClick = {
+                                    onSelect(parent.id)
+                                    showModal = false
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected)
+                                    MaterialTheme.colorScheme.primaryContainer
+                                else
+                                    Color.Transparent
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(vertical = 6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(parseColor(parent.color))
+                                    )
+                                    Text(
+                                        text = parent.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (isSelected)
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        else
+                                            MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (filteredGroups.isEmpty()) {
+                        item {
+                            Text(
+                                "No matching categories",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
+    // Create category dialog
     if (showAddDialog) {
         var newName by remember { mutableStateOf("") }
         AlertDialog(
@@ -204,23 +424,40 @@ fun CompactAccountChip(
     var showAddDialog by remember { mutableStateOf(false) }
 
     val selectedDisplay = accountDisplays.find { it.account.id == selectedId }
+
+    // Compact clickable text trigger (matches date/time style)
     val chipLabel = if (selectedDisplay != null) {
         "${selectedDisplay.label} (${selectedDisplay.account.currency})"
     } else {
         "Account"
     }
-
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
-        AssistChip(
-            onClick = { expanded = true },
-            label = { Text(chipLabel, maxLines = 1) },
-            trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable)
+        Text(
+            text = chipLabel,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable { expanded = true }.menuAnchor(MenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             accountDisplays.forEach { display ->
                 DropdownMenuItem(
-                    text = { Text("${display.label} (${display.account.currency})") },
+                    text = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                display.label,
+                                fontWeight = if (display.account.id == selectedId) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                            Text(
+                                display.account.currency,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
                     onClick = {
                         onSelect(display.account.id, display.account.currency)
                         expanded = false
