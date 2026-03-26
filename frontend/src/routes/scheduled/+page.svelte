@@ -76,6 +76,11 @@
 		return rruleLabels[rrule] || rrule;
 	}
 
+	function extractTime(dt: string): string {
+		if (!dt.includes('T')) return '';
+		return dt.split('T')[1].slice(0, 5);
+	}
+
 	function resetForm() {
 		editId = null;
 		fType = 'expense';
@@ -272,7 +277,7 @@
 						<tr>
 							<td>{rruleLabel(item.rrule)}</td>
 							<td>{item.next_occurrence.includes('T') ? item.next_occurrence.split('T')[0] : item.next_occurrence}</td>
-							<td>{item.next_occurrence.includes('T') ? item.next_occurrence.split('T')[1] : '—'}</td>
+							<td>{extractTime(item.next_occurrence) || '—'}</td>
 							<td><span class="badge {item.type === 'income' ? 'badge-income' : 'badge-expense'}">{item.type}</span></td>
 							<td>{catName(item.category_id)}</td>
 							<td>{acctName(item.account_id)}</td>

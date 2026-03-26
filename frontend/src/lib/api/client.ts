@@ -51,7 +51,8 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 	const res = await fetch(url, {
 		method,
 		headers,
-		body: body ? JSON.stringify(body) : undefined
+		body: body ? JSON.stringify(body) : undefined,
+		cache: method === 'GET' ? 'no-store' : undefined
 	});
 
 	if (res.status === 401 && !path.startsWith('/auth/login')) {

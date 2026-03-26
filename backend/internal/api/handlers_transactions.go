@@ -178,12 +178,13 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 		req.Currency = "EUR"
 	}
 
-	// If the datetime is in the future, create a one-time scheduled transaction instead
+	// If the datetime is in the future, create a one-time scheduled transaction instead.
+	// Parse in local time to match the user's intent (frontend sends local times).
 	now := time.Now()
 	isFuture := false
-	if t, err := time.Parse("2006-01-02T15:04", req.Date); err == nil {
+	if t, err := time.ParseInLocation("2006-01-02T15:04", req.Date, time.Local); err == nil {
 		isFuture = t.After(now)
-	} else if t, err := time.Parse("2006-01-02", req.Date); err == nil {
+	} else if t, err := time.ParseInLocation("2006-01-02", req.Date, time.Local); err == nil {
 		// Date-only: treat as start of day, future only if the entire day is tomorrow+
 		isFuture = t.After(now.Truncate(24 * time.Hour))
 	}

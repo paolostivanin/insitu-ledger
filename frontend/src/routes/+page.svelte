@@ -59,6 +59,11 @@
 	function fmt(n: number): string {
 		return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 	}
+
+	function extractTime(dt: string): string {
+		if (!dt.includes('T')) return '';
+		return dt.slice(11, 16);
+	}
 </script>
 
 <div class="page">
@@ -97,12 +102,13 @@
 					<div class="table-wrap">
 						<table>
 							<thead>
-								<tr><th>Date</th><th>Description</th><th>Amount</th></tr>
+								<tr><th>Date</th><th>Time</th><th>Description</th><th>Amount</th></tr>
 							</thead>
 							<tbody>
 								{#each recentTxns as txn}
 									<tr>
-										<td>{txn.date}</td>
+										<td>{txn.date.slice(0, 10)}</td>
+										<td>{extractTime(txn.date) || '—'}</td>
 										<td>{txn.description || '—'}</td>
 										<td class={txn.type === 'income' ? 'amount-income' : 'amount-expense'}>
 											{txn.type === 'income' ? '+' : '-'}{fmt(txn.amount)}

@@ -23,15 +23,17 @@ func Open(dataDir string) (*sql.DB, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, "insitu-ledger.db")
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(wal)&_pragma=foreign_keys(on)&_pragma=busy_timeout(5000)", dbPath)
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(wal)&_pragma=foreign_keys(on)&_pragma=busy_timeout(5000)&_pragma=synchronous(normal)", dbPath)
 
 	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// SQLite performs best with a single writer connection
-	conn.SetMaxOpenConns(1)
+	// WAL mode allows concurrent readers with a single writer.
+	// SQLite serializes writes internally, so multiple connections are safe.
+	conn.SetMaxOpenConns(4)
+	conn.SetMaxIdleConns(4)
 
 	if _, err := conn.Exec(schemaSQL); err != nil {
 		conn.Close()

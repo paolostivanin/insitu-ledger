@@ -47,25 +47,45 @@
 	// Autocomplete
 	let suggestions = $state<AutocompleteSuggestion[]>([]);
 	let showSuggestions = $state(false);
+	let selectedSuggestionIndex = $state(-1);
 	let debounceTimer: ReturnType<typeof setTimeout>;
 
-	async function onDescriptionInput(value: string) {
-		fDescription = value;
+	function onDescriptionInput() {
 		clearTimeout(debounceTimer);
-		if (value.length < 2) {
+		if (fDescription.length < 2) {
 			suggestions = [];
 			showSuggestions = false;
+			selectedSuggestionIndex = -1;
 			return;
 		}
 		debounceTimer = setTimeout(async () => {
 			try {
-				suggestions = await transactions.autocomplete(value, $sharedOwnerUserId || undefined);
+				suggestions = await transactions.autocomplete(fDescription, $sharedOwnerUserId || undefined);
 				showSuggestions = suggestions.length > 0;
+				selectedSuggestionIndex = -1;
 			} catch {
 				suggestions = [];
 				showSuggestions = false;
+				selectedSuggestionIndex = -1;
 			}
 		}, 200);
+	}
+
+	function onDescriptionKeydown(e: KeyboardEvent) {
+		if (!showSuggestions || suggestions.length === 0) return;
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			selectedSuggestionIndex = (selectedSuggestionIndex + 1) % suggestions.length;
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			selectedSuggestionIndex = selectedSuggestionIndex <= 0 ? suggestions.length - 1 : selectedSuggestionIndex - 1;
+		} else if (e.key === 'Enter' && selectedSuggestionIndex >= 0) {
+			e.preventDefault();
+			selectSuggestion(suggestions[selectedSuggestionIndex]);
+		} else if (e.key === 'Escape') {
+			showSuggestions = false;
+			selectedSuggestionIndex = -1;
+		}
 	}
 
 	function selectSuggestion(s: AutocompleteSuggestion) {
@@ -73,6 +93,7 @@
 		fCategoryId = s.category_id;
 		suggestions = [];
 		showSuggestions = false;
+		selectedSuggestionIndex = -1;
 	}
 
 	// Import
@@ -133,13 +154,11 @@
 	}
 
 	async function load() {
-		loading = true;
 		try {
 			await loadTransactions();
 		} catch (e: any) {
 			error = e.message;
 		}
-		loading = false;
 	}
 
 	async function loadTransactions() {
@@ -193,10 +212,9 @@
 		return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 	}
 
-	function fmtTime(dt: string): string {
-		const d = new Date(dt);
-		if (isNaN(d.getTime())) return '';
-		return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+	function extractTime(dt: string): string {
+		if (!dt.includes('T')) return '';
+		return dt.slice(11, 16);
 	}
 
 	function getDefaultAccountId(): number {
@@ -457,15 +475,16 @@
 				</div>
 				<div class="form-group autocomplete-wrap">
 					<label for="desc">Name</label>
-					<input id="desc" type="text" value={fDescription} maxlength="500"
-						oninput={(e) => onDescriptionInput((e.target as HTMLInputElement).value)}
-						onfocusout={() => setTimeout(() => { showSuggestions = false; }, 150)}
+					<input id="desc" type="text" bind:value={fDescription} maxlength="500"
+						oninput={onDescriptionInput}
+						onkeydown={onDescriptionKeydown}
+						onfocusout={() => setTimeout(() => { showSuggestions = false; selectedSuggestionIndex = -1; }, 150)}
 						placeholder="Optional" autocomplete="off" />
 					{#if showSuggestions}
 						<ul class="autocomplete-list">
-							{#each suggestions as s}
+							{#each suggestions as s, i}
 								<li>
-									<button type="button" onmousedown={() => selectSuggestion(s)}>
+									<button type="button" class:active={i === selectedSuggestionIndex} onmousedown={() => selectSuggestion(s)}>
 										{s.description}
 										<span class="autocomplete-cat">{catName(s.category_id)}</span>
 									</button>
@@ -573,7 +592,7 @@
 								<input type="checkbox" checked={selectedIds.has(txn.id)} onchange={() => toggleSelect(txn.id)} />
 							</td>
 							<td>{txn.date.slice(0, 10)}</td>
-							<td class="time-cell">{txn.date.includes('T') ? txn.date.slice(11, 16) : ''}</td>
+							<td class="time-cell">{extractTime(txn.date) || '—'}</td>
 							<td><span class="badge {txn.type === 'income' ? 'badge-income' : 'badge-expense'}">{txn.type}</span></td>
 							<td>{catName(txn.category_id)}</td>
 							<td>{acctName(txn.account_id)}</td>
@@ -696,7 +715,8 @@
 		color: var(--text);
 		text-align: left;
 	}
-	.autocomplete-list li button:hover {
+	.autocomplete-list li button:hover,
+	.autocomplete-list li button.active {
 		background: var(--bg-hover);
 	}
 	.autocomplete-cat {
