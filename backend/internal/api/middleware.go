@@ -86,20 +86,34 @@ func BodyLimitMiddleware(next http.Handler) http.Handler {
 type LoginRateLimiter struct {
 	mu       sync.Mutex
 	attempts map[string][]time.Time
+	done     chan struct{}
 }
 
 // NewLoginRateLimiter creates a rate limiter for login attempts.
 func NewLoginRateLimiter() *LoginRateLimiter {
 	rl := &LoginRateLimiter{
 		attempts: make(map[string][]time.Time),
+		done:     make(chan struct{}),
 	}
 	// Periodically clean up stale entries
 	go func() {
-		for range time.Tick(10 * time.Minute) {
-			rl.cleanup()
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				rl.cleanup()
+			case <-rl.done:
+				return
+			}
 		}
 	}()
 	return rl
+}
+
+// Stop terminates the background cleanup goroutine.
+func (rl *LoginRateLimiter) Stop() {
+	close(rl.done)
 }
 
 const (

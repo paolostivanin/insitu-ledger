@@ -2,7 +2,9 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { reports, type CategoryReport, type MonthReport, type TrendReport } from '$lib/api/client';
 	import { theme } from '$lib/stores/theme';
-	import * as echarts from 'echarts';
+	import type * as EChartsType from 'echarts';
+
+	let echarts: typeof EChartsType;
 
 	let categoryData = $state<CategoryReport[]>([]);
 	let monthData = $state<MonthReport[]>([]);
@@ -18,9 +20,9 @@
 	let barChartEl: HTMLDivElement;
 	let trendChartEl: HTMLDivElement;
 
-	let pieChart: echarts.ECharts;
-	let barChart: echarts.ECharts;
-	let trendChart: echarts.ECharts;
+	let pieChart: EChartsType.ECharts;
+	let barChart: EChartsType.ECharts;
+	let trendChart: EChartsType.ECharts;
 
 	function getCssVar(name: string): string {
 		return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -31,6 +33,7 @@
 	}
 
 	function reinitCharts() {
+		if (!echarts) return;
 		const echartsTheme = getEchartsTheme();
 		if (pieChart) pieChart.dispose();
 		if (barChart) barChart.dispose();
@@ -65,6 +68,8 @@
 	});
 
 	onMount(async () => {
+		echarts = await import('echarts');
+
 		const echartsTheme = getEchartsTheme();
 		pieChart = echarts.init(pieChartEl, echartsTheme);
 		barChart = echarts.init(barChartEl, echartsTheme);

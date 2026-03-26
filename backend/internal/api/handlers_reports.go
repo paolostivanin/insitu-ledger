@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -41,7 +42,7 @@ func (s *Server) handleReportByCategory(w http.ResponseWriter, r *http.Request) 
 		args = append(args, typ)
 	}
 
-	query += " GROUP BY c.id, t.type ORDER BY total DESC"
+	query += " GROUP BY c.id, t.type ORDER BY total DESC LIMIT 1000"
 
 	rows, err := s.DB.Query(query, args...)
 	if err != nil {
@@ -56,11 +57,18 @@ func (s *Server) handleReportByCategory(w http.ResponseWriter, r *http.Request) 
 		var catName, catType string
 		var catColor *string
 		var total float64
-		rows.Scan(&catID, &catName, &catColor, &catType, &total)
+		if err := rows.Scan(&catID, &catName, &catColor, &catType, &total); err != nil {
+			log.Printf("report by-category: scan error: %v", err)
+			continue
+		}
 		results = append(results, map[string]any{
 			"category_id": catID, "category_name": catName,
 			"category_color": catColor, "type": catType, "total": total,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
 	if results == nil {
@@ -96,7 +104,7 @@ func (s *Server) handleReportByMonth(w http.ResponseWriter, r *http.Request) {
 		args = append(args, year)
 	}
 
-	query += " GROUP BY month, type ORDER BY month"
+	query += " GROUP BY month, type ORDER BY month LIMIT 1000"
 
 	rows, err := s.DB.Query(query, args...)
 	if err != nil {
@@ -109,10 +117,17 @@ func (s *Server) handleReportByMonth(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var month, typ string
 		var total float64
-		rows.Scan(&month, &typ, &total)
+		if err := rows.Scan(&month, &typ, &total); err != nil {
+			log.Printf("report by-month: scan error: %v", err)
+			continue
+		}
 		results = append(results, map[string]any{
 			"month": month, "type": typ, "total": total,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
 	if results == nil {
@@ -164,7 +179,7 @@ func (s *Server) handleReportTrend(w http.ResponseWriter, r *http.Request) {
 		args = append(args, to)
 	}
 
-	query += " GROUP BY period, type ORDER BY period"
+	query += " GROUP BY period, type ORDER BY period LIMIT 1000"
 
 	rows, err := s.DB.Query(query, args...)
 	if err != nil {
@@ -177,10 +192,17 @@ func (s *Server) handleReportTrend(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var period, typ string
 		var total float64
-		rows.Scan(&period, &typ, &total)
+		if err := rows.Scan(&period, &typ, &total); err != nil {
+			log.Printf("report trend: scan error: %v", err)
+			continue
+		}
 		results = append(results, map[string]any{
 			"period": period, "type": typ, "total": total,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
 	if results == nil {

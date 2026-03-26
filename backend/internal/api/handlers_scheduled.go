@@ -69,6 +69,11 @@ func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	if items == nil {
 		items = []map[string]any{}
 	}

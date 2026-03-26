@@ -16,16 +16,24 @@
 			return;
 		}
 		try {
-			const [a, t, c, m] = await Promise.all([
+			const results = await Promise.allSettled([
 				accounts.list(),
 				transactions.list({ limit: '10' }),
 				reports.byCategory({ type: 'expense' }),
 				reports.byMonth({ year: new Date().getFullYear().toString() })
 			]);
-			accts = a;
-			recentTxns = t;
-			categoryData = c;
-			monthData = m;
+			if (results[0].status === 'fulfilled') accts = results[0].value;
+			if (results[1].status === 'fulfilled') recentTxns = results[1].value;
+			if (results[2].status === 'fulfilled') categoryData = results[2].value;
+			if (results[3].status === 'fulfilled') monthData = results[3].value;
+
+			const failures = results.filter(r => r.status === 'rejected');
+			if (failures.length === results.length) {
+				const reason = (failures[0] as PromiseRejectedResult).reason;
+				if (reason?.status !== 401) {
+					loadError = 'Failed to load dashboard data. Please try refreshing.';
+				}
+			}
 		} catch (e: any) {
 			if (e?.status !== 401) {
 				loadError = 'Failed to load dashboard data. Please try refreshing.';

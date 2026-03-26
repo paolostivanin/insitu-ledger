@@ -63,7 +63,7 @@ func (s *Server) handleUpdateBackupSettings(w http.ResponseWriter, r *http.Reque
 	}
 
 	adminID := UserIDFromContext(r.Context())
-	writeAuditLog(s.DB, adminID, "update_backup_settings", nil, fmt.Sprintf("enabled=%v freq=%s retention=%d", req.Enabled, req.Frequency, req.RetentionCount), clientIP(r))
+	writeAuditLog(s.DB, adminID, "update_backup_settings", nil, fmt.Sprintf("enabled=%v freq=%s retention=%d", req.Enabled, req.Frequency, req.RetentionCount), s.clientIP(r))
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -100,7 +100,7 @@ func (s *Server) handleAdminBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeAuditLog(s.DB, adminID, "backup_download", nil, "", clientIP(r))
+	writeAuditLog(s.DB, adminID, "backup_download", nil, "", s.clientIP(r))
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=insitu-backup-%s.db", time.Now().Format("2006-01-02")))

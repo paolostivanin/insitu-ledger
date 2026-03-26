@@ -52,6 +52,11 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	if accts == nil {
 		accts = []map[string]any{}
 	}

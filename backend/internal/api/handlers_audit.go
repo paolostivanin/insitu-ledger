@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 func writeAuditLog(db *sql.DB, adminID int64, action string, targetUserID *int64, details, ip string) {
@@ -17,9 +18,14 @@ func writeAuditLog(db *sql.DB, adminID int64, action string, targetUserID *int64
 	}
 }
 
-func clientIP(r *http.Request) string {
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		return fwd
+func (s *Server) clientIP(r *http.Request) string {
+	if s.TrustProxy {
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			if i := strings.Index(fwd, ","); i != -1 {
+				return strings.TrimSpace(fwd[:i])
+			}
+			return strings.TrimSpace(fwd)
+		}
 	}
 	return r.RemoteAddr
 }
@@ -68,6 +74,11 @@ func (s *Server) handleAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
 			"created_at":     createdAt,
 		}
 		logs = append(logs, entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
 	if logs == nil {

@@ -120,6 +120,11 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	if txns == nil {
 		txns = []map[string]any{}
 	}
@@ -377,6 +382,10 @@ func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.R
 			return
 		}
 		results = append(results, s)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 	if results == nil {
 		results = []suggestion{}

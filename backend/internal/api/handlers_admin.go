@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -52,12 +53,19 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 		var id int64
 		var username, email, name, createdAt string
 		var isAdmin, forcePC, totpEnabled bool
-		rows.Scan(&id, &username, &email, &name, &isAdmin, &forcePC, &totpEnabled, &createdAt)
+		if err := rows.Scan(&id, &username, &email, &name, &isAdmin, &forcePC, &totpEnabled, &createdAt); err != nil {
+			log.Printf("admin list users: scan error: %v", err)
+			continue
+		}
 		users = append(users, map[string]any{
 			"id": id, "username": username, "email": email, "name": name,
 			"is_admin": isAdmin, "force_password_change": forcePC,
 			"totp_enabled": totpEnabled, "created_at": createdAt,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 	if users == nil {
 		users = []map[string]any{}
@@ -102,7 +110,7 @@ func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
 	id, _ := result.LastInsertId()
 
 	adminID := UserIDFromContext(r.Context())
-	writeAuditLog(s.DB, adminID, "create_user", int64Ptr(id), "username: "+req.Username, clientIP(r))
+	writeAuditLog(s.DB, adminID, "create_user", int64Ptr(id), "username: "+req.Username, s.clientIP(r))
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -145,7 +153,7 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	adminID := UserIDFromContext(r.Context())
-	writeAuditLog(s.DB, adminID, "update_user", int64Ptr(id), "", clientIP(r))
+	writeAuditLog(s.DB, adminID, "update_user", int64Ptr(id), "", s.clientIP(r))
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -185,7 +193,7 @@ func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeAuditLog(s.DB, adminID, "delete_user", int64Ptr(id), "", clientIP(r))
+	writeAuditLog(s.DB, adminID, "delete_user", int64Ptr(id), "", s.clientIP(r))
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -239,7 +247,7 @@ func (s *Server) handleAdminResetPassword(w http.ResponseWriter, r *http.Request
 	}
 
 	adminID := UserIDFromContext(r.Context())
-	writeAuditLog(s.DB, adminID, "reset_password", int64Ptr(id), "", clientIP(r))
+	writeAuditLog(s.DB, adminID, "reset_password", int64Ptr(id), "", s.clientIP(r))
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -263,7 +271,7 @@ func (s *Server) handleAdminToggleAdmin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeAuditLog(s.DB, adminID, "toggle_admin", int64Ptr(id), "", clientIP(r))
+	writeAuditLog(s.DB, adminID, "toggle_admin", int64Ptr(id), "", s.clientIP(r))
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -282,7 +290,7 @@ func (s *Server) handleAdminDisableTOTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	adminID := UserIDFromContext(r.Context())
-	writeAuditLog(s.DB, adminID, "disable_totp", int64Ptr(id), "", clientIP(r))
+	writeAuditLog(s.DB, adminID, "disable_totp", int64Ptr(id), "", s.clientIP(r))
 
 	w.WriteHeader(http.StatusNoContent)
 }

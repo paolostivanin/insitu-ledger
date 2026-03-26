@@ -39,8 +39,9 @@ func main() {
 	defer conn.Close()
 
 	server := &api.Server{
-		DB:        conn,
-		AuthStore: auth.NewStore(conn),
+		DB:         conn,
+		AuthStore:  auth.NewStore(conn),
+		TrustProxy: os.Getenv("INSITU_TRUST_PROXY") == "true",
 	}
 
 	router := api.NewRouter(server)
@@ -72,6 +73,7 @@ func main() {
 	<-done
 	log.Println("Shutting down...")
 
+	server.LoginRateLimiter.Stop()
 	schedulerCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

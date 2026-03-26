@@ -70,6 +70,9 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 			currency, description, catName, acctName,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		log.Printf("export rows iteration error: %v", err)
+	}
 	cw.Flush()
 }
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 )
@@ -30,11 +31,18 @@ func (s *Server) handleListSharedAccess(w http.ResponseWriter, r *http.Request) 
 	for rows.Next() {
 		var id, ownerID, guestID int64
 		var permission, guestName, guestEmail string
-		rows.Scan(&id, &ownerID, &guestID, &permission, &guestName, &guestEmail)
+		if err := rows.Scan(&id, &ownerID, &guestID, &permission, &guestName, &guestEmail); err != nil {
+			log.Printf("shared access: scan error: %v", err)
+			continue
+		}
 		items = append(items, map[string]any{
 			"id": id, "owner_user_id": ownerID, "guest_user_id": guestID,
 			"permission": permission, "guest_name": guestName, "guest_email": guestEmail,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
 	if items == nil {
@@ -105,10 +113,17 @@ func (s *Server) handleListAccessibleOwners(w http.ResponseWriter, r *http.Reque
 	for rows.Next() {
 		var ownerID int64
 		var name, email, permission string
-		rows.Scan(&ownerID, &name, &email, &permission)
+		if err := rows.Scan(&ownerID, &name, &email, &permission); err != nil {
+			log.Printf("accessible owners: scan error: %v", err)
+			continue
+		}
 		items = append(items, map[string]any{
 			"owner_user_id": ownerID, "name": name, "email": email, "permission": permission,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
 	if items == nil {

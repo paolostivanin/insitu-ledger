@@ -56,6 +56,11 @@ func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	if err := rows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	if cats == nil {
 		cats = []map[string]any{}
 	}

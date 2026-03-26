@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"image/png"
 	"net/http"
+	"strings"
 
 	"github.com/pquerna/otp/totp"
 	"github.com/pstivanin/insitu-ledger/backend/internal/auth"
@@ -41,8 +42,14 @@ type authResponse struct {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ip := r.RemoteAddr
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		ip = fwd
+	if s.TrustProxy {
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			if i := strings.Index(fwd, ","); i != -1 {
+				ip = strings.TrimSpace(fwd[:i])
+			} else {
+				ip = strings.TrimSpace(fwd)
+			}
+		}
 	}
 	if !s.LoginRateLimiter.Allow(ip) {
 		http.Error(w, "too many login attempts, try again later", http.StatusTooManyRequests)

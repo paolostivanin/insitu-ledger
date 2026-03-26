@@ -13,6 +13,7 @@ type Server struct {
 	DB               *sql.DB
 	AuthStore        *auth.Store
 	LoginRateLimiter *LoginRateLimiter
+	TrustProxy       bool
 }
 
 // NewRouter sets up all routes and returns the root handler.
