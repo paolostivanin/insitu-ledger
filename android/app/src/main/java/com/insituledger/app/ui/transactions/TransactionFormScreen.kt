@@ -155,9 +155,13 @@ fun TransactionFormScreen(
                 }
             }
 
+            val amountError = uiState.amount.isNotEmpty() && uiState.amount.toDoubleOrNull().let { it == null || it <= 0 }
             OutlinedTextField(value = uiState.amount, onValueChange = viewModel::updateAmount,
                 label = { Text("Amount") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
+                prefix = { Text(uiState.currency) },
+                isError = amountError,
+                supportingText = if (amountError) {{ Text("Enter a valid amount") }} else null,
                 trailingIcon = {
                     IconButton(onClick = { showCalculator = true }) {
                         Icon(Icons.Default.Calculate, contentDescription = "Calculator")

@@ -16,10 +16,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AmountText
+import com.insituledger.app.ui.common.IncomeColor
+import com.insituledger.app.ui.common.ExpenseColor
 import com.insituledger.app.ui.common.LoadingIndicator
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import com.insituledger.app.ui.common.CurrencyFormatter
+import com.insituledger.app.ui.theme.AppSpacing
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,20 +52,21 @@ fun DashboardScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(AppSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
         ) {
             // Total balance card
             item {
-                Card(
+                ElevatedCard(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
                 ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Text("Total Balance", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Text("Net Worth", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                         Text(
                             text = formatCurrency(data.totalBalance, "EUR"),
-                            style = MaterialTheme.typography.headlineMedium,
+                            style = MaterialTheme.typography.headlineLarge,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -79,15 +83,37 @@ fun DashboardScreen(
                     SummaryCard(
                         title = "Income",
                         amount = data.monthIncome,
-                        color = Color(0xFF2E7D32),
+                        color = IncomeColor,
                         modifier = Modifier.weight(1f)
                     )
                     SummaryCard(
                         title = "Expenses",
                         amount = data.monthExpense,
-                        color = MaterialTheme.colorScheme.error,
+                        color = ExpenseColor,
                         modifier = Modifier.weight(1f)
                     )
+                }
+            }
+
+            // Net monthly balance
+            item {
+                val net = data.monthIncome - data.monthExpense
+                val netColor = if (net >= 0) IncomeColor else ExpenseColor
+                val netPrefix = if (net >= 0) "+" else ""
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Monthly Net", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = "$netPrefix${formatCurrency(net, "EUR")}",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = netColor
+                        )
+                    }
                 }
             }
 
@@ -97,13 +123,31 @@ fun DashboardScreen(
                     Text("Accounts", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
                 }
                 items(data.accounts, key = { "account_${it.id}" }) { account ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(16.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(account.name, style = MaterialTheme.typography.bodyLarge)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(account.name, style = MaterialTheme.typography.bodyLarge)
+                                if (account.currency != "EUR") {
+                                    Surface(
+                                        shape = MaterialTheme.shapes.small,
+                                        color = MaterialTheme.colorScheme.secondaryContainer
+                                    ) {
+                                        Text(
+                                            text = account.currency,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                }
+                            }
                             Text(
                                 text = formatCurrency(account.balance, account.currency),
                                 style = MaterialTheme.typography.bodyLarge,
@@ -120,7 +164,7 @@ fun DashboardScreen(
                     Text("Recent Transactions", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
                 }
                 items(data.recentTransactions, key = { "txn_${it.id}" }) { txn ->
-                    TransactionItem(txn = txn, onClick = { onTransactionClick(txn.id) })
+                    TransactionItem(txn = txn, onClick = { onTransactionClick(txn.id) }, modifier = Modifier.animateItem())
                 }
             }
         }
@@ -144,8 +188,8 @@ private fun SummaryCard(title: String, amount: Double, color: Color, modifier: M
 }
 
 @Composable
-private fun TransactionItem(txn: Transaction, onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
+private fun TransactionItem(txn: Transaction, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Card(modifier = modifier.fillMaxWidth(), onClick = onClick) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,

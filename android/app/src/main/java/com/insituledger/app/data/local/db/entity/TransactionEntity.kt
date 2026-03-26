@@ -2,9 +2,18 @@ package com.insituledger.app.data.local.db.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "transactions")
+@Entity(
+    tableName = "transactions",
+    indices = [
+        Index(value = ["date"]),
+        Index(value = ["category_id"]),
+        Index(value = ["account_id"]),
+        Index(value = ["deleted_at"])
+    ]
+)
 data class TransactionEntity(
     @PrimaryKey val id: Long,
     @ColumnInfo(name = "account_id") val accountId: Long,

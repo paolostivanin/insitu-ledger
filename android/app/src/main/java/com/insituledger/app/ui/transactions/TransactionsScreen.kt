@@ -27,13 +27,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import java.text.NumberFormat
+import com.insituledger.app.ui.common.CurrencyFormatter
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -152,6 +153,9 @@ fun TransactionsScreen(
                         val categoryMap = remember(uiState.categories) {
                             uiState.categories.associateBy { it.id }
                         }
+                        val isSelectionMode = uiState.isSelectionMode
+                        val selectedIds = uiState.selectedIds
+                        val isReadOnly = uiState.isReadOnly
                         if (uiState.sortBy == "date") {
                             val grouped = remember(uiState.transactions) {
                                 uiState.transactions.groupBy { it.date.take(10) }
@@ -187,11 +191,11 @@ fun TransactionsScreen(
                                         SwipeableTransactionRow(
                                             txn = txn,
                                             categoryMap = categoryMap,
-                                            isSelectionMode = uiState.isSelectionMode,
-                                            isSelected = uiState.selectedIds.contains(txn.id),
-                                            isReadOnly = uiState.isReadOnly,
+                                            isSelectionMode = isSelectionMode,
+                                            isSelected = selectedIds.contains(txn.id),
+                                            isReadOnly = isReadOnly,
                                             onClick = {
-                                                if (uiState.isSelectionMode) viewModel.toggleSelect(txn.id)
+                                                if (isSelectionMode) viewModel.toggleSelect(txn.id)
                                                 else onTransactionClick(txn.id)
                                             },
                                             onLongClick = { viewModel.toggleSelect(txn.id) },
@@ -212,11 +216,11 @@ fun TransactionsScreen(
                                     SwipeableTransactionRow(
                                         txn = txn,
                                         categoryMap = categoryMap,
-                                        isSelectionMode = uiState.isSelectionMode,
-                                        isSelected = uiState.selectedIds.contains(txn.id),
-                                        isReadOnly = uiState.isReadOnly,
+                                        isSelectionMode = isSelectionMode,
+                                        isSelected = selectedIds.contains(txn.id),
+                                        isReadOnly = isReadOnly,
                                         onClick = {
-                                            if (uiState.isSelectionMode) viewModel.toggleSelect(txn.id)
+                                            if (isSelectionMode) viewModel.toggleSelect(txn.id)
                                             else onTransactionClick(txn.id)
                                         },
                                         onLongClick = { viewModel.toggleSelect(txn.id) },
@@ -358,13 +362,14 @@ private fun TransactionRowContent(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val categoryColor = categoryMap[txn.categoryId]?.color
-            if (categoryColor != null) {
+            val category = categoryMap[txn.categoryId]
+            if (category?.color != null) {
                 Box(
                     modifier = Modifier
                         .size(12.dp)
                         .clip(CircleShape)
-                        .background(parseColor(categoryColor))
+                        .background(parseColor(category.color))
+                        .semantics { contentDescription = "Category: ${category.name}" }
                 )
             }
             Text(
@@ -571,8 +576,5 @@ private fun parseColor(hex: String): Color {
 }
 
 private fun formatAmount(amount: Double): String {
-    return NumberFormat.getNumberInstance(Locale.getDefault()).apply {
-        minimumFractionDigits = 2
-        maximumFractionDigits = 2
-    }.format(amount)
+    return CurrencyFormatter.format(amount, "EUR")
 }

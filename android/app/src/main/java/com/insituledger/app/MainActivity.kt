@@ -11,6 +11,8 @@ import androidx.biometric.BiometricPrompt
 import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.ui.common.LoadingIndicator
@@ -128,8 +130,10 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         // Only trigger sync if webapp sync is configured
-        if (userPreferences.getSyncModeImmediate() == "webapp") {
-            syncManager.triggerImmediateSync()
+        lifecycleScope.launch {
+            if (userPreferences.getSyncModeImmediate() == "webapp") {
+                syncManager.triggerImmediateSync()
+            }
         }
     }
 

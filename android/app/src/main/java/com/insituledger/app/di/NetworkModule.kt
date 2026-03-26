@@ -1,5 +1,6 @@
 package com.insituledger.app.di
 
+import android.content.Context
 import com.insituledger.app.BuildConfig
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.remote.api.*
@@ -7,11 +8,14 @@ import com.insituledger.app.data.remote.interceptor.AuthInterceptor
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
@@ -21,8 +25,14 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(authInterceptor: AuthInterceptor): OkHttpClient {
+    fun provideOkHttpClient(
+        authInterceptor: AuthInterceptor,
+        @ApplicationContext context: Context
+    ): OkHttpClient {
+        val cacheDir = File(context.cacheDir, "http_cache")
+        val cache = Cache(cacheDir, 10L * 1024 * 1024) // 10MB
         return OkHttpClient.Builder()
+            .cache(cache)
             .addInterceptor(authInterceptor)
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = if (BuildConfig.DEBUG) {

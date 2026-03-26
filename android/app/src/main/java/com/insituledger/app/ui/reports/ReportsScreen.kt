@@ -15,6 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -239,6 +241,7 @@ private fun SummaryView(
                                     .size(12.dp)
                                     .clip(CircleShape)
                                     .background(parseColor(summary.category.color))
+                                    .semantics { contentDescription = "Category: ${summary.category.name}" }
                             )
                             Column {
                                 Text(summary.category.name, style = MaterialTheme.typography.bodyLarge)

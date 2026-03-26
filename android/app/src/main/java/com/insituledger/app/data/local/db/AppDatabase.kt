@@ -16,7 +16,7 @@ import com.insituledger.app.data.local.db.entity.*
         ScheduledTransactionEntity::class,
         PendingOperationEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @androidx.room.TypeConverters(Converters::class)
@@ -32,6 +32,15 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE scheduled_transactions ADD COLUMN max_occurrences INTEGER")
                 db.execSQL("ALTER TABLE scheduled_transactions ADD COLUMN occurrence_count INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_date ON transactions(date)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_category_id ON transactions(category_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_account_id ON transactions(account_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_deleted_at ON transactions(deleted_at)")
             }
         }
     }

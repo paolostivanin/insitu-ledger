@@ -25,9 +25,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.text.NumberFormat
-import java.util.Currency
-import java.util.Locale
 
 val IncomeColor = Color(0xFF2E7D32)
 val ExpenseColor = Color(0xFFC62828)
@@ -42,13 +39,7 @@ fun AmountText(
 ) {
     val color = if (type == "income") IncomeColor else ExpenseColor
     val prefix = if (type == "income") "+" else "-"
-    val formatted = try {
-        val fmt = NumberFormat.getCurrencyInstance(Locale.getDefault())
-        fmt.currency = Currency.getInstance(currency)
-        fmt.format(amount)
-    } catch (_: Exception) {
-        "$currency %.2f".format(amount)
-    }
+    val formatted = CurrencyFormatter.format(amount, currency)
     Text(
         text = "$prefix$formatted",
         color = color,
@@ -66,13 +57,34 @@ fun LoadingIndicator(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun EmptyState(message: String, modifier: Modifier = Modifier) {
+fun EmptyState(
+    message: String,
+    modifier: Modifier = Modifier,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null
+) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (actionLabel != null && onAction != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                FilledTonalButton(onClick = onAction) { Text(actionLabel) }
+            }
+        }
     }
 }
 
