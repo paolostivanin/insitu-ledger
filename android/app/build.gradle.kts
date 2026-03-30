@@ -14,8 +14,8 @@ android {
         applicationId = "com.insituledger.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.11.0"
+        versionCode = 15
+        versionName = "1.12.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -94,6 +94,7 @@ dependencies {
 
     implementation(libs.biometric)
     implementation(libs.security.crypto)
+    implementation(libs.documentfile)
 
     implementation(libs.lib.recur)
 

@@ -1,6 +1,7 @@
 package com.insituledger.app.data.repository
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import com.insituledger.app.data.local.db.dao.*
 import com.insituledger.app.data.local.db.entity.*
@@ -63,7 +64,7 @@ class FileBackupRepository @Inject constructor(
     private val scheduledDao: ScheduledTransactionDao,
     private val gson: Gson
 ) {
-    suspend fun exportToUri(uri: Uri): Result<Int> {
+    suspend fun generateBackupJson(): Result<String> {
         return try {
             val accounts = accountDao.getAllSync().map {
                 AccountBackup(it.id, it.name, it.currency, it.balance, it.createdAt, it.updatedAt)
@@ -85,16 +86,32 @@ class FileBackupRepository @Inject constructor(
                 scheduledTransactions = scheduled
             )
 
-            val json = gson.toJson(backup)
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                out.write(json.toByteArray(Charsets.UTF_8))
-            } ?: return Result.failure(Exception("Could not open output stream"))
-
-            val totalItems = accounts.size + categories.size + transactions.size + scheduled.size
-            Result.success(totalItems)
+            Result.success(gson.toJson(backup))
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    suspend fun exportToUri(uri: Uri): Result<Int> {
+        return generateBackupJson().mapCatching { json ->
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                out.write(json.toByteArray(Charsets.UTF_8))
+            } ?: throw Exception("Could not open output stream")
+            val backup = gson.fromJson(json, BackupData::class.java)
+            backup.accounts.size + backup.categories.size + backup.transactions.size + backup.scheduledTransactions.size
+        }
+    }
+
+    fun takeFolderPermission(uri: Uri) {
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        context.contentResolver.takePersistableUriPermission(uri, flags)
+    }
+
+    fun releaseFolderPermission(uri: Uri) {
+        try {
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.releasePersistableUriPermission(uri, flags)
+        } catch (_: Exception) {}
     }
 
     suspend fun importFromUri(uri: Uri): Result<Int> {

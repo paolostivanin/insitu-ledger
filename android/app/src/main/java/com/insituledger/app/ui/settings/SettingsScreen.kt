@@ -13,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -26,6 +27,13 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // SAF launcher for auto backup folder
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let { viewModel.setAutoBackupFolder(it) }
+    }
 
     // SAF launchers for file backup
     val exportLauncher = rememberLauncherForActivityResult(
@@ -176,6 +184,76 @@ fun SettingsScreen(
                 }
             }
 
+            // Automatic backup
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Schedule, contentDescription = null)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Automatic Backup", style = MaterialTheme.typography.titleSmall)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Automatically back up your data on a daily, weekly, or monthly schedule. " +
+                                "Backups are saved as JSON files to the selected folder.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (uiState.autoBackupFolderUri != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Folder, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Folder selected", style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { folderPickerLauncher.launch(null) }) { Text("Change") }
+                            TextButton(onClick = viewModel::clearAutoBackupFolder) { Text("Clear") }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        BackupTierRow(
+                            label = "Daily",
+                            description = "Runs every day at ~3:00 AM",
+                            enabled = uiState.autoBackupDailyEnabled,
+                            retention = uiState.autoBackupDailyRetention,
+                            onEnabledChange = viewModel::setAutoBackupDailyEnabled,
+                            onRetentionChange = viewModel::setAutoBackupDailyRetention
+                        )
+                        BackupTierRow(
+                            label = "Weekly",
+                            description = "Runs every Monday",
+                            enabled = uiState.autoBackupWeeklyEnabled,
+                            retention = uiState.autoBackupWeeklyRetention,
+                            onEnabledChange = viewModel::setAutoBackupWeeklyEnabled,
+                            onRetentionChange = viewModel::setAutoBackupWeeklyRetention
+                        )
+                        BackupTierRow(
+                            label = "Monthly",
+                            description = "Runs on the 1st of each month",
+                            enabled = uiState.autoBackupMonthlyEnabled,
+                            retention = uiState.autoBackupMonthlyRetention,
+                            onEnabledChange = viewModel::setAutoBackupMonthlyEnabled,
+                            onRetentionChange = viewModel::setAutoBackupMonthlyRetention
+                        )
+                    } else {
+                        Button(onClick = { folderPickerLauncher.launch(null) }) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Select Backup Folder")
+                        }
+                    }
+                }
+            }
+
             // Sync section
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -256,6 +334,50 @@ fun SettingsScreen(
                         onConfirm = { current, new -> viewModel.changePassword(current, new) }
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BackupTierRow(
+    label: String,
+    description: String,
+    enabled: Boolean,
+    retention: Int,
+    onEnabledChange: (Boolean) -> Unit,
+    onRetentionChange: (Int) -> Unit
+) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.bodyLarge)
+                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+        }
+        if (enabled) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+            ) {
+                Text("Keep", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(
+                    onClick = { if (retention > 1) onRetentionChange(retention - 1) },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.Remove, contentDescription = "Decrease", modifier = Modifier.size(18.dp))
+                }
+                Text("$retention", style = MaterialTheme.typography.bodyMedium)
+                IconButton(
+                    onClick = { onRetentionChange(retention + 1) },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Increase", modifier = Modifier.size(18.dp))
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("backups", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

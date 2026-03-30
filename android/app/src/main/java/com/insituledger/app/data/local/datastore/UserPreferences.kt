@@ -40,6 +40,13 @@ class UserPreferences @Inject constructor(
         val LAST_USED_ACCOUNT_ID = longPreferencesKey("last_used_account_id")
         val WEEK_START_DAY = stringPreferencesKey("week_start_day")
         val SCREEN_SECURE = booleanPreferencesKey("screen_secure")
+        val AUTO_BACKUP_FOLDER_URI = stringPreferencesKey("auto_backup_folder_uri")
+        val AUTO_BACKUP_DAILY_ENABLED = booleanPreferencesKey("auto_backup_daily_enabled")
+        val AUTO_BACKUP_DAILY_RETENTION = intPreferencesKey("auto_backup_daily_retention")
+        val AUTO_BACKUP_WEEKLY_ENABLED = booleanPreferencesKey("auto_backup_weekly_enabled")
+        val AUTO_BACKUP_WEEKLY_RETENTION = intPreferencesKey("auto_backup_weekly_retention")
+        val AUTO_BACKUP_MONTHLY_ENABLED = booleanPreferencesKey("auto_backup_monthly_enabled")
+        val AUTO_BACKUP_MONTHLY_RETENTION = intPreferencesKey("auto_backup_monthly_retention")
 
         private const val ENCRYPTED_PREFS_FILE = "secure_prefs"
         private const val KEY_TOKEN = "token"
@@ -73,6 +80,13 @@ class UserPreferences @Inject constructor(
     val lastUsedAccountIdFlow: Flow<Long?> = context.dataStore.data.map { it[LAST_USED_ACCOUNT_ID] }
     val weekStartDayFlow: Flow<String> = context.dataStore.data.map { it[WEEK_START_DAY] ?: "monday" }
     val screenSecureFlow: Flow<Boolean> = context.dataStore.data.map { it[SCREEN_SECURE] ?: true }
+    val autoBackupFolderUriFlow: Flow<String?> = context.dataStore.data.map { it[AUTO_BACKUP_FOLDER_URI] }
+    val autoBackupDailyEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[AUTO_BACKUP_DAILY_ENABLED] ?: false }
+    val autoBackupDailyRetentionFlow: Flow<Int> = context.dataStore.data.map { it[AUTO_BACKUP_DAILY_RETENTION] ?: 7 }
+    val autoBackupWeeklyEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[AUTO_BACKUP_WEEKLY_ENABLED] ?: false }
+    val autoBackupWeeklyRetentionFlow: Flow<Int> = context.dataStore.data.map { it[AUTO_BACKUP_WEEKLY_RETENTION] ?: 4 }
+    val autoBackupMonthlyEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[AUTO_BACKUP_MONTHLY_ENABLED] ?: false }
+    val autoBackupMonthlyRetentionFlow: Flow<Int> = context.dataStore.data.map { it[AUTO_BACKUP_MONTHLY_RETENTION] ?: 6 }
 
     suspend fun saveToken(token: String) {
         encryptedPrefs.edit().putString(KEY_TOKEN, token).apply()
@@ -128,16 +142,75 @@ class UserPreferences @Inject constructor(
         context.dataStore.edit { it[SCREEN_SECURE] = enabled }
     }
 
+    suspend fun saveAutoBackupFolderUri(uri: String?) {
+        context.dataStore.edit {
+            if (uri != null) it[AUTO_BACKUP_FOLDER_URI] = uri
+            else it.remove(AUTO_BACKUP_FOLDER_URI)
+        }
+    }
+
+    suspend fun saveAutoBackupDailyEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[AUTO_BACKUP_DAILY_ENABLED] = enabled }
+    }
+
+    suspend fun saveAutoBackupDailyRetention(count: Int) {
+        context.dataStore.edit { it[AUTO_BACKUP_DAILY_RETENTION] = count }
+    }
+
+    suspend fun saveAutoBackupWeeklyEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[AUTO_BACKUP_WEEKLY_ENABLED] = enabled }
+    }
+
+    suspend fun saveAutoBackupWeeklyRetention(count: Int) {
+        context.dataStore.edit { it[AUTO_BACKUP_WEEKLY_RETENTION] = count }
+    }
+
+    suspend fun saveAutoBackupMonthlyEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[AUTO_BACKUP_MONTHLY_ENABLED] = enabled }
+    }
+
+    suspend fun saveAutoBackupMonthlyRetention(count: Int) {
+        context.dataStore.edit { it[AUTO_BACKUP_MONTHLY_RETENTION] = count }
+    }
+
     @Volatile
     private var _syncModeCache: String = "none"
+    @Volatile
+    private var _autoBackupFolderUriCache: String? = null
+    @Volatile
+    private var _autoBackupDailyEnabledCache: Boolean = false
+    @Volatile
+    private var _autoBackupDailyRetentionCache: Int = 7
+    @Volatile
+    private var _autoBackupWeeklyEnabledCache: Boolean = false
+    @Volatile
+    private var _autoBackupWeeklyRetentionCache: Int = 4
+    @Volatile
+    private var _autoBackupMonthlyEnabledCache: Boolean = false
+    @Volatile
+    private var _autoBackupMonthlyRetentionCache: Int = 6
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
         syncModeFlow.onEach { _syncModeCache = it }.launchIn(scope)
+        autoBackupFolderUriFlow.onEach { _autoBackupFolderUriCache = it }.launchIn(scope)
+        autoBackupDailyEnabledFlow.onEach { _autoBackupDailyEnabledCache = it }.launchIn(scope)
+        autoBackupDailyRetentionFlow.onEach { _autoBackupDailyRetentionCache = it }.launchIn(scope)
+        autoBackupWeeklyEnabledFlow.onEach { _autoBackupWeeklyEnabledCache = it }.launchIn(scope)
+        autoBackupWeeklyRetentionFlow.onEach { _autoBackupWeeklyRetentionCache = it }.launchIn(scope)
+        autoBackupMonthlyEnabledFlow.onEach { _autoBackupMonthlyEnabledCache = it }.launchIn(scope)
+        autoBackupMonthlyRetentionFlow.onEach { _autoBackupMonthlyRetentionCache = it }.launchIn(scope)
     }
 
     fun getSyncModeImmediate(): String = _syncModeCache
+    fun getAutoBackupFolderUriImmediate(): String? = _autoBackupFolderUriCache
+    fun getAutoBackupDailyEnabledImmediate(): Boolean = _autoBackupDailyEnabledCache
+    fun getAutoBackupDailyRetentionImmediate(): Int = _autoBackupDailyRetentionCache
+    fun getAutoBackupWeeklyEnabledImmediate(): Boolean = _autoBackupWeeklyEnabledCache
+    fun getAutoBackupWeeklyRetentionImmediate(): Int = _autoBackupWeeklyRetentionCache
+    fun getAutoBackupMonthlyEnabledImmediate(): Boolean = _autoBackupMonthlyEnabledCache
+    fun getAutoBackupMonthlyRetentionImmediate(): Int = _autoBackupMonthlyRetentionCache
 
     suspend fun clearAll() {
         encryptedPrefs.edit().remove(KEY_TOKEN).apply()

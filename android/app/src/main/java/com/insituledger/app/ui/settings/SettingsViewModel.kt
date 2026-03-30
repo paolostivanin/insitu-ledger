@@ -7,6 +7,7 @@ import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.repository.AuthRepository
 import com.insituledger.app.data.repository.FileBackupRepository
+import com.insituledger.app.data.sync.BackupManager
 import com.insituledger.app.data.sync.SyncManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -32,7 +33,15 @@ data class SettingsUiState(
     // File backup fields
     val isExporting: Boolean = false,
     val isImporting: Boolean = false,
-    val backupMessage: String? = null
+    val backupMessage: String? = null,
+    // Auto backup fields
+    val autoBackupFolderUri: String? = null,
+    val autoBackupDailyEnabled: Boolean = false,
+    val autoBackupDailyRetention: Int = 7,
+    val autoBackupWeeklyEnabled: Boolean = false,
+    val autoBackupWeeklyRetention: Int = 4,
+    val autoBackupMonthlyEnabled: Boolean = false,
+    val autoBackupMonthlyRetention: Int = 6
 )
 
 @HiltViewModel
@@ -40,6 +49,7 @@ class SettingsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val syncManager: SyncManager,
     private val fileBackupRepository: FileBackupRepository,
+    private val backupManager: BackupManager,
     private val prefs: UserPreferences,
     private val pendingOpDao: PendingOperationDao
 ) : ViewModel() {
@@ -87,6 +97,30 @@ class SettingsViewModel @Inject constructor(
             ) { syncVersion, pending ->
                 _uiState.update {
                     it.copy(lastSyncVersion = syncVersion, pendingOps = pending)
+                }
+            }.collect()
+        }
+
+        viewModelScope.launch {
+            combine(
+                prefs.autoBackupFolderUriFlow,
+                prefs.autoBackupDailyEnabledFlow,
+                prefs.autoBackupDailyRetentionFlow,
+                prefs.autoBackupWeeklyEnabledFlow,
+                prefs.autoBackupWeeklyRetentionFlow,
+                prefs.autoBackupMonthlyEnabledFlow,
+                prefs.autoBackupMonthlyRetentionFlow
+            ) { values: Array<Any?> ->
+                _uiState.update {
+                    it.copy(
+                        autoBackupFolderUri = values[0] as String?,
+                        autoBackupDailyEnabled = values[1] as Boolean,
+                        autoBackupDailyRetention = values[2] as Int,
+                        autoBackupWeeklyEnabled = values[3] as Boolean,
+                        autoBackupWeeklyRetention = values[4] as Int,
+                        autoBackupMonthlyEnabled = values[5] as Boolean,
+                        autoBackupMonthlyRetention = values[6] as Int
+                    )
                 }
             }.collect()
         }
@@ -175,5 +209,57 @@ class SettingsViewModel @Inject constructor(
 
     fun clearBackupMessage() {
         _uiState.update { it.copy(backupMessage = null) }
+    }
+
+    fun setAutoBackupFolder(uri: Uri) {
+        fileBackupRepository.takeFolderPermission(uri)
+        viewModelScope.launch {
+            prefs.saveAutoBackupFolderUri(uri.toString())
+            backupManager.scheduleAutoBackup()
+        }
+    }
+
+    fun clearAutoBackupFolder() {
+        viewModelScope.launch {
+            val oldUri = prefs.getAutoBackupFolderUriImmediate()
+            if (oldUri != null) {
+                fileBackupRepository.releaseFolderPermission(Uri.parse(oldUri))
+            }
+            prefs.saveAutoBackupFolderUri(null)
+            backupManager.cancelAutoBackup()
+        }
+    }
+
+    fun setAutoBackupDailyEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            prefs.saveAutoBackupDailyEnabled(enabled)
+            backupManager.scheduleAutoBackup()
+        }
+    }
+
+    fun setAutoBackupDailyRetention(count: Int) {
+        viewModelScope.launch { prefs.saveAutoBackupDailyRetention(count) }
+    }
+
+    fun setAutoBackupWeeklyEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            prefs.saveAutoBackupWeeklyEnabled(enabled)
+            backupManager.scheduleAutoBackup()
+        }
+    }
+
+    fun setAutoBackupWeeklyRetention(count: Int) {
+        viewModelScope.launch { prefs.saveAutoBackupWeeklyRetention(count) }
+    }
+
+    fun setAutoBackupMonthlyEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            prefs.saveAutoBackupMonthlyEnabled(enabled)
+            backupManager.scheduleAutoBackup()
+        }
+    }
+
+    fun setAutoBackupMonthlyRetention(count: Int) {
+        viewModelScope.launch { prefs.saveAutoBackupMonthlyRetention(count) }
     }
 }

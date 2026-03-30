@@ -14,6 +14,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import com.insituledger.app.data.local.datastore.UserPreferences
+import com.insituledger.app.data.sync.BackupManager
 import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.ui.common.LoadingIndicator
 import com.insituledger.app.ui.navigation.AppNavigation
@@ -26,6 +27,7 @@ class MainActivity : AppCompatActivity() {
 
     @Inject lateinit var userPreferences: UserPreferences
     @Inject lateinit var syncManager: SyncManager
+    @Inject lateinit var backupManager: BackupManager
 
     private var biometricUnlocked = mutableStateOf(false)
     private var biometricPromptShown = false
@@ -39,6 +41,7 @@ class MainActivity : AppCompatActivity() {
 
         // Always schedule the local scheduled-transaction worker
         syncManager.scheduleScheduledTransactionCheck()
+        backupManager.scheduleAutoBackup()
 
         setContent {
             val themeMode by userPreferences.themeModeFlow.collectAsStateWithLifecycle(initialValue = "system")
