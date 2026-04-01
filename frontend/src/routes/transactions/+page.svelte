@@ -449,7 +449,7 @@
 					<div class="form-group">
 						<label for="account">Account</label>
 						<select id="account" bind:value={fAccountId} onchange={() => localStorage.setItem('lastUsedAccountId', fAccountId.toString())}>
-							{#each accts as a}
+							{#each accts as a (a.id)}
 								<option value={a.id}>{a.name}{$sharedOwnerUserId ? ' (shared)' : ''}</option>
 							{/each}
 						</select>
@@ -482,7 +482,7 @@
 						placeholder="Optional" autocomplete="off" />
 					{#if showSuggestions}
 						<ul class="autocomplete-list">
-							{#each suggestions as s, i}
+							{#each suggestions as s, i (s.description)}
 								<li>
 									<button type="button" class:active={i === selectedSuggestionIndex} onmousedown={() => selectSuggestion(s)}>
 										{s.description}
@@ -512,7 +512,7 @@
 				<label for="fc">Category</label>
 				<select id="fc" bind:value={filterCat} onchange={() => load()}>
 					<option value="">All</option>
-					{#each cats as c}
+					{#each cats as c (c.id)}
 						<option value={c.id.toString()}>{c.name}</option>
 					{/each}
 				</select>
@@ -529,7 +529,7 @@
 			</button>
 			{#if showBatchCategoryPicker}
 				<select bind:value={batchCategoryId}>
-					{#each cats as c}
+					{#each cats as c (c.id)}
 						<option value={c.id}>{c.name}</option>
 					{/each}
 				</select>
@@ -549,7 +549,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each Array(5) as _}
+					{#each Array(5) as _, i (i)}
 						<tr class="skeleton-row">
 							<td><div class="skeleton" style="width:16px;height:16px"></div></td>
 							<td><div class="skeleton" style="width:80px"></div></td>
@@ -586,7 +586,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each txns as txn}
+					{#each txns as txn (txn.id)}
 						<tr>
 							<td class="check-col">
 								<input type="checkbox" checked={selectedIds.has(txn.id)} onchange={() => toggleSelect(txn.id)} />

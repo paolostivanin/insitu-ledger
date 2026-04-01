@@ -51,28 +51,74 @@ func (s *Server) handleBatchDeleteTransactions(w http.ResponseWriter, r *http.Re
 	}
 	defer tx.Rollback()
 
-	for _, id := range req.IDs {
-		var amount float64
-		var typ string
-		var accountID int64
-		err := tx.QueryRow(
-			"SELECT amount, type, account_id FROM transactions WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
-			id, targetUserID,
-		).Scan(&amount, &typ, &accountID)
-		if err != nil {
-			continue
-		}
+	// Fetch all matching transactions in one query
+	placeholders := make([]string, len(req.IDs))
+	args := make([]any, 0, len(req.IDs)+1)
+	for i, id := range req.IDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	args = append(args, targetUserID)
 
-		if _, err := tx.Exec("UPDATE transactions SET deleted_at = datetime('now') WHERE id = ?", id); err != nil {
-			http.Error(w, "delete failed", http.StatusInternalServerError)
+	fetchQuery := fmt.Sprintf(
+		"SELECT id, amount, type, account_id FROM transactions WHERE id IN (%s) AND user_id = ? AND deleted_at IS NULL",
+		strings.Join(placeholders, ","),
+	)
+	rows, err := tx.Query(fetchQuery, args...)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Accumulate balance deltas per account
+	type txnInfo struct {
+		id        int64
+		amount    float64
+		typ       string
+		accountID int64
+	}
+	var found []txnInfo
+	for rows.Next() {
+		var t txnInfo
+		if err := rows.Scan(&t.id, &t.amount, &t.typ, &t.accountID); err != nil {
+			rows.Close()
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		found = append(found, t)
+	}
+	rows.Close()
 
+	if len(found) == 0 {
+		tx.Rollback()
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Soft-delete all matching transactions in one query
+	delPlaceholders := make([]string, len(found))
+	delArgs := make([]any, len(found))
+	for i, t := range found {
+		delPlaceholders[i] = "?"
+		delArgs[i] = t.id
+	}
+	delQuery := fmt.Sprintf("UPDATE transactions SET deleted_at = datetime('now') WHERE id IN (%s)", strings.Join(delPlaceholders, ","))
+	if _, err := tx.Exec(delQuery, delArgs...); err != nil {
+		http.Error(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Aggregate balance adjustments per account
+	balanceDeltas := make(map[int64]float64)
+	for _, t := range found {
 		sign := 1.0
-		if typ == "expense" {
+		if t.typ == "expense" {
 			sign = -1.0
 		}
-		if _, err := tx.Exec("UPDATE accounts SET balance = balance - ? WHERE id = ?", amount*sign, accountID); err != nil {
+		balanceDeltas[t.accountID] -= t.amount * sign
+	}
+	for accountID, delta := range balanceDeltas {
+		if _, err := tx.Exec("UPDATE accounts SET balance = balance + ? WHERE id = ?", delta, accountID); err != nil {
 			http.Error(w, "failed to update balance", http.StatusInternalServerError)
 			return
 		}

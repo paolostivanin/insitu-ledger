@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
@@ -46,7 +47,13 @@ func Open(dataDir string) (*sql.DB, error) {
 		"ALTER TABLE scheduled_transactions ADD COLUMN occurrence_count INTEGER NOT NULL DEFAULT 0",
 	}
 	for _, m := range migrations {
-		conn.Exec(m) // ignore errors (column already exists)
+		if _, err := conn.Exec(m); err != nil {
+			// Only ignore "duplicate column" errors — everything else is a real problem.
+			if !strings.Contains(err.Error(), "duplicate column") {
+				conn.Close()
+				return nil, fmt.Errorf("migration error: %w", err)
+			}
+		}
 	}
 
 	seedDefaultAdmin(conn)

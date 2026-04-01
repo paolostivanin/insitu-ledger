@@ -131,7 +131,7 @@
 		<p class="empty-state">No accounts yet. Create one to start tracking.</p>
 	{:else}
 		<div class="acct-grid">
-			{#each accts as acct}
+			{#each accts as acct (acct.id)}
 				<div class="card acct-card">
 					<div class="acct-name">{acct.name}</div>
 					<div class="acct-balance">{fmt(acct.balance)} <span class="acct-currency">{acct.currency}</span></div>

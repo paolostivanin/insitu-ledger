@@ -134,7 +134,7 @@
 						<label for="parent">Parent Category</label>
 						<select id="parent" bind:value={fParentId}>
 							<option value={null}>None (top level)</option>
-							{#each parentCats() as p}
+							{#each parentCats() as p (p.id)}
 								<option value={p.id}>{p.name}</option>
 							{/each}
 						</select>
@@ -159,7 +159,7 @@
 		<p class="empty-state">No categories yet. Create one to get started.</p>
 	{:else}
 		<div class="cat-grid">
-			{#each topLevel() as cat}
+			{#each topLevel() as cat (cat.id)}
 				<div class="card cat-card">
 					<div class="cat-header">
 						<span class="cat-dot" style="background: {cat.color || '#6366f1'}"></span>
@@ -173,7 +173,7 @@
 					</div>
 					{#if children(cat.id).length > 0}
 						<div class="sub-cats">
-							{#each children(cat.id) as sub}
+							{#each children(cat.id) as sub (sub.id)}
 								<div class="sub-row">
 									<span class="cat-dot small" style="background: {sub.color || cat.color || '#6366f1'}"></span>
 									<span>{sub.icon || ''} {sub.name}</span>

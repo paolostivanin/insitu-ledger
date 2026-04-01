@@ -136,7 +136,7 @@
 				<span class="hamburger-line"></span>
 			</button>
 			<div class="nav-links" class:open={mobileMenuOpen}>
-				{#each navItems as item}
+				{#each navItems as item (item.href)}
 					<a href={item.href} class:active={$page.url.pathname === item.href} onclick={() => mobileMenuOpen = false}>{item.label}</a>
 				{/each}
 				{#if $isAdmin}
@@ -147,7 +147,7 @@
 				{#if accessibleOwners.length > 0}
 					<select class="owner-switcher" value={$sharedOwnerUserId || ''} onchange={switchOwner}>
 						<option value="">My Data</option>
-						{#each accessibleOwners as owner}
+						{#each accessibleOwners as owner (owner.owner_user_id)}
 							<option value={owner.owner_user_id.toString()}>{owner.name} ({owner.permission})</option>
 						{/each}
 					</select>

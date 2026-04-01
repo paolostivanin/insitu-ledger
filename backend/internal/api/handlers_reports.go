@@ -30,7 +30,7 @@ func (s *Server) handleReportByCategory(w http.ResponseWriter, r *http.Request) 
 	args := []any{targetUserID}
 
 	if from != "" {
-		query += " AND SUBSTR(t.date, 1, 10) >= ?"
+		query += " AND t.date >= ?"
 		args = append(args, from)
 	}
 	if to != "" {
@@ -171,7 +171,7 @@ func (s *Server) handleReportTrend(w http.ResponseWriter, r *http.Request) {
 	args := []any{targetUserID}
 
 	if from != "" {
-		query += " AND SUBSTR(date, 1, 10) >= ?"
+		query += " AND date >= ?"
 		args = append(args, from)
 	}
 	if to != "" {

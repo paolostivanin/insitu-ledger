@@ -99,6 +99,11 @@ func (s *Store) RevokeToken(token string) {
 	s.db.Exec("DELETE FROM sessions WHERE token = ?", token)
 }
 
+// RevokeAllForUser removes all session tokens for the given user.
+func (s *Store) RevokeAllForUser(userID int64) {
+	s.db.Exec("DELETE FROM sessions WHERE user_id = ?", userID)
+}
+
 // cleanup removes all expired tokens.
 func (s *Store) cleanup() {
 	s.db.Exec("DELETE FROM sessions WHERE expires_at < ?", time.Now().UTC().Format(time.RFC3339))

@@ -168,6 +168,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+
+	// Invalidate all existing sessions so stolen/old tokens can't be reused.
+	s.AuthStore.RevokeAllForUser(userID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -182,6 +185,10 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Username != "" {
+		if err := validateLength("username", req.Username, 100); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		_, err := s.DB.Exec("UPDATE users SET username = ? WHERE id = ?", req.Username, userID)
 		if err != nil {
 			http.Error(w, "username already in use", http.StatusConflict)
@@ -190,6 +197,10 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Email != "" {
+		if err := validateLength("email", req.Email, 255); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		_, err := s.DB.Exec("UPDATE users SET email = ? WHERE id = ?", req.Email, userID)
 		if err != nil {
 			http.Error(w, "email already in use", http.StatusConflict)
@@ -198,6 +209,10 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Name != "" {
+		if err := validateLength("name", req.Name, 100); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		if _, err := s.DB.Exec("UPDATE users SET name = ? WHERE id = ?", req.Name, userID); err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return

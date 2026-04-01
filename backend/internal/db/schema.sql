@@ -117,6 +117,7 @@ CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_active ON scheduled_transactions(active, next_occurrence);
 CREATE INDEX IF NOT EXISTS idx_shared_access_guest ON shared_access(guest_user_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_description ON transactions(description COLLATE NOCASE);
 
 -- Sync version indexes (for efficient sync queries)
 CREATE INDEX IF NOT EXISTS idx_transactions_sync ON transactions(sync_version);

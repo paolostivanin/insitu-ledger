@@ -23,8 +23,16 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	sinceStr := r.URL.Query().Get("since")
 	since, _ := strconv.ParseInt(sinceStr, 10, 64)
 
+	// Use a read transaction so all queries see a consistent snapshot.
+	tx, err := s.DB.Begin()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
 	var currentVersion int64
-	s.DB.QueryRow("SELECT version FROM sync_meta WHERE id = 1").Scan(&currentVersion)
+	tx.QueryRow("SELECT version FROM sync_meta WHERE id = 1").Scan(&currentVersion)
 
 	if since >= currentVersion {
 		w.Header().Set("Content-Type", "application/json")
@@ -41,148 +49,160 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{"current_version": currentVersion}
 
 	// Fetch changed transactions (including soft-deleted ones so mobile can remove them)
-	txnRows, err := s.DB.Query(
+	txnRows, err := tx.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency,
 		        description, date, created_at, updated_at, deleted_at, sync_version
 		 FROM transactions WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
 	)
-	if err == nil {
-		defer txnRows.Close()
-		var txns []map[string]any
-		for txnRows.Next() {
-			var id, accountID, categoryID, uid, sv int64
-			var typ, currency, date, createdAt, updatedAt string
-			var amount float64
-			var description, deletedAt *string
-			if err := txnRows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
-				&description, &date, &createdAt, &updatedAt, &deletedAt, &sv); err != nil {
-				log.Printf("sync: scan transaction error: %v", err)
-				continue
-			}
-			txns = append(txns, map[string]any{
-				"id": id, "account_id": accountID, "category_id": categoryID,
-				"user_id": uid, "type": typ, "amount": amount, "currency": currency,
-				"description": description, "date": date, "created_at": createdAt,
-				"updated_at": updatedAt, "deleted_at": deletedAt, "sync_version": sv,
-			})
-		}
-		if err := txnRows.Err(); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if txns == nil {
-			txns = []map[string]any{}
-		}
-		resp["transactions"] = txns
+	if err != nil {
+		log.Printf("sync: transaction query error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
+	defer txnRows.Close()
+	var txns []map[string]any
+	for txnRows.Next() {
+		var id, accountID, categoryID, uid, sv int64
+		var typ, currency, date, createdAt, updatedAt string
+		var amount float64
+		var description, deletedAt *string
+		if err := txnRows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
+			&description, &date, &createdAt, &updatedAt, &deletedAt, &sv); err != nil {
+			log.Printf("sync: scan transaction error: %v", err)
+			continue
+		}
+		txns = append(txns, map[string]any{
+			"id": id, "account_id": accountID, "category_id": categoryID,
+			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
+			"description": description, "date": date, "created_at": createdAt,
+			"updated_at": updatedAt, "deleted_at": deletedAt, "sync_version": sv,
+		})
+	}
+	if err := txnRows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if txns == nil {
+		txns = []map[string]any{}
+	}
+	resp["transactions"] = txns
 
 	// Fetch changed categories
-	catRows, err := s.DB.Query(
+	catRows, err := tx.Query(
 		`SELECT id, user_id, parent_id, name, type, icon, color, created_at, updated_at, deleted_at, sync_version
 		 FROM categories WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
 	)
-	if err == nil {
-		defer catRows.Close()
-		var cats []map[string]any
-		for catRows.Next() {
-			var id, uid, sv int64
-			var parentID *int64
-			var name, typ, createdAt, updatedAt string
-			var icon, color, deletedAt *string
-			if err := catRows.Scan(&id, &uid, &parentID, &name, &typ, &icon, &color, &createdAt, &updatedAt, &deletedAt, &sv); err != nil {
-				log.Printf("sync: scan category error: %v", err)
-				continue
-			}
-			cats = append(cats, map[string]any{
-				"id": id, "user_id": uid, "parent_id": parentID, "name": name, "type": typ,
-				"icon": icon, "color": color, "created_at": createdAt, "updated_at": updatedAt,
-				"deleted_at": deletedAt, "sync_version": sv,
-			})
-		}
-		if err := catRows.Err(); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if cats == nil {
-			cats = []map[string]any{}
-		}
-		resp["categories"] = cats
+	if err != nil {
+		log.Printf("sync: category query error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
+	defer catRows.Close()
+	var cats []map[string]any
+	for catRows.Next() {
+		var id, uid, sv int64
+		var parentID *int64
+		var name, typ, createdAt, updatedAt string
+		var icon, color, deletedAt *string
+		if err := catRows.Scan(&id, &uid, &parentID, &name, &typ, &icon, &color, &createdAt, &updatedAt, &deletedAt, &sv); err != nil {
+			log.Printf("sync: scan category error: %v", err)
+			continue
+		}
+		cats = append(cats, map[string]any{
+			"id": id, "user_id": uid, "parent_id": parentID, "name": name, "type": typ,
+			"icon": icon, "color": color, "created_at": createdAt, "updated_at": updatedAt,
+			"deleted_at": deletedAt, "sync_version": sv,
+		})
+	}
+	if err := catRows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if cats == nil {
+		cats = []map[string]any{}
+	}
+	resp["categories"] = cats
 
 	// Fetch changed accounts
-	acctRows, err := s.DB.Query(
+	acctRows, err := tx.Query(
 		`SELECT id, user_id, name, currency, balance, created_at, updated_at, deleted_at, sync_version
 		 FROM accounts WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
 	)
-	if err == nil {
-		defer acctRows.Close()
-		var accts []map[string]any
-		for acctRows.Next() {
-			var id, uid, sv int64
-			var name, currency, createdAt, updatedAt string
-			var balance float64
-			var deletedAt *string
-			if err := acctRows.Scan(&id, &uid, &name, &currency, &balance, &createdAt, &updatedAt, &deletedAt, &sv); err != nil {
-				log.Printf("sync: scan account error: %v", err)
-				continue
-			}
-			accts = append(accts, map[string]any{
-				"id": id, "user_id": uid, "name": name, "currency": currency,
-				"balance": balance, "created_at": createdAt, "updated_at": updatedAt,
-				"deleted_at": deletedAt, "sync_version": sv,
-			})
-		}
-		if err := acctRows.Err(); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if accts == nil {
-			accts = []map[string]any{}
-		}
-		resp["accounts"] = accts
+	if err != nil {
+		log.Printf("sync: account query error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
+	defer acctRows.Close()
+	var accts []map[string]any
+	for acctRows.Next() {
+		var id, uid, sv int64
+		var name, currency, createdAt, updatedAt string
+		var balance float64
+		var deletedAt *string
+		if err := acctRows.Scan(&id, &uid, &name, &currency, &balance, &createdAt, &updatedAt, &deletedAt, &sv); err != nil {
+			log.Printf("sync: scan account error: %v", err)
+			continue
+		}
+		accts = append(accts, map[string]any{
+			"id": id, "user_id": uid, "name": name, "currency": currency,
+			"balance": balance, "created_at": createdAt, "updated_at": updatedAt,
+			"deleted_at": deletedAt, "sync_version": sv,
+		})
+	}
+	if err := acctRows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if accts == nil {
+		accts = []map[string]any{}
+	}
+	resp["accounts"] = accts
 
 	// Fetch changed scheduled transactions
-	schedRows, err := s.DB.Query(
+	schedRows, err := tx.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency,
 		        description, rrule, next_occurrence, active, max_occurrences, occurrence_count,
 		        created_at, updated_at, deleted_at, sync_version
 		 FROM scheduled_transactions WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
 	)
-	if err == nil {
-		defer schedRows.Close()
-		var scheds []map[string]any
-		for schedRows.Next() {
-			var id, accountID, categoryID, uid, sv, occurrenceCount int64
-			var active int
-			var typ, currency, rrule, nextOcc, createdAt, updatedAt string
-			var amount float64
-			var description, deletedAt *string
-			var maxOccurrences *int64
-			if err := schedRows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
-				&description, &rrule, &nextOcc, &active, &maxOccurrences, &occurrenceCount,
-				&createdAt, &updatedAt, &deletedAt, &sv); err != nil {
-				log.Printf("sync: scan scheduled transaction error: %v", err)
-				continue
-			}
-			scheds = append(scheds, map[string]any{
-				"id": id, "account_id": accountID, "category_id": categoryID,
-				"user_id": uid, "type": typ, "amount": amount, "currency": currency,
-				"description": description, "rrule": rrule, "next_occurrence": nextOcc,
-				"active": active == 1, "max_occurrences": maxOccurrences, "occurrence_count": occurrenceCount,
-				"created_at": createdAt, "updated_at": updatedAt,
-				"deleted_at": deletedAt, "sync_version": sv,
-			})
-		}
-		if err := schedRows.Err(); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if scheds == nil {
-			scheds = []map[string]any{}
-		}
-		resp["scheduled_transactions"] = scheds
+	if err != nil {
+		log.Printf("sync: scheduled query error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
+	defer schedRows.Close()
+	var scheds []map[string]any
+	for schedRows.Next() {
+		var id, accountID, categoryID, uid, sv, occurrenceCount int64
+		var active int
+		var typ, currency, rrule, nextOcc, createdAt, updatedAt string
+		var amount float64
+		var description, deletedAt *string
+		var maxOccurrences *int64
+		if err := schedRows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
+			&description, &rrule, &nextOcc, &active, &maxOccurrences, &occurrenceCount,
+			&createdAt, &updatedAt, &deletedAt, &sv); err != nil {
+			log.Printf("sync: scan scheduled transaction error: %v", err)
+			continue
+		}
+		scheds = append(scheds, map[string]any{
+			"id": id, "account_id": accountID, "category_id": categoryID,
+			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
+			"description": description, "rrule": rrule, "next_occurrence": nextOcc,
+			"active": active == 1, "max_occurrences": maxOccurrences, "occurrence_count": occurrenceCount,
+			"created_at": createdAt, "updated_at": updatedAt,
+			"deleted_at": deletedAt, "sync_version": sv,
+		})
+	}
+	if err := schedRows.Err(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if scheds == nil {
+		scheds = []map[string]any{}
+	}
+	resp["scheduled_transactions"] = scheds
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

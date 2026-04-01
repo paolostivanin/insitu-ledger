@@ -73,9 +73,11 @@ func main() {
 	<-done
 	log.Println("Shutting down...")
 
-	server.LoginRateLimiter.Stop()
+	// Stop background goroutines first so they don't use a closing DB connection.
 	schedulerCancel()
+	server.LoginRateLimiter.Stop()
 
+	// Then gracefully drain in-flight HTTP requests.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

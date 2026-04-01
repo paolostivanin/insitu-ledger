@@ -78,7 +78,7 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 	args := []any{targetUserID}
 
 	if from != "" {
-		query += " AND SUBSTR(t.date, 1, 10) >= ?"
+		query += " AND t.date >= ?"
 		args = append(args, from)
 	}
 	if to != "" {
@@ -198,7 +198,12 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "failed to create scheduled transaction", http.StatusInternalServerError)
 			return
 		}
-		id, _ := result.LastInsertId()
+		id, err := result.LastInsertId()
+		if err != nil {
+			log.Printf("LastInsertId error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]any{"id": id, "scheduled": true})
@@ -237,7 +242,12 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	id, _ := result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		log.Printf("LastInsertId error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]any{"id": id})

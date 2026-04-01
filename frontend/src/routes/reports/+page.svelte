@@ -23,6 +23,7 @@
 	let pieChart: EChartsType.ECharts;
 	let barChart: EChartsType.ECharts;
 	let trendChart: EChartsType.ECharts;
+	let themeTimer: ReturnType<typeof setTimeout>;
 
 	function getCssVar(name: string): string {
 		return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -49,7 +50,8 @@
 	const unsubTheme = theme.subscribe(() => {
 		if (pieChart) {
 			// Defer to allow CSS vars to update
-			setTimeout(reinitCharts, 50);
+			clearTimeout(themeTimer);
+			themeTimer = setTimeout(reinitCharts, 50);
 		}
 	});
 
@@ -60,6 +62,7 @@
 	}
 
 	onDestroy(() => {
+		clearTimeout(themeTimer);
 		unsubTheme();
 		window.removeEventListener('resize', handleResize);
 		if (pieChart) pieChart.dispose();
