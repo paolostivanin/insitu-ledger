@@ -5,7 +5,13 @@ import java.util.Currency
 import java.util.Locale
 
 object CurrencyFormatter {
-    private val cache = mutableMapOf<String, NumberFormat>()
+    private const val MAX_CACHE_SIZE = 32
+
+    private val cache = object : LinkedHashMap<String, NumberFormat>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, NumberFormat>): Boolean {
+            return size > MAX_CACHE_SIZE
+        }
+    }
 
     fun format(amount: Double, currency: String): String {
         return try {

@@ -32,15 +32,19 @@ class SyncRepository @Inject constructor(
         return try {
             val ops = pendingOpDao.getAll()
             for (op in ops) {
-                val success = when (op.entityType) {
-                    "account" -> pushAccountOp(op)
-                    "category" -> pushCategoryOp(op)
-                    "transaction" -> pushTransactionOp(op)
-                    "scheduled" -> pushScheduledOp(op)
-                    else -> true
-                }
-                if (success) {
-                    pendingOpDao.delete(op)
+                try {
+                    val success = when (op.entityType) {
+                        "account" -> pushAccountOp(op)
+                        "category" -> pushCategoryOp(op)
+                        "transaction" -> pushTransactionOp(op)
+                        "scheduled" -> pushScheduledOp(op)
+                        else -> true
+                    }
+                    if (success) {
+                        pendingOpDao.delete(op)
+                    }
+                } catch (_: Exception) {
+                    // Continue processing remaining operations
                 }
             }
             Result.success(Unit)
@@ -55,7 +59,7 @@ class SyncRepository @Inject constructor(
                 val input = gson.fromJson(op.payloadJson, AccountInput::class.java)
                 val response = accountApi.create(input)
                 if (response.isSuccessful) {
-                    val serverId = response.body()!!.id
+                    val serverId = response.body()?.id ?: return false
                     remapAccountId(op.entityId, serverId)
                     true
                 } else false
@@ -81,7 +85,7 @@ class SyncRepository @Inject constructor(
                 val input = gson.fromJson(op.payloadJson, CategoryInput::class.java)
                 val response = categoryApi.create(input)
                 if (response.isSuccessful) {
-                    val serverId = response.body()!!.id
+                    val serverId = response.body()?.id ?: return false
                     remapCategoryId(op.entityId, serverId)
                     true
                 } else false
@@ -107,7 +111,7 @@ class SyncRepository @Inject constructor(
                 val input = gson.fromJson(op.payloadJson, TransactionInput::class.java)
                 val response = transactionApi.create(input)
                 if (response.isSuccessful) {
-                    val serverId = response.body()!!.id
+                    val serverId = response.body()?.id ?: return false
                     remapTransactionId(op.entityId, serverId)
                     true
                 } else false
@@ -133,7 +137,7 @@ class SyncRepository @Inject constructor(
                 val input = gson.fromJson(op.payloadJson, ScheduledInput::class.java)
                 val response = scheduledApi.create(input)
                 if (response.isSuccessful) {
-                    val serverId = response.body()!!.id
+                    val serverId = response.body()?.id ?: return false
                     remapScheduledId(op.entityId, serverId)
                     true
                 } else false
@@ -193,7 +197,8 @@ class SyncRepository @Inject constructor(
                 return Result.failure(Exception("Sync failed: ${response.code()}"))
             }
 
-            val data = response.body()!!
+            val data = response.body()
+                ?: return Result.failure(Exception("Empty sync response body"))
 
             // Upsert accounts
             val accountEntities = data.accounts.map { it.toEntity() }

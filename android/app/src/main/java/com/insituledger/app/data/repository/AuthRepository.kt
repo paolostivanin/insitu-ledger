@@ -24,7 +24,8 @@ class AuthRepository @Inject constructor(
             prefs.saveServerUrl(normalizedUrl)
             val response = authApi.login(LoginRequest(login, password, totpCode))
             if (response.isSuccessful) {
-                val body = response.body()!!
+                val body = response.body()
+                    ?: return Result.failure(Exception("Empty response body"))
                 if (body.totpRequired == true && body.token == null) {
                     Result.success(body)
                 } else {
@@ -57,8 +58,11 @@ class AuthRepository @Inject constructor(
     suspend fun getProfile(): Result<UserProfileDto> {
         return try {
             val response = authApi.getMe()
-            if (response.isSuccessful) Result.success(response.body()!!)
-            else Result.failure(Exception(response.errorBody()?.string()))
+            if (response.isSuccessful) {
+                val body = response.body()
+                    ?: return Result.failure(Exception("Empty response body"))
+                Result.success(body)
+            } else Result.failure(Exception(response.errorBody()?.string()))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -94,8 +98,11 @@ class AuthRepository @Inject constructor(
     suspend fun totpSetup(): Result<TotpSetupResponse> {
         return try {
             val response = authApi.totpSetup()
-            if (response.isSuccessful) Result.success(response.body()!!)
-            else Result.failure(Exception(response.errorBody()?.string()))
+            if (response.isSuccessful) {
+                val body = response.body()
+                    ?: return Result.failure(Exception("Empty response body"))
+                Result.success(body)
+            } else Result.failure(Exception(response.errorBody()?.string()))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -114,8 +121,11 @@ class AuthRepository @Inject constructor(
     suspend fun totpReset(password: String): Result<TotpSetupResponse> {
         return try {
             val response = authApi.totpReset(TotpResetRequest(password))
-            if (response.isSuccessful) Result.success(response.body()!!)
-            else Result.failure(Exception(response.errorBody()?.string()))
+            if (response.isSuccessful) {
+                val body = response.body()
+                    ?: return Result.failure(Exception("Empty response body"))
+                Result.success(body)
+            } else Result.failure(Exception(response.errorBody()?.string()))
         } catch (e: Exception) {
             Result.failure(e)
         }

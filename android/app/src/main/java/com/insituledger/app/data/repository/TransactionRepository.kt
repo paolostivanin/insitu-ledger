@@ -1,7 +1,9 @@
 package com.insituledger.app.data.repository
 
+import androidx.room.withTransaction
 import androidx.sqlite.db.SimpleSQLiteQuery
 import com.insituledger.app.data.local.datastore.UserPreferences
+import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.db.dao.AccountDao
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
@@ -19,6 +21,7 @@ import javax.inject.Singleton
 
 @Singleton
 class TransactionRepository @Inject constructor(
+    private val database: AppDatabase,
     private val transactionDao: TransactionDao,
     private val accountDao: AccountDao,
     private val pendingOpDao: PendingOperationDao,
@@ -72,7 +75,7 @@ class TransactionRepository @Inject constructor(
             args.add(from)
         }
         if (to != null) {
-            sb.append(" AND date <= ?")
+            sb.append(" AND SUBSTR(date, 1, 10) <= ?")
             args.add(to)
         }
         if (categoryId != null) {
@@ -125,23 +128,29 @@ class TransactionRepository @Inject constructor(
         accountId: Long, categoryId: Long, type: String,
         amount: Double, currency: String, description: String?, date: String
     ): Long {
-        val minId = transactionDao.getMinId() ?: 0
-        val localId = if (minId >= 0) -1 else minId - 1
-        val entity = TransactionEntity(
-            id = localId,
-            accountId = accountId,
-            categoryId = categoryId,
-            userId = 0,
-            type = type,
-            amount = amount,
-            currency = currency,
-            description = description,
-            date = date,
-            isLocalOnly = true
-        )
-        transactionDao.upsert(entity)
-        val delta = if (type == "income") amount else -amount
-        accountDao.adjustBalance(accountId, delta)
+        require(amount > 0) { "Amount must be positive" }
+        require(type == "income" || type == "expense") { "Type must be 'income' or 'expense'" }
+
+        val localId = database.withTransaction {
+            val minId = transactionDao.getMinId() ?: 0
+            val id = if (minId >= 0) -1 else minId - 1
+            val entity = TransactionEntity(
+                id = id,
+                accountId = accountId,
+                categoryId = categoryId,
+                userId = 0,
+                type = type,
+                amount = amount,
+                currency = currency,
+                description = description,
+                date = date,
+                isLocalOnly = true
+            )
+            transactionDao.upsert(entity)
+            val delta = if (type == "income") amount else -amount
+            accountDao.adjustBalance(accountId, delta)
+            id
+        }
 
         if (isSyncEnabled()) {
             val input = TransactionInput(accountId, categoryId, type, amount, currency, description, date)
@@ -160,18 +169,23 @@ class TransactionRepository @Inject constructor(
         id: Long, accountId: Long, categoryId: Long, type: String,
         amount: Double, currency: String, description: String?, date: String
     ) {
-        val existing = transactionDao.getById(id) ?: return
-        // Reverse old transaction's effect on old account
-        val oldDelta = if (existing.type == "income") existing.amount else -existing.amount
-        accountDao.adjustBalance(existing.accountId, -oldDelta)
-        // Apply new transaction's effect on new account
-        val newDelta = if (type == "income") amount else -amount
-        accountDao.adjustBalance(accountId, newDelta)
+        require(amount > 0) { "Amount must be positive" }
+        require(type == "income" || type == "expense") { "Type must be 'income' or 'expense'" }
 
-        transactionDao.upsert(existing.copy(
-            accountId = accountId, categoryId = categoryId, type = type,
-            amount = amount, currency = currency, description = description, date = date
-        ))
+        database.withTransaction {
+            val existing = transactionDao.getById(id) ?: return@withTransaction
+            // Reverse old transaction's effect on old account
+            val oldDelta = if (existing.type == "income") existing.amount else -existing.amount
+            accountDao.adjustBalance(existing.accountId, -oldDelta)
+            // Apply new transaction's effect on new account
+            val newDelta = if (type == "income") amount else -amount
+            accountDao.adjustBalance(accountId, newDelta)
+
+            transactionDao.upsert(existing.copy(
+                accountId = accountId, categoryId = categoryId, type = type,
+                amount = amount, currency = currency, description = description, date = date
+            ))
+        }
 
         if (isSyncEnabled()) {
             val input = TransactionInput(accountId, categoryId, type, amount, currency, description, date)
@@ -187,11 +201,13 @@ class TransactionRepository @Inject constructor(
     }
 
     suspend fun delete(id: Long) {
-        val existing = transactionDao.getById(id) ?: return
-        // Reverse the transaction's effect on account balance
-        val delta = if (existing.type == "income") existing.amount else -existing.amount
-        accountDao.adjustBalance(existing.accountId, -delta)
-        transactionDao.upsert(existing.copy(deletedAt = "deleted"))
+        database.withTransaction {
+            val existing = transactionDao.getById(id) ?: return@withTransaction
+            // Reverse the transaction's effect on account balance
+            val delta = if (existing.type == "income") existing.amount else -existing.amount
+            accountDao.adjustBalance(existing.accountId, -delta)
+            transactionDao.upsert(existing.copy(deletedAt = "deleted"))
+        }
 
         if (isSyncEnabled()) {
             pendingOpDao.insert(PendingOperationEntity(

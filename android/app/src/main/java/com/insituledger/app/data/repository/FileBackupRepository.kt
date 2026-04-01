@@ -120,7 +120,15 @@ class FileBackupRepository @Inject constructor(
                 input.bufferedReader().readText()
             } ?: return Result.failure(Exception("Could not open input stream"))
 
-            val backup = gson.fromJson(json, BackupData::class.java)
+            val backup = try {
+                gson.fromJson(json, BackupData::class.java)
+            } catch (e: Exception) {
+                return Result.failure(Exception("Invalid backup file format: ${e.message}"))
+            }
+
+            if (backup == null) {
+                return Result.failure(Exception("Invalid backup file: empty or malformed JSON"))
+            }
 
             // Import categories first (transactions reference them)
             val categoryEntities = backup.categories.map {

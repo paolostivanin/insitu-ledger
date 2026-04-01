@@ -16,7 +16,7 @@ import com.insituledger.app.data.local.db.entity.*
         ScheduledTransactionEntity::class,
         PendingOperationEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 @androidx.room.TypeConverters(Converters::class)
@@ -41,6 +41,12 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_category_id ON transactions(category_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_account_id ON transactions(account_id)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_deleted_at ON transactions(deleted_at)")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_categories_type ON categories(type)")
             }
         }
     }

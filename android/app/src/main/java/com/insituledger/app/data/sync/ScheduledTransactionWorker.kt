@@ -3,8 +3,10 @@ package com.insituledger.app.data.sync
 import android.content.Context
 import android.util.Log
 import androidx.hilt.work.HiltWorker
+import androidx.room.withTransaction
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.db.dao.AccountDao
 import com.insituledger.app.data.local.db.dao.ScheduledTransactionDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
@@ -19,6 +21,7 @@ import java.time.format.DateTimeFormatter
 class ScheduledTransactionWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
+    private val database: AppDatabase,
     private val scheduledDao: ScheduledTransactionDao,
     private val transactionDao: TransactionDao,
     private val accountDao: AccountDao
@@ -39,39 +42,41 @@ class ScheduledTransactionWorker @AssistedInject constructor(
 
         for (scheduled in due) {
             val txDate = scheduled.nextOccurrence
-
-            // Generate a local negative ID for the new transaction
-            val minId = transactionDao.getMinId() ?: 0
-            val localId = if (minId >= 0) -1 else minId - 1
-
-            val transaction = TransactionEntity(
-                id = localId,
-                accountId = scheduled.accountId,
-                categoryId = scheduled.categoryId,
-                userId = scheduled.userId,
-                type = scheduled.type,
-                amount = scheduled.amount,
-                currency = scheduled.currency,
-                description = scheduled.description,
-                date = txDate,
-                isLocalOnly = true
-            )
-            transactionDao.upsert(transaction)
-
-            // Update account balance
-            val delta = if (scheduled.type == "expense") -scheduled.amount else scheduled.amount
-            accountDao.adjustBalance(scheduled.accountId, delta)
-
-            // Advance next_occurrence and track occurrences
             val next = advanceDate(scheduled.nextOccurrence, scheduled.rrule)
             val newCount = scheduled.occurrenceCount + 1
             val deactivate = scheduled.maxOccurrences != null && newCount >= scheduled.maxOccurrences
-            scheduledDao.upsert(scheduled.copy(
-                nextOccurrence = next,
-                occurrenceCount = newCount,
-                active = if (deactivate) false else scheduled.active,
-                deletedAt = if (deactivate) nowStr else scheduled.deletedAt
-            ))
+
+            database.withTransaction {
+                // Generate a local negative ID for the new transaction
+                val minId = transactionDao.getMinId() ?: 0
+                val localId = if (minId >= 0) -1 else minId - 1
+
+                val transaction = TransactionEntity(
+                    id = localId,
+                    accountId = scheduled.accountId,
+                    categoryId = scheduled.categoryId,
+                    userId = scheduled.userId,
+                    type = scheduled.type,
+                    amount = scheduled.amount,
+                    currency = scheduled.currency,
+                    description = scheduled.description,
+                    date = txDate,
+                    isLocalOnly = true
+                )
+                transactionDao.upsert(transaction)
+
+                // Update account balance
+                val delta = if (scheduled.type == "expense") -scheduled.amount else scheduled.amount
+                accountDao.adjustBalance(scheduled.accountId, delta)
+
+                // Advance next_occurrence and track occurrences
+                scheduledDao.upsert(scheduled.copy(
+                    nextOccurrence = next,
+                    occurrenceCount = newCount,
+                    active = if (deactivate) false else scheduled.active,
+                    deletedAt = if (deactivate) nowStr else scheduled.deletedAt
+                ))
+            }
 
             Log.d(TAG, "Materialized scheduled ${scheduled.id}, next: $next")
         }

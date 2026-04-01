@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,12 +78,18 @@ fun CategoriesScreen(
             uiState.incomeCategories.isEmpty() && uiState.expenseCategories.isEmpty() ->
                 EmptyState("No categories", modifier = Modifier.padding(padding))
             else -> {
+                val expenseTree = remember(uiState.expenseCategories) {
+                    buildTree(uiState.expenseCategories)
+                }
+                val incomeTree = remember(uiState.incomeCategories) {
+                    buildTree(uiState.incomeCategories)
+                }
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    if (uiState.expenseCategories.isNotEmpty()) {
+                    if (expenseTree.isNotEmpty()) {
                         item {
                             Text(
                                 "Expense",
@@ -91,7 +98,6 @@ fun CategoriesScreen(
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
                         }
-                        val expenseTree = buildTree(uiState.expenseCategories)
                         items(expenseTree, key = { "expense_${it.category.id}" }) { node ->
                             CategoryTreeNode(
                                 node = node,
@@ -101,7 +107,7 @@ fun CategoriesScreen(
                             )
                         }
                     }
-                    if (uiState.incomeCategories.isNotEmpty()) {
+                    if (incomeTree.isNotEmpty()) {
                         item {
                             Text(
                                 "Income",
@@ -110,7 +116,6 @@ fun CategoriesScreen(
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
                         }
-                        val incomeTree = buildTree(uiState.incomeCategories)
                         items(incomeTree, key = { "income_${it.category.id}" }) { node ->
                             CategoryTreeNode(
                                 node = node,
@@ -145,7 +150,7 @@ private fun CategoryTreeNode(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                parseColor(node.category.color)?.let { color ->
+                remember(node.category.color) { parseColor(node.category.color) }?.let { color ->
                     Box(
                         modifier = Modifier
                             .size(12.dp)
@@ -191,7 +196,7 @@ private fun CategoryTreeNode(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            parseColor(child.color)?.let { color ->
+                            remember(child.color) { parseColor(child.color) }?.let { color ->
                                 Box(
                                     modifier = Modifier
                                         .size(10.dp)

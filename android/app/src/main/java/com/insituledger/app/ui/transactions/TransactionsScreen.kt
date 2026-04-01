@@ -364,11 +364,12 @@ private fun TransactionRowContent(
         ) {
             val category = categoryMap[txn.categoryId]
             if (category?.color != null) {
+                val color = remember(category.color) { parseColor(category.color) }
                 Box(
                     modifier = Modifier
                         .size(12.dp)
                         .clip(CircleShape)
-                        .background(parseColor(category.color))
+                        .background(color)
                         .semantics { contentDescription = "Category: ${category.name}" }
                 )
             }
