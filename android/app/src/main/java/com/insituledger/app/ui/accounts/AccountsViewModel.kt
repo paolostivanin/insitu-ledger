@@ -6,6 +6,7 @@ import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.domain.model.Account
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -16,30 +17,25 @@ data class AccountsUiState(
     val isReadOnly: Boolean = false
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class AccountsViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val sharedAccessState: SharedAccessState
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(AccountsUiState())
-    val uiState: StateFlow<AccountsUiState> = _uiState.asStateFlow()
-
-    init {
-        viewModelScope.launch {
-            sharedAccessState.selectedOwner.collectLatest { owner ->
-                _uiState.update { it.copy(isLoading = true) }
-                if (owner != null) {
-                    val accounts = accountRepository.listFromServer(owner.ownerId)
-                    _uiState.update { it.copy(accounts = accounts, isLoading = false, isReadOnly = owner.permission == "read") }
-                } else {
-                    accountRepository.getAll().collect { accounts ->
-                        _uiState.update { it.copy(accounts = accounts, isLoading = false, isReadOnly = false) }
-                    }
+    val uiState: StateFlow<AccountsUiState> = sharedAccessState.selectedOwner
+        .flatMapLatest { owner ->
+            if (owner != null) {
+                val accounts = accountRepository.listFromServer(owner.ownerId)
+                flowOf(AccountsUiState(accounts = accounts, isLoading = false, isReadOnly = owner.permission == "read"))
+            } else {
+                accountRepository.getAll().map { accounts ->
+                    AccountsUiState(accounts = accounts, isLoading = false, isReadOnly = false)
                 }
             }
         }
-    }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AccountsUiState())
 
     fun delete(id: Long) {
         if (sharedAccessState.isReadOnly) return

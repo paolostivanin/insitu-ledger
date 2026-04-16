@@ -96,6 +96,17 @@ interface TransactionDao {
         ORDER BY date DESC, id DESC
     """)
     suspend fun getFilteredSync(from: String?, to: String?, categoryId: Long?): List<TransactionEntity>
+
+    @Query("""
+        SELECT category_id, type, SUM(amount) AS total, COUNT(*) AS count
+        FROM transactions
+        WHERE deleted_at IS NULL
+        AND (:from IS NULL OR date >= :from)
+        AND (:to IS NULL OR SUBSTR(date, 1, 10) <= :to)
+        GROUP BY category_id, type
+        ORDER BY total DESC
+    """)
+    suspend fun getCategoryBreakdown(from: String?, to: String?): List<CategoryBreakdownRow>
 }
 
 data class MonthlySummary(
@@ -106,4 +117,11 @@ data class MonthlySummary(
 data class LocalAutocompleteSuggestion(
     val description: String,
     val categoryId: Long
+)
+
+data class CategoryBreakdownRow(
+    @ColumnInfo(name = "category_id") val categoryId: Long,
+    val type: String,
+    val total: Double,
+    val count: Int
 )

@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.ui.common.LoadingIndicator
@@ -45,7 +46,7 @@ fun SharedScreen(
 
         if (!uiState.isConnected) {
             Column(
-                modifier = Modifier.fillMaxSize().padding(padding).padding(32.dp),
+                modifier = Modifier.fillMaxSize().padding(padding).padding(AppSpacing.xxl),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -55,12 +56,12 @@ fun SharedScreen(
                     modifier = Modifier.size(64.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(AppSpacing.lg))
                 Text(
                     "Server connection required",
                     style = MaterialTheme.typography.titleMedium
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(AppSpacing.sm))
                 Text(
                     "Shared access lets you give other users read or write access to your data. This requires connecting to an InSitu Ledger server in Settings.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -73,14 +74,14 @@ fun SharedScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(AppSpacing.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
         ) {
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.padding(AppSpacing.cardPadding),
+                        verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
                     ) {
                         Text("Share with someone", style = MaterialTheme.typography.titleSmall)
 
@@ -94,7 +95,7 @@ fun SharedScreen(
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.lg)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 RadioButton(
@@ -130,12 +131,12 @@ fun SharedScreen(
 
             if (uiState.accesses.isNotEmpty()) {
                 item {
-                    Text("Current access", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 4.dp))
+                    Text("Current access", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = AppSpacing.xs))
                 }
                 items(uiState.accesses, key = { it.id }) { access ->
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.md),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {

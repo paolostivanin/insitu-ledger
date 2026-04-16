@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.ScheduledTransaction
@@ -45,14 +46,15 @@ fun ScheduledScreen(
             else -> {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(AppSpacing.screenPadding),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
                 ) {
                     items(uiState.items, key = { it.id }) { item ->
                         ScheduledCard(
                             item = item,
                             onEdit = if (uiState.isReadOnly) null else {{ onEditClick(item.id) }},
-                            onDelete = if (uiState.isReadOnly) null else {{ viewModel.delete(item.id) }}
+                            onDelete = if (uiState.isReadOnly) null else {{ viewModel.delete(item.id) }},
+                            modifier = Modifier.animateItem()
                         )
                     }
                 }
@@ -62,9 +64,9 @@ fun ScheduledScreen(
 }
 
 @Composable
-private fun ScheduledCard(item: ScheduledTransaction, onEdit: (() -> Unit)?, onDelete: (() -> Unit)?) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+private fun ScheduledCard(item: ScheduledTransaction, onEdit: (() -> Unit)?, onDelete: (() -> Unit)?, modifier: Modifier = Modifier) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

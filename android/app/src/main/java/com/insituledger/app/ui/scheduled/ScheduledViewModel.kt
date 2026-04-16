@@ -6,6 +6,7 @@ import com.insituledger.app.data.repository.ScheduledRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.domain.model.ScheduledTransaction
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -16,30 +17,25 @@ data class ScheduledUiState(
     val isReadOnly: Boolean = false
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ScheduledViewModel @Inject constructor(
     private val scheduledRepository: ScheduledRepository,
     private val sharedAccessState: SharedAccessState
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ScheduledUiState())
-    val uiState: StateFlow<ScheduledUiState> = _uiState.asStateFlow()
-
-    init {
-        viewModelScope.launch {
-            sharedAccessState.selectedOwner.collectLatest { owner ->
-                _uiState.update { it.copy(isLoading = true) }
-                if (owner != null) {
-                    val items = scheduledRepository.listFromServer(owner.ownerId)
-                    _uiState.update { it.copy(items = items, isLoading = false, isReadOnly = owner.permission == "read") }
-                } else {
-                    scheduledRepository.getAll().collect { items ->
-                        _uiState.update { it.copy(items = items, isLoading = false, isReadOnly = false) }
-                    }
+    val uiState: StateFlow<ScheduledUiState> = sharedAccessState.selectedOwner
+        .flatMapLatest { owner ->
+            if (owner != null) {
+                val items = scheduledRepository.listFromServer(owner.ownerId)
+                flowOf(ScheduledUiState(items = items, isLoading = false, isReadOnly = owner.permission == "read"))
+            } else {
+                scheduledRepository.getAll().map { items ->
+                    ScheduledUiState(items = items, isLoading = false, isReadOnly = false)
                 }
             }
         }
-    }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ScheduledUiState())
 
     fun delete(id: Long) {
         if (sharedAccessState.isReadOnly) return

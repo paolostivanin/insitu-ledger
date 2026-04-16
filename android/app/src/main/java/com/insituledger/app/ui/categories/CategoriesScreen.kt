@@ -14,22 +14,24 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Category
+import com.insituledger.app.ui.common.ColorUtils
 import com.insituledger.app.ui.common.EmptyState
+import com.insituledger.app.ui.common.LocalSnackbarHostState
+import com.insituledger.app.ui.theme.LocalSemanticColors
 import com.insituledger.app.ui.common.LoadingIndicator
 
-private fun parseColor(hex: String?): Color? {
-    if (hex == null) return null
-    return try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Exception) { null }
-}
 
 private data class CategoryNode(
     val category: Category,
@@ -53,6 +55,12 @@ fun CategoriesScreen(
     viewModel: CategoriesViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = LocalSnackbarHostState.current
+    val scope = rememberCoroutineScope()
+    val onDelete: (Long) -> Unit = { id ->
+        viewModel.delete(id)
+        scope.launch { snackbarHostState.showSnackbar("Category deleted") }
+    }
 
     Scaffold(
         topBar = {
@@ -86,8 +94,8 @@ fun CategoriesScreen(
                 }
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    contentPadding = PaddingValues(AppSpacing.screenPadding),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)
                 ) {
                     if (expenseTree.isNotEmpty()) {
                         item {
@@ -95,16 +103,28 @@ fun CategoriesScreen(
                                 "Expense",
                                 style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.padding(vertical = 8.dp)
+                                modifier = Modifier.padding(vertical = AppSpacing.sm).animateItem()
                             )
                         }
-                        items(expenseTree, key = { "expense_${it.category.id}" }) { node ->
-                            CategoryTreeNode(
-                                node = node,
-                                isReadOnly = uiState.isReadOnly,
-                                onEdit = onEditClick,
-                                onDelete = viewModel::delete
-                            )
+                        expenseTree.forEach { node ->
+                            item(key = "expense_${node.category.id}") {
+                                CategoryParentRow(
+                                    category = node.category,
+                                    isReadOnly = uiState.isReadOnly,
+                                    onEdit = onEditClick,
+                                    onDelete = onDelete,
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
+                            items(node.children, key = { "expense_child_${it.id}" }) { child ->
+                                CategoryChildRow(
+                                    child = child,
+                                    isReadOnly = uiState.isReadOnly,
+                                    onEdit = onEditClick,
+                                    onDelete = onDelete,
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
                         }
                     }
                     if (incomeTree.isNotEmpty()) {
@@ -112,17 +132,29 @@ fun CategoriesScreen(
                             Text(
                                 "Income",
                                 style = MaterialTheme.typography.titleSmall,
-                                color = Color(0xFF2E7D32),
-                                modifier = Modifier.padding(vertical = 8.dp)
+                                color = LocalSemanticColors.current.income,
+                                modifier = Modifier.padding(vertical = AppSpacing.sm).animateItem()
                             )
                         }
-                        items(incomeTree, key = { "income_${it.category.id}" }) { node ->
-                            CategoryTreeNode(
-                                node = node,
-                                isReadOnly = uiState.isReadOnly,
-                                onEdit = onEditClick,
-                                onDelete = viewModel::delete
-                            )
+                        incomeTree.forEach { node ->
+                            item(key = "income_${node.category.id}") {
+                                CategoryParentRow(
+                                    category = node.category,
+                                    isReadOnly = uiState.isReadOnly,
+                                    onEdit = onEditClick,
+                                    onDelete = onDelete,
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
+                            items(node.children, key = { "income_child_${it.id}" }) { child ->
+                                CategoryChildRow(
+                                    child = child,
+                                    isReadOnly = uiState.isReadOnly,
+                                    onEdit = onEditClick,
+                                    onDelete = onDelete,
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
                         }
                     }
                 }
@@ -132,93 +164,95 @@ fun CategoriesScreen(
 }
 
 @Composable
-private fun CategoryTreeNode(
-    node: CategoryNode,
+private fun CategoryParentRow(
+    category: Category,
     isReadOnly: Boolean,
     onEdit: (Long) -> Unit,
-    onDelete: (Long) -> Unit
+    onDelete: (Long) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    // Parent row
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(modifier = modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(AppSpacing.md),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                remember(node.category.color) { parseColor(node.category.color) }?.let { color ->
+                if (category.color != null) {
                     Box(
                         modifier = Modifier
                             .size(12.dp)
                             .clip(CircleShape)
-                            .background(color)
+                            .background(ColorUtils.parseHex(category.color))
                     )
                 }
                 Text(
-                    node.category.name,
+                    category.name,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
             }
             if (!isReadOnly) {
                 Row {
-                    IconButton(onClick = { onEdit(node.category.id) }) {
+                    IconButton(onClick = { onEdit(category.id) }) {
                         Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
                     }
-                    IconButton(onClick = { onDelete(node.category.id) }) {
+                    IconButton(onClick = { onDelete(category.id) }) {
                         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                     }
                 }
             }
         }
     }
+}
 
-    // Children rows (indented, lighter style)
-    if (node.children.isNotEmpty()) {
-        Column(modifier = Modifier.padding(start = 32.dp, top = 2.dp, bottom = 4.dp)) {
-            node.children.forEach { child ->
-                Surface(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            remember(child.color) { parseColor(child.color) }?.let { color ->
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(CircleShape)
-                                        .background(color)
-                                )
-                            }
-                            Text(
-                                child.name,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                        if (!isReadOnly) {
-                            Row {
-                                IconButton(onClick = { onEdit(child.id) }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(16.dp))
-                                }
-                                IconButton(onClick = { onDelete(child.id) }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
-                                }
-                            }
-                        }
+@Composable
+private fun CategoryChildRow(
+    child: Category,
+    isReadOnly: Boolean,
+    onEdit: (Long) -> Unit,
+    onDelete: (Long) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth().padding(start = AppSpacing.xxl, top = AppSpacing.xxs, bottom = AppSpacing.xxs),
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.md, vertical = AppSpacing.sm),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (child.color != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(ColorUtils.parseHex(child.color))
+                    )
+                }
+                Text(
+                    child.name,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            if (!isReadOnly) {
+                Row {
+                    IconButton(onClick = { onEdit(child.id) }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = { onDelete(child.id) }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
                     }
                 }
             }

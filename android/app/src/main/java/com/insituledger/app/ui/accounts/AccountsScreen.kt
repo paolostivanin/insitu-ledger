@@ -11,14 +11,18 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.ui.common.EmptyState
+import com.insituledger.app.ui.common.LocalSnackbarHostState
 import com.insituledger.app.ui.common.LoadingIndicator
 import java.text.NumberFormat
 import java.util.Currency
@@ -33,6 +37,8 @@ fun AccountsScreen(
     viewModel: AccountsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = LocalSnackbarHostState.current
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -59,14 +65,18 @@ fun AccountsScreen(
             else -> {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(AppSpacing.screenPadding),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
                 ) {
                     items(uiState.accounts, key = { it.id }) { account ->
                         AccountCard(
                             account = account,
                             onEdit = if (uiState.isReadOnly) null else {{ onEditClick(account.id) }},
-                            onDelete = if (uiState.isReadOnly) null else {{ viewModel.delete(account.id) }}
+                            onDelete = if (uiState.isReadOnly) null else {{
+                                viewModel.delete(account.id)
+                                scope.launch { snackbarHostState.showSnackbar("Account deleted") }
+                            }},
+                            modifier = Modifier.animateItem()
                         )
                     }
                 }
@@ -76,10 +86,10 @@ fun AccountsScreen(
 }
 
 @Composable
-private fun AccountCard(account: Account, onEdit: (() -> Unit)?, onDelete: (() -> Unit)?) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun AccountCard(account: Account, onEdit: (() -> Unit)?, onDelete: (() -> Unit)?, modifier: Modifier = Modifier) {
+    Card(modifier = modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(AppSpacing.cardPadding),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {

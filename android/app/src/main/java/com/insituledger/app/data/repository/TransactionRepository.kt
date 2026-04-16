@@ -5,6 +5,7 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.db.dao.AccountDao
+import com.insituledger.app.data.local.db.dao.CategoryBreakdownRow
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
 import com.insituledger.app.data.local.db.entity.PendingOperationEntity
@@ -226,6 +227,9 @@ class TransactionRepository @Inject constructor(
 
     suspend fun getFilteredSync(from: String?, to: String?, categoryId: Long?): List<Transaction> =
         transactionDao.getFilteredSync(from, to, categoryId).map { it.toDomain() }
+
+    suspend fun getCategoryBreakdown(from: String?, to: String?): List<CategoryBreakdownRow> =
+        transactionDao.getCategoryBreakdown(from, to)
 
     private fun TransactionEntity.toDomain() = Transaction(
         id = id, accountId = accountId, categoryId = categoryId,

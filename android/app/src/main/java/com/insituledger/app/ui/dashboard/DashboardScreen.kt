@@ -16,11 +16,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AmountText
-import com.insituledger.app.ui.common.IncomeColor
-import com.insituledger.app.ui.common.ExpenseColor
-import com.insituledger.app.ui.common.LoadingIndicator
+import com.insituledger.app.ui.common.DashboardSkeleton
+import com.insituledger.app.ui.common.SectionHeader
+import com.insituledger.app.ui.theme.LocalSemanticColors
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import com.insituledger.app.ui.common.CurrencyFormatter
 import com.insituledger.app.ui.theme.AppSpacing
 
@@ -32,37 +35,47 @@ fun DashboardScreen(
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val semanticColors = LocalSemanticColors.current
+    val haptic = LocalHapticFeedback.current
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("InSitu Ledger") }) },
         floatingActionButton = {
             if (!uiState.isReadOnly) {
-                FloatingActionButton(onClick = onAddClick) {
+                FloatingActionButton(onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onAddClick()
+                }) {
                     Icon(Icons.Default.Add, contentDescription = "Add Transaction")
                 }
             }
         }
     ) { padding ->
         if (uiState.isLoading) {
-            LoadingIndicator(modifier = Modifier.padding(padding))
+            DashboardSkeleton(modifier = Modifier.padding(padding))
             return@Scaffold
         }
 
         val data = uiState.data ?: return@Scaffold
 
+        PullToRefreshBox(
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = { viewModel.refresh() },
+            modifier = Modifier.fillMaxSize().padding(padding)
+        ) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(AppSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
         ) {
             // Total balance card
             item {
                 ElevatedCard(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().animateItem(),
                     colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
                     elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
                 ) {
-                    Column(modifier = Modifier.padding(24.dp)) {
+                    Column(modifier = Modifier.padding(AppSpacing.xl)) {
                         Text("Net Worth", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                         Text(
                             text = formatCurrency(data.totalBalance, "EUR"),
@@ -77,19 +90,19 @@ fun DashboardScreen(
             // Monthly summary
             item {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.fillMaxWidth().animateItem(),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
                 ) {
                     SummaryCard(
                         title = "Income",
                         amount = data.monthIncome,
-                        color = IncomeColor,
+                        color = semanticColors.income,
                         modifier = Modifier.weight(1f)
                     )
                     SummaryCard(
                         title = "Expenses",
                         amount = data.monthExpense,
-                        color = ExpenseColor,
+                        color = semanticColors.expense,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -98,11 +111,11 @@ fun DashboardScreen(
             // Net monthly balance
             item {
                 val net = data.monthIncome - data.monthExpense
-                val netColor = if (net >= 0) IncomeColor else ExpenseColor
+                val netColor = if (net >= 0) semanticColors.income else semanticColors.expense
                 val netPrefix = if (net >= 0) "+" else ""
-                Card(modifier = Modifier.fillMaxWidth()) {
+                Card(modifier = Modifier.fillMaxWidth().animateItem()) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(AppSpacing.lg),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -120,17 +133,17 @@ fun DashboardScreen(
             // Accounts
             if (data.accounts.size > 1) {
                 item {
-                    Text("Accounts", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
+                    SectionHeader(title = "Accounts", modifier = Modifier.animateItem())
                 }
                 items(data.accounts, key = { "account_${it.id}" }) { account ->
-                    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedCard(modifier = Modifier.fillMaxWidth().animateItem()) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            modifier = Modifier.fillMaxWidth().padding(AppSpacing.lg),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(account.name, style = MaterialTheme.typography.bodyLarge)
@@ -161,12 +174,13 @@ fun DashboardScreen(
             // Recent transactions
             if (data.recentTransactions.isNotEmpty()) {
                 item {
-                    Text("Recent Transactions", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
+                    SectionHeader(title = "Recent Transactions", modifier = Modifier.animateItem())
                 }
                 items(data.recentTransactions, key = { "txn_${it.id}" }) { txn ->
                     TransactionItem(txn = txn, onClick = { onTransactionClick(txn.id) }, modifier = Modifier.animateItem())
                 }
             }
+        }
         }
     }
 }
@@ -174,9 +188,9 @@ fun DashboardScreen(
 @Composable
 private fun SummaryCard(title: String, amount: Double, color: Color, modifier: Modifier = Modifier) {
     Card(modifier = modifier) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(AppSpacing.lg)) {
             Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(AppSpacing.xs))
             Text(
                 text = formatCurrency(amount, "EUR"),
                 style = MaterialTheme.typography.titleMedium,
@@ -191,7 +205,7 @@ private fun SummaryCard(title: String, amount: Double, color: Color, modifier: M
 private fun TransactionItem(txn: Transaction, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Card(modifier = modifier.fillMaxWidth(), onClick = onClick) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(AppSpacing.md),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {

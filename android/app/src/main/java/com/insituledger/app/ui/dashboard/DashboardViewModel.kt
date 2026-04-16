@@ -7,6 +7,7 @@ import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.domain.model.DashboardData
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
@@ -18,9 +19,11 @@ import javax.inject.Inject
 data class DashboardUiState(
     val data: DashboardData? = null,
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
     val isReadOnly: Boolean = false
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
@@ -28,21 +31,70 @@ class DashboardViewModel @Inject constructor(
     private val sharedAccessState: SharedAccessState
 ) : ViewModel() {
 
+    private val _refreshTrigger = MutableStateFlow(0)
+
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     init { loadData() }
 
+    fun refresh() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshing = true) }
+            val owner = sharedAccessState.selectedOwner.value
+            if (owner != null) {
+                loadFromServer(owner.ownerId, owner.permission == "read")
+            } else {
+                // Trigger re-emission from the local flow
+                _refreshTrigger.update { it + 1 }
+                _uiState.update { it.copy(isRefreshing = false) }
+            }
+        }
+    }
+
     private fun loadData() {
         viewModelScope.launch {
-            sharedAccessState.selectedOwner.collectLatest { owner ->
-                _uiState.update { it.copy(isLoading = true) }
-                if (owner != null) {
-                    loadFromServer(owner.ownerId, owner.permission == "read")
-                } else {
-                    loadFromLocal()
+            sharedAccessState.selectedOwner
+                .flatMapLatest { owner ->
+                    if (owner != null) {
+                        flow {
+                            _uiState.update { it.copy(isLoading = true) }
+                            loadFromServer(owner.ownerId, owner.permission == "read")
+                            emit(Unit)
+                        }
+                    } else {
+                        _refreshTrigger.flatMapLatest {
+                            _uiState.update { it.copy(isLoading = true) }
+                            combine(
+                                accountRepository.getAll(),
+                                transactionRepository.getRecent(10)
+                            ) { accounts, recentTxns ->
+                                Pair(accounts, recentTxns)
+                            }.map { (accounts, recentTxns) ->
+                                val now = LocalDate.now()
+                                val monthStart = now.withDayOfMonth(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
+                                val monthEnd = now.format(DateTimeFormatter.ISO_LOCAL_DATE)
+                                val summary = transactionRepository.getMonthlySummary(monthStart, monthEnd)
+
+                                val totalBalance = accounts.sumOf { it.balance }
+                                _uiState.update {
+                                    it.copy(
+                                        data = DashboardData(
+                                            totalBalance = totalBalance,
+                                            monthIncome = summary.income,
+                                            monthExpense = summary.expense,
+                                            recentTransactions = recentTxns,
+                                            accounts = accounts
+                                        ),
+                                        isLoading = false,
+                                        isReadOnly = false
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
-            }
+                .collect()
         }
     }
 
@@ -76,36 +128,8 @@ class DashboardViewModel @Inject constructor(
                 it.copy(
                     data = DashboardData(totalBalance, monthIncome, monthExpense, recentTxns, accounts),
                     isLoading = false,
+                    isRefreshing = false,
                     isReadOnly = readOnly
-                )
-            }
-        }
-    }
-
-    private suspend fun loadFromLocal() {
-        combine(
-            accountRepository.getAll(),
-            transactionRepository.getRecent(10)
-        ) { accounts, recentTxns ->
-            Pair(accounts, recentTxns)
-        }.collect { (accounts, recentTxns) ->
-            val now = LocalDate.now()
-            val monthStart = now.withDayOfMonth(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val monthEnd = now.format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val summary = transactionRepository.getMonthlySummary(monthStart, monthEnd)
-
-            val totalBalance = accounts.sumOf { it.balance }
-            _uiState.update {
-                it.copy(
-                    data = DashboardData(
-                        totalBalance = totalBalance,
-                        monthIncome = summary.income,
-                        monthExpense = summary.expense,
-                        recentTransactions = recentTxns,
-                        accounts = accounts
-                    ),
-                    isLoading = false,
-                    isReadOnly = false
                 )
             }
         }

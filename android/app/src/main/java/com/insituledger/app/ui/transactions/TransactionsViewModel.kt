@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+private const val STOP_TIMEOUT_MS = 5_000L
+
 data class TransactionsUiState(
     val transactions: List<Transaction> = emptyList(),
     val categories: List<Category> = emptyList(),
@@ -56,6 +58,17 @@ class TransactionsViewModel @Inject constructor(
     private val _filterAndSort = MutableStateFlow(FilterAndSort())
     private val _searchInput = MutableStateFlow("")
 
+    // Categories flow: stops upstream collection when UI is in background
+    private val categoriesFlow: StateFlow<Pair<List<Category>, Boolean>> = sharedAccessState.selectedOwner
+        .flatMapLatest { owner ->
+            if (owner != null) {
+                flowOf(categoryRepository.listFromServer(owner.ownerId) to (owner.permission == "read"))
+            } else {
+                categoryRepository.getAll().map { cats -> cats to false }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList<Category>() to false)
+
     init {
         viewModelScope.launch {
             _searchInput.debounce(300).collectLatest { query ->
@@ -63,17 +76,10 @@ class TransactionsViewModel @Inject constructor(
             }
         }
 
-        // Load categories - either from local DB or server depending on shared state
+        // Sync categories into uiState
         viewModelScope.launch {
-            sharedAccessState.selectedOwner.collectLatest { owner ->
-                if (owner != null) {
-                    val cats = categoryRepository.listFromServer(owner.ownerId)
-                    _uiState.update { it.copy(categories = cats, isReadOnly = owner.permission == "read") }
-                } else {
-                    categoryRepository.getAll().collect { cats ->
-                        _uiState.update { it.copy(categories = cats, isReadOnly = false) }
-                    }
-                }
+            categoriesFlow.collect { (cats, readOnly) ->
+                _uiState.update { it.copy(categories = cats, isReadOnly = readOnly) }
             }
         }
 

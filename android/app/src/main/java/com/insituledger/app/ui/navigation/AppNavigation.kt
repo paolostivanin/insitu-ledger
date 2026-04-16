@@ -3,6 +3,8 @@ package com.insituledger.app.ui.navigation
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -11,10 +13,12 @@ import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -42,6 +46,7 @@ import com.insituledger.app.ui.scheduled.ScheduledScreen
 import com.insituledger.app.ui.settings.SettingsScreen
 import com.insituledger.app.ui.shared.SharedScreen
 import com.insituledger.app.ui.about.AboutScreen
+import com.insituledger.app.ui.common.LocalSnackbarHostState
 import com.insituledger.app.ui.transactions.TransactionFormScreen
 import com.insituledger.app.ui.transactions.TransactionsScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -129,6 +134,8 @@ fun AppNavigation(
     val selectedOwner by sharedOwnerViewModel.selectedOwner.collectAsStateWithLifecycle()
     val syncMode by sharedOwnerViewModel.syncMode.collectAsStateWithLifecycle(initialValue = "none")
 
+    val snackbarHostState = remember { SnackbarHostState() }
+
     LaunchedEffect(openNewTransaction) {
         if (openNewTransaction) {
             navController.navigate(Screen.TransactionForm.createRoute()) {
@@ -138,7 +145,9 @@ fun AppNavigation(
         }
     }
 
+    CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (showBottomBar) {
                 Column {
@@ -180,7 +189,7 @@ fun AppNavigation(
                         text = "Viewing ${selectedOwner!!.name}'s data (${selectedOwner!!.permission})",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = AppSpacing.lg, vertical = 6.dp)
                     )
                 }
             }
@@ -188,10 +197,10 @@ fun AppNavigation(
             NavHost(
                 navController = navController,
                 startDestination = Screen.Dashboard.route,
-                enterTransition = { fadeIn(animationSpec = tween(150)) },
-                exitTransition = { fadeOut(animationSpec = tween(150)) },
-                popEnterTransition = { fadeIn(animationSpec = tween(150)) },
-                popExitTransition = { fadeOut(animationSpec = tween(150)) }
+                enterTransition = { slideInHorizontally(initialOffsetX = { it / 4 }) + fadeIn(tween(200)) },
+                exitTransition = { fadeOut(tween(200)) },
+                popEnterTransition = { fadeIn(tween(200)) },
+                popExitTransition = { slideOutHorizontally(targetOffsetX = { it / 4 }) + fadeOut(tween(200)) }
             ) {
                 composable(Screen.Dashboard.route) {
                     DashboardScreen(
@@ -303,6 +312,7 @@ fun AppNavigation(
             }
         }
     }
+    }
 }
 
 @Composable
@@ -342,9 +352,9 @@ private fun OwnerSwitcher(
         color = MaterialTheme.colorScheme.surfaceVariant
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.xs),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
         ) {
             Text("Viewing:", style = MaterialTheme.typography.labelSmall)
             ExposedDropdownMenuBox(

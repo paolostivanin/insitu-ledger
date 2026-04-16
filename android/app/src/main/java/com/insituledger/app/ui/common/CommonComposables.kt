@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.insituledger.app.ui.theme.AppSpacing
+import com.insituledger.app.ui.theme.LocalSemanticColors
 
 val IncomeColor = Color(0xFF2E7D32)
 val ExpenseColor = Color(0xFFC62828)
@@ -37,7 +39,8 @@ fun AmountText(
     modifier: Modifier = Modifier,
     style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.titleMedium
 ) {
-    val color = if (type == "income") IncomeColor else ExpenseColor
+    val semanticColors = LocalSemanticColors.current
+    val color = if (type == "income") semanticColors.income else semanticColors.expense
     val prefix = if (type == "income") "+" else "-"
     val formatted = CurrencyFormatter.format(amount, currency)
     Text(
@@ -73,7 +76,7 @@ fun EmptyState(
                     modifier = Modifier.size(48.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(AppSpacing.md))
             }
             Text(
                 text = message,
@@ -81,7 +84,7 @@ fun EmptyState(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (actionLabel != null && onAction != null) {
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(AppSpacing.lg))
                 FilledTonalButton(onClick = onAction) { Text(actionLabel) }
             }
         }
@@ -101,7 +104,7 @@ fun ErrorMessage(message: String, onRetry: (() -> Unit)? = null, modifier: Modif
             color = MaterialTheme.colorScheme.error
         )
         if (onRetry != null) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(AppSpacing.lg))
             Button(onClick = onRetry) { Text("Retry") }
         }
     }
@@ -113,17 +116,18 @@ fun IncomeExpenseToggle(
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val semanticColors = LocalSemanticColors.current
+    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
         OutlinedButton(
             onClick = { onSelect("expense") },
             modifier = Modifier.weight(1f).height(44.dp),
             colors = if (selected == "expense") ButtonDefaults.outlinedButtonColors(
-                containerColor = ExpenseColor.copy(alpha = 0.12f),
-                contentColor = ExpenseColor
+                containerColor = semanticColors.expense.copy(alpha = 0.12f),
+                contentColor = semanticColors.expense
             ) else ButtonDefaults.outlinedButtonColors(),
             border = BorderStroke(
                 width = if (selected == "expense") 2.dp else 1.dp,
-                color = if (selected == "expense") ExpenseColor else MaterialTheme.colorScheme.outline
+                color = if (selected == "expense") semanticColors.expense else MaterialTheme.colorScheme.outline
             )
         ) { Text("Expense", fontWeight = if (selected == "expense") FontWeight.Bold else FontWeight.Normal) }
 
@@ -131,25 +135,17 @@ fun IncomeExpenseToggle(
             onClick = { onSelect("income") },
             modifier = Modifier.weight(1f).height(44.dp),
             colors = if (selected == "income") ButtonDefaults.outlinedButtonColors(
-                containerColor = IncomeColor.copy(alpha = 0.12f),
-                contentColor = IncomeColor
+                containerColor = semanticColors.income.copy(alpha = 0.12f),
+                contentColor = semanticColors.income
             ) else ButtonDefaults.outlinedButtonColors(),
             border = BorderStroke(
                 width = if (selected == "income") 2.dp else 1.dp,
-                color = if (selected == "income") IncomeColor else MaterialTheme.colorScheme.outline
+                color = if (selected == "income") semanticColors.income else MaterialTheme.colorScheme.outline
             )
         ) { Text("Income", fontWeight = if (selected == "income") FontWeight.Bold else FontWeight.Normal) }
     }
 }
 
-private fun parseColor(hex: String?): Color {
-    if (hex == null) return Color(0xFF6366F1)
-    return try {
-        Color(android.graphics.Color.parseColor(hex))
-    } catch (_: Exception) {
-        Color(0xFF6366F1)
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -183,7 +179,7 @@ fun CategoryDropdownWithAdd(
             modifier = Modifier
                 .size(10.dp)
                 .clip(CircleShape)
-                .background(parseColor(parentCat?.color ?: selectedCat?.color))
+                .background(ColorUtils.parseHex(parentCat?.color ?: selectedCat?.color))
         )
         Text(
             text = displayText,
@@ -197,15 +193,17 @@ fun CategoryDropdownWithAdd(
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var searchQuery by remember { mutableStateOf("") }
 
-        val topLevel = filteredCats.filter { it.parentId == null }
+        val topLevel = remember(filteredCats) { filteredCats.filter { it.parentId == null } }
 
         fun matchesSearch(cat: com.insituledger.app.domain.model.Category): Boolean {
             if (searchQuery.isBlank()) return true
             return cat.name.contains(searchQuery, ignoreCase = true)
         }
 
-        val filteredGroups = topLevel.filter { parent ->
-            matchesSearch(parent) || filteredCats.any { it.parentId == parent.id && matchesSearch(it) }
+        val filteredGroups = remember(topLevel, searchQuery) {
+            topLevel.filter { parent ->
+                matchesSearch(parent) || filteredCats.any { it.parentId == parent.id && matchesSearch(it) }
+            }
         }
 
         ModalBottomSheet(
@@ -217,13 +215,13 @@ fun CategoryDropdownWithAdd(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 24.dp)
+                    .padding(bottom = AppSpacing.xl)
             ) {
                 // Header
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = AppSpacing.lg),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -241,8 +239,8 @@ fun CategoryDropdownWithAdd(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedTextField(
@@ -266,17 +264,18 @@ fun CategoryDropdownWithAdd(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 400.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    contentPadding = PaddingValues(horizontal = AppSpacing.lg, vertical = AppSpacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
                 ) {
                     items(filteredGroups, key = { it.id }) { parent ->
-                        val children = filteredCats.filter { it.parentId == parent.id && matchesSearch(it) }
-                        // Also show parent's own children if parent matches search but children don't
-                        val allChildren = if (searchQuery.isBlank()) {
-                            filteredCats.filter { it.parentId == parent.id }
-                        } else {
-                            children.ifEmpty {
+                        val allChildren = remember(filteredCats, searchQuery, parent.id) {
+                            val children = filteredCats.filter { it.parentId == parent.id && matchesSearch(it) }
+                            if (searchQuery.isBlank()) {
                                 filteredCats.filter { it.parentId == parent.id }
+                            } else {
+                                children.ifEmpty {
+                                    filteredCats.filter { it.parentId == parent.id }
+                                }
                             }
                         }
 
@@ -285,14 +284,14 @@ fun CategoryDropdownWithAdd(
                             Column {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
                                     modifier = Modifier.padding(bottom = 6.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier
                                             .size(10.dp)
                                             .clip(CircleShape)
-                                            .background(parseColor(parent.color))
+                                            .background(ColorUtils.parseHex(parent.color))
                                     )
                                     Text(
                                         text = parent.name,
@@ -303,7 +302,7 @@ fun CategoryDropdownWithAdd(
                                 }
                                 // Subcategory chips
                                 FlowRow(
-                                    modifier = Modifier.padding(start = 8.dp),
+                                    modifier = Modifier.padding(start = AppSpacing.sm),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
@@ -323,7 +322,7 @@ fun CategoryDropdownWithAdd(
                                         ) {
                                             Text(
                                                 text = child.name,
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                                modifier = Modifier.padding(horizontal = AppSpacing.md, vertical = 6.dp),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = if (isSelected)
                                                     MaterialTheme.colorScheme.onPrimaryContainer
@@ -350,14 +349,14 @@ fun CategoryDropdownWithAdd(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
                                     modifier = Modifier.padding(vertical = 6.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier
                                             .size(10.dp)
                                             .clip(CircleShape)
-                                            .background(parseColor(parent.color))
+                                            .background(ColorUtils.parseHex(parent.color))
                                     )
                                     Text(
                                         text = parent.name,
@@ -378,7 +377,7 @@ fun CategoryDropdownWithAdd(
                                 "No matching categories",
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 24.dp),
+                                    .padding(vertical = AppSpacing.xl),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -479,7 +478,7 @@ fun CompactAccountChip(
             HorizontalDivider()
             DropdownMenuItem(
                 text = {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                         Text("New account", color = MaterialTheme.colorScheme.primary)
                     }
@@ -499,7 +498,7 @@ fun CompactAccountChip(
             onDismissRequest = { showAddDialog = false },
             title = { Text("New Account") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                     OutlinedTextField(
                         value = newName,
                         onValueChange = { newName = it },
@@ -579,7 +578,7 @@ fun AccountDropdownWithAdd(
             HorizontalDivider()
             DropdownMenuItem(
                 text = {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                         Text("New account", color = MaterialTheme.colorScheme.primary)
                     }
@@ -599,7 +598,7 @@ fun AccountDropdownWithAdd(
             onDismissRequest = { showAddDialog = false },
             title = { Text("New Account") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                     OutlinedTextField(
                         value = newName,
                         onValueChange = { newName = it },

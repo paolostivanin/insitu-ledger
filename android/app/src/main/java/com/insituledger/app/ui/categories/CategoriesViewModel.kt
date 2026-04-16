@@ -6,6 +6,7 @@ import com.insituledger.app.data.repository.CategoryRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.domain.model.Category
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -17,44 +18,37 @@ data class CategoriesUiState(
     val isReadOnly: Boolean = false
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class CategoriesViewModel @Inject constructor(
     private val categoryRepository: CategoryRepository,
     private val sharedAccessState: SharedAccessState
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(CategoriesUiState())
-    val uiState: StateFlow<CategoriesUiState> = _uiState.asStateFlow()
-
-    init {
-        viewModelScope.launch {
-            sharedAccessState.selectedOwner.collectLatest { owner ->
-                _uiState.update { it.copy(isLoading = true) }
-                if (owner != null) {
-                    val categories = categoryRepository.listFromServer(owner.ownerId)
-                    _uiState.update {
-                        it.copy(
-                            incomeCategories = categories.filter { c -> c.type == "income" },
-                            expenseCategories = categories.filter { c -> c.type == "expense" },
-                            isLoading = false,
-                            isReadOnly = owner.permission == "read"
-                        )
-                    }
-                } else {
-                    categoryRepository.getAll().collect { categories ->
-                        _uiState.update {
-                            it.copy(
-                                incomeCategories = categories.filter { c -> c.type == "income" },
-                                expenseCategories = categories.filter { c -> c.type == "expense" },
-                                isLoading = false,
-                                isReadOnly = false
-                            )
-                        }
-                    }
+    val uiState: StateFlow<CategoriesUiState> = sharedAccessState.selectedOwner
+        .flatMapLatest { owner ->
+            if (owner != null) {
+                val categories = categoryRepository.listFromServer(owner.ownerId)
+                flowOf(
+                    CategoriesUiState(
+                        incomeCategories = categories.filter { c -> c.type == "income" },
+                        expenseCategories = categories.filter { c -> c.type == "expense" },
+                        isLoading = false,
+                        isReadOnly = owner.permission == "read"
+                    )
+                )
+            } else {
+                categoryRepository.getAll().map { categories ->
+                    CategoriesUiState(
+                        incomeCategories = categories.filter { c -> c.type == "income" },
+                        expenseCategories = categories.filter { c -> c.type == "expense" },
+                        isLoading = false,
+                        isReadOnly = false
+                    )
                 }
             }
         }
-    }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), CategoriesUiState())
 
     fun delete(id: Long) {
         if (sharedAccessState.isReadOnly) return

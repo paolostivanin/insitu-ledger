@@ -88,8 +88,8 @@ class TransactionFormViewModel @Inject constructor(
                     accounts = accountsDeferred.await()
                     categories = categoriesDeferred.await()
                 } else {
-                    val accountsDeferred = async { accountRepository.getAll().first() }
-                    val categoriesDeferred = async { categoryRepository.getAll().first() }
+                    val accountsDeferred = async { accountRepository.getCached() }
+                    val categoriesDeferred = async { categoryRepository.getCached() }
                     accounts = accountsDeferred.await()
                     categories = categoriesDeferred.await()
                 }
@@ -192,11 +192,8 @@ class TransactionFormViewModel @Inject constructor(
             val id = accountRepository.create(name, currency, 0.0)
             val owner = sharedAccessState.selectedOwner.value
             val isShared = owner != null
-            val updatedAccounts = if (isShared) {
-                accountRepository.listFromServer(owner!!.ownerId)
-            } else {
-                accountRepository.getAll().first()
-            }
+            val newAccount = Account(id = id, userId = 0, name = name, currency = currency, balance = 0.0, isLocalOnly = true)
+            val updatedAccounts = _uiState.value.accounts + newAccount
             val updatedDisplays = updatedAccounts.map { acct ->
                 AccountDisplay(
                     account = acct,
@@ -218,12 +215,8 @@ class TransactionFormViewModel @Inject constructor(
     fun createCategory(name: String, type: String) {
         viewModelScope.launch {
             val id = categoryRepository.create(name, type, null, null, null)
-            val owner = sharedAccessState.selectedOwner.value
-            val updatedCategories = if (owner != null) {
-                categoryRepository.listFromServer(owner.ownerId)
-            } else {
-                categoryRepository.getAll().first()
-            }
+            val newCategory = Category(id = id, userId = 0, parentId = null, name = name, type = type, icon = null, color = null, isLocalOnly = true)
+            val updatedCategories = _uiState.value.categories + newCategory
             _uiState.update { it.copy(categories = updatedCategories, categoryId = id) }
         }
     }

@@ -1,8 +1,8 @@
 package com.insituledger.app.ui.navigation
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Assessment
@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.insituledger.app.ui.theme.AppSpacing
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,14 +34,14 @@ fun MoreScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(AppSpacing.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
         ) {
             MoreMenuItem(Icons.Default.AccountBalance, "Accounts", onAccountsClick)
             MoreMenuItem(Icons.AutoMirrored.Filled.List, "Categories", onCategoriesClick)
             MoreMenuItem(Icons.Default.Assessment, "Reports", onReportsClick)
             MoreMenuItem(Icons.Default.Share, "Shared Access", onSharedClick)
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = AppSpacing.sm))
             MoreMenuItem(Icons.Default.Settings, "Settings", onSettingsClick)
             MoreMenuItem(Icons.Default.Info, "About", onAboutClick)
         }
@@ -56,12 +57,17 @@ private fun MoreMenuItem(icon: ImageVector, title: String, onClick: () -> Unit) 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(AppSpacing.lg),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.lg)
         ) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

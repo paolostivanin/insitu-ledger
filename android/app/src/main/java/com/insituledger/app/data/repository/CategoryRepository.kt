@@ -11,7 +11,10 @@ import com.insituledger.app.domain.model.Category
 import com.insituledger.app.data.sync.SyncManager
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,9 +29,13 @@ class CategoryRepository @Inject constructor(
 ) {
     private fun isSyncEnabled() = prefs.getSyncModeImmediate() == "webapp"
 
+    private val _cached = MutableStateFlow<List<Category>?>(null)
+
     fun getAll(): Flow<List<Category>> = categoryDao.getAll().map { list ->
         list.map { it.toDomain() }
-    }
+    }.onEach { _cached.value = it }
+
+    suspend fun getCached(): List<Category> = _cached.value ?: getAll().first()
 
     suspend fun listFromServer(ownerId: Long): List<Category> {
         val response = categoryApi.list(ownerId = ownerId)

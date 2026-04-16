@@ -8,6 +8,7 @@ import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.Transaction
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
@@ -38,6 +39,7 @@ data class ReportsUiState(
     val selectedCategoryTotal: Double = 0.0
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ReportsViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
@@ -48,19 +50,26 @@ class ReportsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ReportsUiState())
     val uiState: StateFlow<ReportsUiState> = _uiState.asStateFlow()
 
+    private val categories: StateFlow<List<Category>> = categoryRepository.getAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val weekStart: StateFlow<DayOfWeek> = prefs.weekStartDayFlow
+        .map { day -> if (day == "sunday") DayOfWeek.SUNDAY else DayOfWeek.MONDAY }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DayOfWeek.MONDAY)
+
     private var weekStartDay: DayOfWeek = DayOfWeek.MONDAY
 
     init {
         viewModelScope.launch {
-            categoryRepository.getAll().collect { cats ->
+            categories.collect { cats ->
                 _uiState.update { it.copy(categories = cats) }
                 loadReport()
             }
         }
 
         viewModelScope.launch {
-            prefs.weekStartDayFlow.collect { day ->
-                weekStartDay = if (day == "sunday") DayOfWeek.SUNDAY else DayOfWeek.MONDAY
+            weekStart.collect { day ->
+                weekStartDay = day
                 loadReport()
             }
         }
@@ -100,17 +109,17 @@ class ReportsViewModel @Inject constructor(
     private suspend fun loadReport() {
         _uiState.update { it.copy(isLoading = true) }
         val (from, to) = resolveDateRange()
-        val transactions = transactionRepository.getFilteredSync(from, to, null)
+        val breakdownRows = transactionRepository.getCategoryBreakdown(from, to)
 
-        val totalIncome = transactions.filter { it.type == "income" }.sumOf { it.amount }
-        val totalExpense = transactions.filter { it.type == "expense" }.sumOf { it.amount }
+        val totalIncome = breakdownRows.filter { it.type == "income" }.sumOf { it.total }
+        val totalExpense = breakdownRows.filter { it.type == "expense" }.sumOf { it.total }
 
         val categories = _uiState.value.categories
-        val breakdown = transactions
+        val breakdown = breakdownRows
             .groupBy { it.categoryId }
-            .mapNotNull { (catId, txns) ->
+            .mapNotNull { (catId, rows) ->
                 val cat = categories.find { it.id == catId } ?: return@mapNotNull null
-                CategorySummary(cat, txns.sumOf { it.amount })
+                CategorySummary(cat, rows.sumOf { it.total })
             }
             .sortedByDescending { it.total }
 

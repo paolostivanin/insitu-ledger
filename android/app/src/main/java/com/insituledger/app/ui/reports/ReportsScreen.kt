@@ -19,13 +19,14 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AmountText
+import com.insituledger.app.ui.common.ColorUtils
 import com.insituledger.app.ui.common.CurrencyFormatter
-import com.insituledger.app.ui.common.ExpenseColor
-import com.insituledger.app.ui.common.IncomeColor
+import com.insituledger.app.ui.theme.LocalSemanticColors
 import com.insituledger.app.ui.common.LoadingIndicator
 import java.time.Instant
 import java.time.LocalDate
@@ -55,6 +56,7 @@ private fun SummaryView(
     viewModel: ReportsViewModel,
     onBack: () -> Unit
 ) {
+    val semanticColors = LocalSemanticColors.current
     Scaffold(
         topBar = {
             TopAppBar(
@@ -74,12 +76,12 @@ private fun SummaryView(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(AppSpacing.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
         ) {
             // Date range chips
             item {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm), modifier = Modifier.animateItem()) {
                     DateRangePreset.entries.forEach { preset ->
                         FilterChip(
                             selected = uiState.dateRangePreset == preset,
@@ -101,7 +103,8 @@ private fun SummaryView(
                     var showFromPicker by remember { mutableStateOf(false) }
                     var showToPicker by remember { mutableStateOf(false) }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(modifier = Modifier.animateItem()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                         Box(modifier = Modifier.weight(1f)) {
                             OutlinedTextField(
                                 value = fromText,
@@ -199,40 +202,41 @@ private fun SummaryView(
                             DatePicker(state = datePickerState)
                         }
                     }
+                    }
                 }
             }
 
             // Summary cards
             item {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.fillMaxWidth().animateItem(),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
                 ) {
-                    SummaryCard("Income", uiState.totalIncome, IncomeColor, Modifier.weight(1f))
-                    SummaryCard("Expenses", uiState.totalExpense, ExpenseColor, Modifier.weight(1f))
+                    SummaryCard("Income", uiState.totalIncome, semanticColors.income, Modifier.weight(1f))
+                    SummaryCard("Expenses", uiState.totalExpense, semanticColors.expense, Modifier.weight(1f))
                 }
             }
 
             // Category breakdown header
             if (uiState.categoryBreakdown.isNotEmpty()) {
                 item {
-                    Text("Category Breakdown", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp))
+                    Text("Category Breakdown", style = MaterialTheme.typography.titleMedium, modifier = Modifier.animateItem().padding(top = AppSpacing.sectionGap))
                 }
             }
 
             // Category breakdown items
             items(uiState.categoryBreakdown, key = { it.category.id }) { summary ->
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().animateItem(),
                     onClick = { viewModel.selectCategory(summary.category) }
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(AppSpacing.lg),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.md),
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.weight(1f)
                         ) {
@@ -240,7 +244,7 @@ private fun SummaryView(
                                 modifier = Modifier
                                     .size(12.dp)
                                     .clip(CircleShape)
-                                    .background(parseColor(summary.category.color))
+                                    .background(ColorUtils.parseHex(summary.category.color))
                                     .semantics { contentDescription = "Category: ${summary.category.name}" }
                             )
                             Column {
@@ -256,7 +260,7 @@ private fun SummaryView(
                             text = formatCurrency(summary.total),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (summary.category.type == "income") IncomeColor else ExpenseColor
+                            color = if (summary.category.type == "income") semanticColors.income else semanticColors.expense
                         )
                     }
                 }
@@ -268,6 +272,7 @@ private fun SummaryView(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DrillDownView(uiState: ReportsUiState, onBack: () -> Unit) {
+    val semanticColors = LocalSemanticColors.current
     val category = uiState.selectedCategory ?: return
 
     Scaffold(
@@ -288,27 +293,27 @@ private fun DrillDownView(uiState: ReportsUiState, onBack: () -> Unit) {
 
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            contentPadding = PaddingValues(AppSpacing.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)
         ) {
             // Total card
             item {
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().animateItem(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(AppSpacing.lg)) {
                         Text("Total for period", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(AppSpacing.xs))
                         Text(
                             text = formatCurrency(uiState.selectedCategoryTotal),
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
-                            color = if (category.type == "income") IncomeColor else ExpenseColor
+                            color = if (category.type == "income") semanticColors.income else semanticColors.expense
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(AppSpacing.md))
             }
 
             // Transactions grouped by date
@@ -318,11 +323,11 @@ private fun DrillDownView(uiState: ReportsUiState, onBack: () -> Unit) {
                         text = date,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                        modifier = Modifier.animateItem().padding(top = AppSpacing.sm, bottom = AppSpacing.xs)
                     )
                 }
                 items(txns, key = { it.id }) { txn ->
-                    DrillDownTransactionRow(txn)
+                    DrillDownTransactionRow(txn, modifier = Modifier.animateItem())
                 }
             }
         }
@@ -330,10 +335,10 @@ private fun DrillDownView(uiState: ReportsUiState, onBack: () -> Unit) {
 }
 
 @Composable
-private fun DrillDownTransactionRow(txn: Transaction) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun DrillDownTransactionRow(txn: Transaction, modifier: Modifier = Modifier) {
+    Card(modifier = modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(AppSpacing.md),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -350,9 +355,9 @@ private fun DrillDownTransactionRow(txn: Transaction) {
 @Composable
 private fun SummaryCard(title: String, amount: Double, color: Color, modifier: Modifier = Modifier) {
     Card(modifier = modifier) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(AppSpacing.lg)) {
             Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(AppSpacing.xs))
             Text(
                 text = formatCurrency(amount),
                 style = MaterialTheme.typography.titleMedium,
@@ -373,14 +378,6 @@ private fun presetLabel(preset: DateRangePreset): String = when (preset) {
     DateRangePreset.CUSTOM -> "Custom"
 }
 
-private fun parseColor(hex: String?): Color {
-    if (hex == null) return Color.Gray
-    return try {
-        Color(android.graphics.Color.parseColor(if (hex.startsWith("#")) hex else "#$hex"))
-    } catch (_: Exception) {
-        Color.Gray
-    }
-}
 
 private fun formatCurrency(amount: Double): String {
     return CurrencyFormatter.format(amount, "EUR")

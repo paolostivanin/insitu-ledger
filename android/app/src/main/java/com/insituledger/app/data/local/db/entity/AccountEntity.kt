@@ -2,9 +2,13 @@ package com.insituledger.app.data.local.db.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "accounts")
+@Entity(
+    tableName = "accounts",
+    indices = [Index(value = ["deleted_at"])]
+)
 data class AccountEntity(
     @PrimaryKey val id: Long,
     @ColumnInfo(name = "user_id") val userId: Long,

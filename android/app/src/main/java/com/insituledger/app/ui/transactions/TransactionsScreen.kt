@@ -15,14 +15,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.insituledger.app.ui.theme.AppSpacing
+import com.insituledger.app.ui.common.LocalSnackbarHostState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AmountText
 import com.insituledger.app.ui.common.EmptyState
-import com.insituledger.app.ui.common.ExpenseColor
-import com.insituledger.app.ui.common.LoadingIndicator
+import com.insituledger.app.ui.theme.LocalSemanticColors
+import com.insituledger.app.ui.common.TransactionListSkeleton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
@@ -30,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import com.insituledger.app.ui.common.ColorUtils
 import com.insituledger.app.ui.common.CurrencyFormatter
 import java.time.Instant
 import java.time.LocalDate
@@ -44,6 +51,10 @@ fun TransactionsScreen(
     viewModel: TransactionsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val semanticColors = LocalSemanticColors.current
+    val haptic = LocalHapticFeedback.current
+    val snackbarHostState = LocalSnackbarHostState.current
+    val scope = rememberCoroutineScope()
     var showFilters by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var pendingDeleteId by remember { mutableStateOf<Long?>(null) }
@@ -147,7 +158,7 @@ fun TransactionsScreen(
                 )
 
                 when {
-                    uiState.isLoading -> LoadingIndicator()
+                    uiState.isLoading -> TransactionListSkeleton()
                     uiState.transactions.isEmpty() -> EmptyState("No transactions")
                     else -> {
                         val categoryMap = remember(uiState.categories) {
@@ -161,14 +172,14 @@ fun TransactionsScreen(
                                 uiState.transactions.groupBy { it.date.take(10) }
                             }
                             LazyColumn(
-                                contentPadding = PaddingValues(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                contentPadding = PaddingValues(AppSpacing.lg),
+                                verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)
                             ) {
                                 grouped.forEach { (date, txns) ->
                                     item(key = "header_$date") {
                                         val dailyExpense = txns.filter { it.type == "expense" }.sumOf { it.amount }
                                         Row(
-                                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),
+                                            modifier = Modifier.fillMaxWidth().animateItem().padding(top = AppSpacing.sm, bottom = AppSpacing.xs),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
@@ -182,12 +193,13 @@ fun TransactionsScreen(
                                                     text = "-${formatAmount(dailyExpense)}",
                                                     style = MaterialTheme.typography.labelMedium,
                                                     fontWeight = FontWeight.SemiBold,
-                                                    color = ExpenseColor
+                                                    color = semanticColors.expense
                                                 )
                                             }
                                         }
                                     }
                                     items(txns, key = { it.id }) { txn ->
+                                        Box(modifier = Modifier.animateItem()) {
                                         SwipeableTransactionRow(
                                             txn = txn,
                                             categoryMap = categoryMap,
@@ -204,15 +216,17 @@ fun TransactionsScreen(
                                                 showDeleteDialog = true
                                             }
                                         )
+                                        }
                                     }
                                 }
                             }
                         } else {
                             LazyColumn(
-                                contentPadding = PaddingValues(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                contentPadding = PaddingValues(AppSpacing.lg),
+                                verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)
                             ) {
                                 items(uiState.transactions, key = { it.id }) { txn ->
+                                    Box(modifier = Modifier.animateItem()) {
                                     SwipeableTransactionRow(
                                         txn = txn,
                                         categoryMap = categoryMap,
@@ -229,6 +243,7 @@ fun TransactionsScreen(
                                             showDeleteDialog = true
                                         }
                                     )
+                                    }
                                 }
                             }
                         }
@@ -249,6 +264,7 @@ fun TransactionsScreen(
                     viewModel.delete(pendingDeleteId!!)
                     showDeleteDialog = false
                     pendingDeleteId = null
+                    scope.launch { snackbarHostState.showSnackbar("Transaction deleted") }
                 }) { Text("Delete") }
             },
             dismissButton = {
@@ -259,6 +275,7 @@ fun TransactionsScreen(
 
     // Batch delete confirmation dialog
     if (showBatchDeleteDialog) {
+        val count = uiState.selectedIds.size
         AlertDialog(
             onDismissRequest = { showBatchDeleteDialog = false },
             title = { Text("Delete Transactions") },
@@ -267,6 +284,7 @@ fun TransactionsScreen(
                 TextButton(onClick = {
                     viewModel.deleteSelected()
                     showBatchDeleteDialog = false
+                    scope.launch { snackbarHostState.showSnackbar("$count transaction(s) deleted") }
                 }) { Text("Delete") }
             },
             dismissButton = {
@@ -288,11 +306,15 @@ private fun SwipeableTransactionRow(
     onLongClick: () -> Unit,
     onSwipeDelete: () -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
     if (isReadOnly || isSelectionMode) {
         Card(
             modifier = Modifier.fillMaxWidth().combinedClickable(
                 onClick = onClick,
-                onLongClick = onLongClick
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                }
             )
         ) {
             TransactionRowContent(txn, categoryMap, isSelectionMode, isSelected)
@@ -301,6 +323,7 @@ private fun SwipeableTransactionRow(
         val dismissState = rememberSwipeToDismissBoxState(
             confirmValueChange = { value ->
                 if (value == SwipeToDismissBoxValue.EndToStart) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSwipeDelete()
                     false // Don't dismiss yet — wait for dialog confirmation
                 } else {
@@ -329,7 +352,10 @@ private fun SwipeableTransactionRow(
             Card(
                 modifier = Modifier.fillMaxWidth().combinedClickable(
                     onClick = onClick,
-                    onLongClick = onLongClick
+                    onLongClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongClick()
+                    }
                 )
             ) {
                 TransactionRowContent(txn, categoryMap, isSelectionMode, isSelected)
@@ -346,7 +372,7 @@ private fun TransactionRowContent(
     isSelected: Boolean
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(AppSpacing.md),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -354,17 +380,17 @@ private fun TransactionRowContent(
             Checkbox(
                 checked = isSelected,
                 onCheckedChange = null,
-                modifier = Modifier.padding(end = 8.dp)
+                modifier = Modifier.padding(end = AppSpacing.sm)
             )
         }
         Row(
             modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val category = categoryMap[txn.categoryId]
             if (category?.color != null) {
-                val color = remember(category.color) { parseColor(category.color) }
+                val color = ColorUtils.parseHex(category.color)
                 Box(
                     modifier = Modifier
                         .size(12.dp)
@@ -395,8 +421,8 @@ private fun SortBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text("Sort:", style = MaterialTheme.typography.labelMedium)
@@ -450,9 +476,9 @@ private fun FilterBar(
     var showFromPicker by remember { mutableStateOf(false) }
     var showToPicker by remember { mutableStateOf(false) }
 
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm)) {
+        Column(modifier = Modifier.padding(AppSpacing.md), verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                 Box(modifier = Modifier.weight(1f)) {
                     OutlinedTextField(
                         value = fromText, onValueChange = {},
@@ -480,7 +506,7 @@ private fun FilterBar(
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 var expanded by remember { mutableStateOf(false) }
@@ -568,13 +594,6 @@ private fun FilterBar(
     }
 }
 
-private fun parseColor(hex: String): Color {
-    return try {
-        Color(android.graphics.Color.parseColor(if (hex.startsWith("#")) hex else "#$hex"))
-    } catch (_: Exception) {
-        Color.Gray
-    }
-}
 
 private fun formatAmount(amount: Double): String {
     return CurrencyFormatter.format(amount, "EUR")

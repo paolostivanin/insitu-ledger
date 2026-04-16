@@ -15,12 +15,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.ui.common.CategoryDropdownWithAdd
 import com.insituledger.app.ui.common.CompactAccountChip
 import com.insituledger.app.ui.common.IncomeExpenseToggle
 import com.insituledger.app.ui.common.LoadingIndicator
+import com.insituledger.app.ui.common.LocalSnackbarHostState
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -33,8 +37,15 @@ fun TransactionFormScreen(
     viewModel: TransactionFormViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = LocalSnackbarHostState.current
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(uiState.saved) { if (uiState.saved) onBack() }
+    LaunchedEffect(uiState.saved) {
+        if (uiState.saved) {
+            scope.launch { snackbarHostState.showSnackbar(if (uiState.id != null) "Transaction updated" else "Transaction created") }
+            onBack()
+        }
+    }
 
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
@@ -68,17 +79,17 @@ fun TransactionFormScreen(
         }
 
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)
+            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = AppSpacing.screenPadding)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
         ) {
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(AppSpacing.xs))
 
             IncomeExpenseToggle(selected = uiState.type, onSelect = viewModel::updateType)
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.lg),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -184,7 +195,7 @@ fun TransactionFormScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(AppSpacing.lg))
         }
     }
 

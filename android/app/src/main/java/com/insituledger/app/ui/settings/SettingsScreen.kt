@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -71,15 +72,15 @@ fun SettingsScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(AppSpacing.screenPadding),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.lg)
         ) {
             // Theme
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
                     Text("Theme", style = MaterialTheme.typography.titleSmall)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
+                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                         listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (value, label) ->
                             FilterChip(
                                 selected = uiState.themeMode == value,
@@ -93,10 +94,10 @@ fun SettingsScreen(
 
             // Week starts on
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
                     Text("Week starts on", style = MaterialTheme.typography.titleSmall)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
+                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                         listOf("monday" to "Monday", "sunday" to "Sunday").forEach { (value, label) ->
                             FilterChip(
                                 selected = uiState.weekStartDay == value,
@@ -111,11 +112,11 @@ fun SettingsScreen(
             // Biometric unlock
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(AppSpacing.cardPadding),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(Icons.Default.Fingerprint, contentDescription = null)
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(AppSpacing.md))
                     Text("Fingerprint unlock", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                     Switch(
                         checked = uiState.biometricEnabled,
@@ -127,11 +128,11 @@ fun SettingsScreen(
             // Prevent screenshots
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(AppSpacing.cardPadding),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(Icons.Default.ScreenLockPortrait, contentDescription = null)
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(AppSpacing.md))
                     Text("Prevent screenshots", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                     Switch(
                         checked = uiState.screenSecure,
@@ -142,30 +143,30 @@ fun SettingsScreen(
 
             // Data backup (always available)
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.FolderOpen, contentDescription = null)
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(AppSpacing.md))
                         Text("Data Backup", style = MaterialTheme.typography.titleSmall)
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
                     Text(
                         "Export or import your data as a JSON file. Save to Google Drive, Dropbox, or any storage provider.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Spacer(modifier = Modifier.height(AppSpacing.md))
+                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                         Button(
                             onClick = { exportLauncher.launch("insitu-ledger-backup.json") },
                             enabled = !uiState.isExporting && !uiState.isImporting
                         ) {
                             if (uiState.isExporting) {
                                 CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary)
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(AppSpacing.sm))
                             }
                             Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(AppSpacing.xs))
                             Text("Export")
                         }
                         OutlinedButton(
@@ -174,10 +175,10 @@ fun SettingsScreen(
                         ) {
                             if (uiState.isImporting) {
                                 CircularProgressIndicator(modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(AppSpacing.sm))
                             }
                             Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(AppSpacing.xs))
                             Text("Import")
                         }
                     }
@@ -186,20 +187,20 @@ fun SettingsScreen(
 
             // Automatic backup
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Schedule, contentDescription = null)
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(AppSpacing.md))
                         Text("Automatic Backup", style = MaterialTheme.typography.titleSmall)
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
                     Text(
                         "Automatically back up your data on a daily, weekly, or monthly schedule. " +
                                 "Backups are saved as JSON files to the selected folder.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(AppSpacing.md))
 
                     if (uiState.autoBackupFolderUri != null) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -207,7 +208,7 @@ fun SettingsScreen(
                                 Icons.Default.Folder, contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(AppSpacing.sm))
                             Text(
                                 "Folder selected", style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.weight(1f)
@@ -216,9 +217,9 @@ fun SettingsScreen(
                             TextButton(onClick = viewModel::clearAutoBackupFolder) { Text("Clear") }
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(AppSpacing.md))
                         HorizontalDivider()
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(AppSpacing.md))
 
                         BackupTierRow(
                             label = "Daily",
@@ -247,7 +248,7 @@ fun SettingsScreen(
                     } else {
                         Button(onClick = { folderPickerLauncher.launch(null) }) {
                             Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(AppSpacing.sm))
                             Text("Select Backup Folder")
                         }
                     }
@@ -256,25 +257,25 @@ fun SettingsScreen(
 
             // Sync section
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Sync, contentDescription = null)
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(AppSpacing.md))
                         Text("Server Sync", style = MaterialTheme.typography.titleSmall)
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
                     Text(
                         "Optionally connect to an InSitu Ledger server for real-time sync across devices.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(AppSpacing.md))
 
                     if (uiState.syncMode == "webapp" && uiState.isWebappConnected) {
                         // Connected state
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Cloud, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.width(AppSpacing.md))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Connected", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                                 if (uiState.userName.isNotBlank()) {
@@ -282,15 +283,15 @@ fun SettingsScreen(
                                 }
                             }
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(AppSpacing.sm))
                         Text("Last sync version: ${uiState.lastSyncVersion}", style = MaterialTheme.typography.bodySmall)
                         Text("Pending operations: ${uiState.pendingOps}", style = MaterialTheme.typography.bodySmall)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Spacer(modifier = Modifier.height(AppSpacing.md))
+                        Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                             Button(onClick = viewModel::forceSync, enabled = !uiState.isSyncing) {
                                 if (uiState.isSyncing) {
                                     CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary)
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Spacer(modifier = Modifier.width(AppSpacing.sm))
                                 }
                                 Text("Sync Now")
                             }
@@ -308,7 +309,7 @@ fun SettingsScreen(
                             onConnectWebapp?.invoke()
                         }) {
                             Icon(Icons.Default.CloudOff, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(AppSpacing.sm))
                             Text("Connect to Server")
                         }
                     }
@@ -319,9 +320,9 @@ fun SettingsScreen(
             if (uiState.syncMode == "webapp" && uiState.isWebappConnected) {
                 var showPasswordDialog by remember { mutableStateOf(false) }
                 Card(modifier = Modifier.fillMaxWidth(), onClick = { showPasswordDialog = true }) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(modifier = Modifier.padding(AppSpacing.cardPadding), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Lock, contentDescription = null)
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(AppSpacing.md))
                         Text("Change Password", style = MaterialTheme.typography.bodyLarge)
                     }
                 }
@@ -359,10 +360,10 @@ private fun BackupTierRow(
         if (enabled) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                modifier = Modifier.padding(start = AppSpacing.lg, bottom = AppSpacing.sm)
             ) {
                 Text("Keep", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(AppSpacing.sm))
                 IconButton(
                     onClick = { if (retention > 1) onRetentionChange(retention - 1) },
                     modifier = Modifier.size(32.dp)
@@ -376,7 +377,7 @@ private fun BackupTierRow(
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Increase", modifier = Modifier.size(18.dp))
                 }
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(AppSpacing.xs))
                 Text("backups", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -397,7 +398,7 @@ private fun ChangePasswordDialog(
         onDismissRequest = onDismiss,
         title = { Text("Change Password") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                 OutlinedTextField(
                     value = currentPassword, onValueChange = { currentPassword = it },
                     label = { Text("Current Password") },

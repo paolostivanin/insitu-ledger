@@ -11,7 +11,9 @@ import androidx.room.PrimaryKey
         Index(value = ["date"]),
         Index(value = ["category_id"]),
         Index(value = ["account_id"]),
-        Index(value = ["deleted_at"])
+        Index(value = ["deleted_at"]),
+        Index(value = ["deleted_at", "date"]),
+        Index(value = ["deleted_at", "category_id"])
     ]
 )
 data class TransactionEntity(
