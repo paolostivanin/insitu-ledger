@@ -25,6 +25,7 @@ import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.ui.common.LoadingIndicator
 import com.insituledger.app.ui.navigation.AppNavigation
 import com.insituledger.app.ui.theme.InSituLedgerTheme
+import com.insituledger.app.widget.AddTransactionWidgetProvider
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -76,6 +77,14 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        val fromWidget = isFromWidget(intent)
+        if (fromWidget) {
+            // Widget is a quick-add path — biometric would defeat the point.
+            biometricUnlocked.value = true
+            biometricRequested = true
+            biometricPromptShown = true
+        }
+
         if (isNewTransactionIntent(intent)) newTransactionEvents.tryEmit(Unit)
 
         // Always schedule the local scheduled-transaction worker
@@ -110,7 +119,10 @@ class MainActivity : AppCompatActivity() {
                         maybeShowBiometricPrompt()
                     }
                 } else {
-                    AppNavigation(newTransactionEvents = newTransactionEvents)
+                    AppNavigation(
+                        newTransactionEvents = newTransactionEvents,
+                        launchedFromWidget = fromWidget
+                    )
                 }
             }
         }
@@ -125,6 +137,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun isNewTransactionIntent(intent: Intent?): Boolean {
         return intent?.action == ACTION_NEW_TRANSACTION
+    }
+
+    private fun isFromWidget(intent: Intent?): Boolean {
+        return intent?.getBooleanExtra(AddTransactionWidgetProvider.EXTRA_FROM_WIDGET, false) == true
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

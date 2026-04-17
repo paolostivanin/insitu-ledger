@@ -1,6 +1,5 @@
 package com.insituledger.app.ui.transactions
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,12 +9,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -34,7 +33,6 @@ import com.insituledger.app.ui.common.IncomeExpenseToggle
 import com.insituledger.app.ui.common.LoadingIndicator
 import com.insituledger.app.ui.common.LocalSnackbarHostState
 import com.insituledger.app.ui.theme.AppSpacing
-import com.insituledger.app.ui.theme.BrandGradients
 import com.insituledger.app.ui.theme.InterFontFamily
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -82,6 +80,28 @@ fun TransactionFormScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
+            )
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = {
+                    if (!uiState.isSaving) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.save()
+                    }
+                },
+                icon = {
+                    if (uiState.isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    } else {
+                        Icon(Icons.Default.Check, contentDescription = null)
+                    }
+                },
+                text = { Text(if (uiState.id != null) "Update" else "Create") }
             )
         }
     ) { padding ->
@@ -218,16 +238,8 @@ fun TransactionFormScreen(
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
 
-            GradientSaveButton(
-                label = if (uiState.id != null) "Update" else "Create",
-                isSaving = uiState.isSaving,
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    viewModel.save()
-                }
-            )
-
-            Spacer(modifier = Modifier.height(AppSpacing.lg))
+            // FAB clearance: 56dp button + 16dp margin + breathing room
+            Spacer(modifier = Modifier.height(96.dp))
         }
     }
 
@@ -400,41 +412,3 @@ private fun DateTimePill(
     }
 }
 
-@Composable
-private fun GradientSaveButton(
-    label: String,
-    isSaving: Boolean,
-    onClick: () -> Unit
-) {
-    val gradient = BrandGradients.hero()
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp),
-        shape = RoundedCornerShape(28.dp),
-        color = Color.Transparent,
-        onClick = { if (!isSaving) onClick() }
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(brush = gradient),
-            contentAlignment = Alignment.Center
-        ) {
-            if (isSaving) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(24.dp),
-                    color = Color.White,
-                    strokeWidth = 2.5.dp
-                )
-            } else {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-    }
-}

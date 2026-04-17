@@ -19,6 +19,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.insituledger.app.ui.theme.AppSpacing
@@ -122,9 +123,11 @@ class SharedOwnerViewModel @Inject constructor(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppNavigation(
-    newTransactionEvents: SharedFlow<Unit>
+    newTransactionEvents: SharedFlow<Unit>,
+    launchedFromWidget: Boolean = false
 ) {
     val navController = rememberNavController()
+    val context = LocalContext.current
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute by remember {
         derivedStateOf { navBackStackEntry?.destination?.route }
@@ -139,6 +142,7 @@ fun AppNavigation(
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(navController) {
+        if (launchedFromWidget) return@LaunchedEffect
         navController.currentBackStackEntryFlow.first()
         newTransactionEvents.collect {
             navController.navigate(Screen.TransactionForm.createRoute()) {
@@ -198,7 +202,7 @@ fun AppNavigation(
 
             NavHost(
                 navController = navController,
-                startDestination = Screen.Dashboard.route,
+                startDestination = if (launchedFromWidget) Screen.TransactionForm.route else Screen.Dashboard.route,
                 enterTransition = {
                     if (initialState.destination.route in bottomNavRoutes &&
                         targetState.destination.route in bottomNavRoutes) {
@@ -242,7 +246,13 @@ fun AppNavigation(
                     Screen.TransactionForm.route,
                     arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null })
                 ) {
-                    TransactionFormScreen(onBack = { navController.popBackStack() })
+                    TransactionFormScreen(onBack = {
+                        if (launchedFromWidget) {
+                            (context as? android.app.Activity)?.finish()
+                        } else {
+                            navController.popBackStack()
+                        }
+                    })
                 }
 
                 composable(Screen.Scheduled.route) {

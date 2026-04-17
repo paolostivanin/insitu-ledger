@@ -20,6 +20,7 @@ class AddTransactionWidgetProvider : AppWidgetProvider() {
             val intent = Intent(context, MainActivity::class.java).apply {
                 action = ACTION_NEW_TRANSACTION
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_FROM_WIDGET, true)
             }
             val pendingIntent = PendingIntent.getActivity(
                 context,
@@ -38,5 +39,6 @@ class AddTransactionWidgetProvider : AppWidgetProvider() {
 
     companion object {
         const val ACTION_NEW_TRANSACTION = "com.insituledger.app.ACTION_NEW_TRANSACTION"
+        const val EXTRA_FROM_WIDGET = "com.insituledger.app.EXTRA_FROM_WIDGET"
     }
 }
