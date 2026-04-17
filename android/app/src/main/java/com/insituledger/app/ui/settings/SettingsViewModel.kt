@@ -12,6 +12,7 @@ import com.insituledger.app.data.sync.SyncManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 import javax.inject.Inject
 
 data class SettingsUiState(
@@ -41,7 +42,10 @@ data class SettingsUiState(
     val autoBackupWeeklyEnabled: Boolean = false,
     val autoBackupWeeklyRetention: Int = 4,
     val autoBackupMonthlyEnabled: Boolean = false,
-    val autoBackupMonthlyRetention: Int = 6
+    val autoBackupMonthlyRetention: Int = 6,
+    // mTLS fields
+    val mtlsEnabled: Boolean = false,
+    val mtlsAlias: String? = null
 )
 
 @HiltViewModel
@@ -51,7 +55,8 @@ class SettingsViewModel @Inject constructor(
     private val fileBackupRepository: FileBackupRepository,
     private val backupManager: BackupManager,
     private val prefs: UserPreferences,
-    private val pendingOpDao: PendingOperationDao
+    private val pendingOpDao: PendingOperationDao,
+    private val okHttpClient: OkHttpClient
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -98,6 +103,12 @@ class SettingsViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(lastSyncVersion = syncVersion, pendingOps = pending)
                 }
+            }.collect()
+        }
+
+        viewModelScope.launch {
+            combine(prefs.mtlsEnabledFlow, prefs.mtlsAliasFlow) { enabled, alias ->
+                _uiState.update { it.copy(mtlsEnabled = enabled, mtlsAlias = alias) }
             }.collect()
         }
 
@@ -261,5 +272,20 @@ class SettingsViewModel @Inject constructor(
 
     fun setAutoBackupMonthlyRetention(count: Int) {
         viewModelScope.launch { prefs.saveAutoBackupMonthlyRetention(count) }
+    }
+
+    fun setMtlsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            prefs.saveMtlsEnabled(enabled)
+            if (!enabled) prefs.saveMtlsAlias(null)
+            okHttpClient.connectionPool.evictAll()
+        }
+    }
+
+    fun setMtlsAlias(alias: String?) {
+        viewModelScope.launch {
+            prefs.saveMtlsAlias(alias)
+            okHttpClient.connectionPool.evictAll()
+        }
     }
 }

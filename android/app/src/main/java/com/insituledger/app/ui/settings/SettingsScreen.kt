@@ -1,6 +1,8 @@
 package com.insituledger.app.ui.settings
 
+import android.app.Activity
 import android.content.Intent
+import android.security.KeyChain
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -252,6 +254,58 @@ fun SettingsScreen(
                             Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(AppSpacing.sm))
                             Text("Select Backup Folder")
+                        }
+                    }
+                }
+            }
+
+            // Client certificate (mTLS)
+            val context = LocalContext.current
+            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
+                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.VerifiedUser, contentDescription = null)
+                        Spacer(modifier = Modifier.width(AppSpacing.md))
+                        Text("Client certificate (mTLS)", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = uiState.mtlsEnabled,
+                            onCheckedChange = viewModel::setMtlsEnabled
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
+                    Text(
+                        "Required if your server enforces mutual TLS (e.g. Cloudflare Access).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (uiState.mtlsEnabled) {
+                        Spacer(modifier = Modifier.height(AppSpacing.md))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Selected certificate", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    uiState.mtlsAlias ?: "None",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (uiState.mtlsAlias != null) FontWeight.Medium else FontWeight.Normal
+                                )
+                            }
+                            TextButton(onClick = {
+                                val activity = context as? Activity ?: return@TextButton
+                                KeyChain.choosePrivateKeyAlias(
+                                    activity,
+                                    { alias -> viewModel.setMtlsAlias(alias) },
+                                    null,
+                                    null,
+                                    null,
+                                    -1,
+                                    uiState.mtlsAlias
+                                )
+                            }) {
+                                Text(if (uiState.mtlsAlias == null) "Choose" else "Change")
+                            }
+                            if (uiState.mtlsAlias != null) {
+                                TextButton(onClick = { viewModel.setMtlsAlias(null) }) { Text("Clear") }
+                            }
                         }
                     }
                 }

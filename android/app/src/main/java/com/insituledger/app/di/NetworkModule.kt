@@ -5,6 +5,7 @@ import com.insituledger.app.BuildConfig
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.remote.api.*
 import com.insituledger.app.data.remote.interceptor.AuthInterceptor
+import com.insituledger.app.data.remote.tls.ClientCertificateKeyManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -16,8 +17,12 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.io.File
+import java.security.KeyStore
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509TrustManager
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -27,12 +32,21 @@ object NetworkModule {
     @Singleton
     fun provideOkHttpClient(
         authInterceptor: AuthInterceptor,
+        clientCertKeyManager: ClientCertificateKeyManager,
         @ApplicationContext context: Context
     ): OkHttpClient {
         val cacheDir = File(context.cacheDir, "http_cache")
         val cache = Cache(cacheDir, 10L * 1024 * 1024) // 10MB
+
+        val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+        tmf.init(null as KeyStore?)
+        val trustManager = tmf.trustManagers.first { it is X509TrustManager } as X509TrustManager
+        val sslContext = SSLContext.getInstance("TLS")
+        sslContext.init(arrayOf(clientCertKeyManager), arrayOf(trustManager), null)
+
         return OkHttpClient.Builder()
             .cache(cache)
+            .sslSocketFactory(sslContext.socketFactory, trustManager)
             .addInterceptor(authInterceptor)
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = if (BuildConfig.DEBUG) {

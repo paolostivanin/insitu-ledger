@@ -47,6 +47,8 @@ class UserPreferences @Inject constructor(
         val AUTO_BACKUP_WEEKLY_RETENTION = intPreferencesKey("auto_backup_weekly_retention")
         val AUTO_BACKUP_MONTHLY_ENABLED = booleanPreferencesKey("auto_backup_monthly_enabled")
         val AUTO_BACKUP_MONTHLY_RETENTION = intPreferencesKey("auto_backup_monthly_retention")
+        val MTLS_ENABLED = booleanPreferencesKey("mtls_enabled")
+        val MTLS_ALIAS = stringPreferencesKey("mtls_alias")
 
         private const val ENCRYPTED_PREFS_FILE = "secure_prefs"
         private const val KEY_TOKEN = "token"
@@ -87,6 +89,8 @@ class UserPreferences @Inject constructor(
     val autoBackupWeeklyRetentionFlow: Flow<Int> = context.dataStore.data.map { it[AUTO_BACKUP_WEEKLY_RETENTION] ?: 4 }
     val autoBackupMonthlyEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[AUTO_BACKUP_MONTHLY_ENABLED] ?: false }
     val autoBackupMonthlyRetentionFlow: Flow<Int> = context.dataStore.data.map { it[AUTO_BACKUP_MONTHLY_RETENTION] ?: 6 }
+    val mtlsEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[MTLS_ENABLED] ?: false }
+    val mtlsAliasFlow: Flow<String?> = context.dataStore.data.map { it[MTLS_ALIAS] }
 
     suspend fun saveToken(token: String) {
         encryptedPrefs.edit().putString(KEY_TOKEN, token).apply()
@@ -173,6 +177,17 @@ class UserPreferences @Inject constructor(
         context.dataStore.edit { it[AUTO_BACKUP_MONTHLY_RETENTION] = count }
     }
 
+    suspend fun saveMtlsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[MTLS_ENABLED] = enabled }
+    }
+
+    suspend fun saveMtlsAlias(alias: String?) {
+        context.dataStore.edit {
+            if (alias.isNullOrBlank()) it.remove(MTLS_ALIAS)
+            else it[MTLS_ALIAS] = alias
+        }
+    }
+
     @Volatile
     private var _syncModeCache: String = "none"
     @Volatile
@@ -189,6 +204,10 @@ class UserPreferences @Inject constructor(
     private var _autoBackupMonthlyEnabledCache: Boolean = false
     @Volatile
     private var _autoBackupMonthlyRetentionCache: Int = 6
+    @Volatile
+    private var _mtlsEnabledCache: Boolean = false
+    @Volatile
+    private var _mtlsAliasCache: String? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -201,6 +220,8 @@ class UserPreferences @Inject constructor(
         autoBackupWeeklyRetentionFlow.onEach { _autoBackupWeeklyRetentionCache = it }.launchIn(scope)
         autoBackupMonthlyEnabledFlow.onEach { _autoBackupMonthlyEnabledCache = it }.launchIn(scope)
         autoBackupMonthlyRetentionFlow.onEach { _autoBackupMonthlyRetentionCache = it }.launchIn(scope)
+        mtlsEnabledFlow.onEach { _mtlsEnabledCache = it }.launchIn(scope)
+        mtlsAliasFlow.onEach { _mtlsAliasCache = it }.launchIn(scope)
     }
 
     fun getSyncModeImmediate(): String = _syncModeCache
@@ -211,11 +232,19 @@ class UserPreferences @Inject constructor(
     fun getAutoBackupWeeklyRetentionImmediate(): Int = _autoBackupWeeklyRetentionCache
     fun getAutoBackupMonthlyEnabledImmediate(): Boolean = _autoBackupMonthlyEnabledCache
     fun getAutoBackupMonthlyRetentionImmediate(): Int = _autoBackupMonthlyRetentionCache
+    fun getMtlsEnabledImmediate(): Boolean = _mtlsEnabledCache
+    fun getMtlsAliasImmediate(): String? = _mtlsAliasCache
 
     suspend fun clearAll() {
         encryptedPrefs.edit().remove(KEY_TOKEN).apply()
         _tokenFlow.value = null
-        context.dataStore.edit { it.clear() }
+        context.dataStore.edit { prefs ->
+            val mtlsEnabled = prefs[MTLS_ENABLED]
+            val mtlsAlias = prefs[MTLS_ALIAS]
+            prefs.clear()
+            if (mtlsEnabled != null) prefs[MTLS_ENABLED] = mtlsEnabled
+            if (mtlsAlias != null) prefs[MTLS_ALIAS] = mtlsAlias
+        }
     }
 
     fun getTokenImmediate(): String? = encryptedPrefs.getString(KEY_TOKEN, null)
