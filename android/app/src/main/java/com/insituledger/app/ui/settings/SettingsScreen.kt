@@ -14,8 +14,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.insituledger.app.ui.common.AppCard
 import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -76,7 +78,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(AppSpacing.lg)
         ) {
             // Theme
-            Card(modifier = Modifier.fillMaxWidth()) {
+            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
                 Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
                     Text("Theme", style = MaterialTheme.typography.titleSmall)
                     Spacer(modifier = Modifier.height(AppSpacing.sm))
@@ -93,7 +95,7 @@ fun SettingsScreen(
             }
 
             // Week starts on
-            Card(modifier = Modifier.fillMaxWidth()) {
+            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
                 Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
                     Text("Week starts on", style = MaterialTheme.typography.titleSmall)
                     Spacer(modifier = Modifier.height(AppSpacing.sm))
@@ -110,7 +112,7 @@ fun SettingsScreen(
             }
 
             // Biometric unlock
-            Card(modifier = Modifier.fillMaxWidth()) {
+            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
                 Row(
                     modifier = Modifier.padding(AppSpacing.cardPadding),
                     verticalAlignment = Alignment.CenterVertically
@@ -126,7 +128,7 @@ fun SettingsScreen(
             }
 
             // Prevent screenshots
-            Card(modifier = Modifier.fillMaxWidth()) {
+            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
                 Row(
                     modifier = Modifier.padding(AppSpacing.cardPadding),
                     verticalAlignment = Alignment.CenterVertically
@@ -142,7 +144,7 @@ fun SettingsScreen(
             }
 
             // Data backup (always available)
-            Card(modifier = Modifier.fillMaxWidth()) {
+            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
                 Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.FolderOpen, contentDescription = null)
@@ -186,7 +188,7 @@ fun SettingsScreen(
             }
 
             // Automatic backup
-            Card(modifier = Modifier.fillMaxWidth()) {
+            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
                 Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Schedule, contentDescription = null)
@@ -256,7 +258,7 @@ fun SettingsScreen(
             }
 
             // Sync section
-            Card(modifier = Modifier.fillMaxWidth()) {
+            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
                 Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Sync, contentDescription = null)
@@ -319,11 +321,11 @@ fun SettingsScreen(
             // Change password (only when webapp connected)
             if (uiState.syncMode == "webapp" && uiState.isWebappConnected) {
                 var showPasswordDialog by remember { mutableStateOf(false) }
-                Card(modifier = Modifier.fillMaxWidth(), onClick = { showPasswordDialog = true }) {
+                AppCard(modifier = Modifier.fillMaxWidth(), onClick = { showPasswordDialog = true }, level = 1) {
                     Row(modifier = Modifier.padding(AppSpacing.cardPadding), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Lock, contentDescription = null)
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(AppSpacing.md))
-                        Text("Change Password", style = MaterialTheme.typography.bodyLarge)
+                        Text("Change Password", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                     }
                 }
 

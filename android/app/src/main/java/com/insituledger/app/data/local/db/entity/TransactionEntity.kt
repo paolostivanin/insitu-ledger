@@ -25,6 +25,7 @@ data class TransactionEntity(
     val amount: Double,
     val currency: String = "EUR",
     val description: String? = null,
+    val note: String? = null,
     val date: String,
     @ColumnInfo(name = "created_at") val createdAt: String = "",
     @ColumnInfo(name = "updated_at") val updatedAt: String = "",

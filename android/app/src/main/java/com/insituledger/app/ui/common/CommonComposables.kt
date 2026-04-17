@@ -28,9 +28,6 @@ import androidx.compose.ui.unit.sp
 import com.insituledger.app.ui.theme.AppSpacing
 import com.insituledger.app.ui.theme.LocalSemanticColors
 
-val IncomeColor = Color(0xFF2E7D32)
-val ExpenseColor = Color(0xFFC62828)
-
 @Composable
 fun AmountText(
     amount: Double,
@@ -46,7 +43,7 @@ fun AmountText(
     Text(
         text = "$prefix$formatted",
         color = color,
-        style = style,
+        style = style.copy(fontFeatureSettings = "tnum"),
         fontWeight = FontWeight.SemiBold,
         modifier = modifier
     )
@@ -64,27 +61,49 @@ fun EmptyState(
     message: String,
     modifier: Modifier = Modifier,
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    title: String? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null
 ) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = AppSpacing.xl)
+        ) {
             if (icon != null) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(modifier = Modifier.height(AppSpacing.lg))
+            }
+            if (title != null) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(AppSpacing.md))
+                Spacer(modifier = Modifier.height(AppSpacing.xs))
             }
             Text(
                 text = message,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
             if (actionLabel != null && onAction != null) {
-                Spacer(modifier = Modifier.height(AppSpacing.lg))
+                Spacer(modifier = Modifier.height(AppSpacing.xl))
                 FilledTonalButton(onClick = onAction) { Text(actionLabel) }
             }
         }

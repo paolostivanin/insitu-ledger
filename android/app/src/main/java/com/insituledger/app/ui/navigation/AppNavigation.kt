@@ -1,5 +1,7 @@
 package com.insituledger.app.ui.navigation
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -17,6 +19,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -119,8 +122,7 @@ class SharedOwnerViewModel @Inject constructor(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppNavigation(
-    openNewTransaction: Boolean = false,
-    onNewTransactionConsumed: () -> Unit = {}
+    newTransactionEvents: SharedFlow<Unit>
 ) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -136,12 +138,12 @@ fun AppNavigation(
 
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(openNewTransaction) {
-        if (openNewTransaction) {
+    LaunchedEffect(navController) {
+        navController.currentBackStackEntryFlow.first()
+        newTransactionEvents.collect {
             navController.navigate(Screen.TransactionForm.createRoute()) {
                 launchSingleTop = true
             }
-            onNewTransactionConsumed()
         }
     }
 
@@ -197,10 +199,26 @@ fun AppNavigation(
             NavHost(
                 navController = navController,
                 startDestination = Screen.Dashboard.route,
-                enterTransition = { slideInHorizontally(initialOffsetX = { it / 4 }) + fadeIn(tween(200)) },
-                exitTransition = { fadeOut(tween(200)) },
-                popEnterTransition = { fadeIn(tween(200)) },
-                popExitTransition = { slideOutHorizontally(targetOffsetX = { it / 4 }) + fadeOut(tween(200)) }
+                enterTransition = {
+                    if (initialState.destination.route in bottomNavRoutes &&
+                        targetState.destination.route in bottomNavRoutes) {
+                        EnterTransition.None
+                    } else {
+                        slideInHorizontally(tween(150)) { it / 6 } + fadeIn(tween(150))
+                    }
+                },
+                exitTransition = {
+                    if (initialState.destination.route in bottomNavRoutes &&
+                        targetState.destination.route in bottomNavRoutes) {
+                        ExitTransition.None
+                    } else {
+                        fadeOut(tween(150))
+                    }
+                },
+                popEnterTransition = { fadeIn(tween(150)) },
+                popExitTransition = {
+                    slideOutHorizontally(tween(150)) { it / 6 } + fadeOut(tween(150))
+                }
             ) {
                 composable(Screen.Dashboard.route) {
                     DashboardScreen(
@@ -326,7 +344,15 @@ private fun BottomNavBar(
                 selected = currentRoute == item.screen.route,
                 onClick = { onNavigate(item.screen.route) },
                 icon = { Icon(item.icon, contentDescription = item.label) },
-                label = { Text(item.label) }
+                label = {
+                    Text(
+                        text = item.label,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Visible,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
             )
         }
     }

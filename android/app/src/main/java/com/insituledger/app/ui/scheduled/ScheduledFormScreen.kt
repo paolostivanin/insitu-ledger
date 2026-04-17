@@ -119,6 +119,19 @@ fun ScheduledFormScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true, modifier = Modifier.fillMaxWidth())
 
+            OutlinedTextField(
+                value = uiState.note,
+                onValueChange = viewModel::updateNote,
+                label = { Text("Note (optional)") },
+                singleLine = false,
+                minLines = 3,
+                maxLines = 8,
+                supportingText = if (uiState.note.isNotEmpty()) {
+                    { Text("${uiState.note.length}/2000") }
+                } else null,
+                modifier = Modifier.fillMaxWidth()
+            )
+
             uiState.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }

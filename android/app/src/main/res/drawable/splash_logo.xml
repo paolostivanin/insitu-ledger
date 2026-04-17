@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+
+    <!-- Outer ring -->
+    <path
+        android:pathData="M60,8 C31.28,8 8,31.28 8,60 C8,88.72 31.28,112 60,112 C88.72,112 112,88.72 112,60 C112,31.28 88.72,8 60,8 Z M60,16 C84.3,16 104,35.7 104,60 C104,84.3 84.3,104 60,104 C35.7,104 16,84.3 16,60 C16,35.7 35.7,16 60,16 Z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.18"/>
+
+    <!-- Bar chart: tall bar -->
+    <path
+        android:pathData="M76,40 L86,40 C87.66,40 89,41.34 89,43 L89,80 C89,81.66 87.66,83 86,83 L76,83 C74.34,83 73,81.66 73,80 L73,43 C73,41.34 74.34,40 76,40 Z"
+        android:fillColor="#FFFFFF"/>
+
+    <!-- Bar chart: medium bar -->
+    <path
+        android:pathData="M55,52 L65,52 C66.66,52 68,53.34 68,55 L68,80 C68,81.66 66.66,83 65,83 L55,83 C53.34,83 52,81.66 52,80 L52,55 C52,53.34 53.34,52 55,52 Z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.85"/>
+
+    <!-- Bar chart: short bar -->
+    <path
+        android:pathData="M34,62 L44,62 C45.66,62 47,63.34 47,65 L47,80 C47,81.66 45.66,83 44,83 L34,83 C32.34,83 31,81.66 31,80 L31,65 C31,63.34 32.34,62 34,62 Z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.7"/>
+
+    <!-- Pin head -->
+    <path
+        android:pathData="M82,30 m-9,0 a9,9 0 1,1 18,0 a9,9 0 1,1 -18,0"
+        android:fillColor="#FFFFFF"/>
+
+    <!-- Pin head inner -->
+    <path
+        android:pathData="M82,30 m-4,0 a4,4 0 1,1 8,0 a4,4 0 1,1 -8,0"
+        android:fillColor="#FF00574E"/>
+</vector>

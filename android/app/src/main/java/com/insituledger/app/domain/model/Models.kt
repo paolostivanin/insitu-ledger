@@ -34,6 +34,7 @@ data class Transaction(
     val amount: Double,
     val currency: String,
     val description: String?,
+    val note: String?,
     val date: String,
     val isLocalOnly: Boolean = false
 )
@@ -48,6 +49,7 @@ data class ScheduledTransaction(
     val amount: Double,
     val currency: String,
     val description: String?,
+    val note: String?,
     val rrule: String,
     val nextOccurrence: String,
     val active: Boolean,

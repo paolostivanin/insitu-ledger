@@ -12,10 +12,10 @@ android {
 
     defaultConfig {
         applicationId = "com.insituledger.app"
-        minSdk = 26
+        minSdk = 34
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.14.0"
+        versionCode = 18
+        versionName = "1.15.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -95,6 +95,7 @@ dependencies {
     implementation(libs.biometric)
     implementation(libs.security.crypto)
     implementation(libs.documentfile)
+    implementation(libs.core.splashscreen)
 
     implementation(libs.lib.recur)
 

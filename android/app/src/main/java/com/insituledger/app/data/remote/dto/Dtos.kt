@@ -57,6 +57,7 @@ data class TransactionDto(
     val amount: Double,
     val currency: String,
     val description: String?,
+    val note: String? = null,
     val date: String,
     @SerializedName("created_at") val createdAt: String,
     @SerializedName("updated_at") val updatedAt: String,
@@ -71,6 +72,7 @@ data class TransactionInput(
     val amount: Double,
     val currency: String = "EUR",
     val description: String? = null,
+    val note: String? = null,
     val date: String
 )
 
@@ -123,6 +125,7 @@ data class ScheduledTransactionDto(
     val amount: Double,
     val currency: String,
     val description: String?,
+    val note: String? = null,
     val rrule: String,
     @SerializedName("next_occurrence") val nextOccurrence: String,
     val active: Boolean,
@@ -141,6 +144,7 @@ data class ScheduledInput(
     val amount: Double,
     val currency: String = "EUR",
     val description: String? = null,
+    val note: String? = null,
     val rrule: String,
     @SerializedName("next_occurrence") val nextOccurrence: String,
     @SerializedName("max_occurrences") val maxOccurrences: Int? = null

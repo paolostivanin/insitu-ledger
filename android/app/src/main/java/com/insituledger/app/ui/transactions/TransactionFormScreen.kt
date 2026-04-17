@@ -1,30 +1,42 @@
 package com.insituledger.app.ui.transactions
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Calculate
-import com.insituledger.app.ui.common.CalculatorDialog
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.insituledger.app.ui.theme.AppSpacing
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.ui.common.AppCard
+import com.insituledger.app.ui.common.CalculatorDialog
 import com.insituledger.app.ui.common.CategoryDropdownWithAdd
 import com.insituledger.app.ui.common.CompactAccountChip
 import com.insituledger.app.ui.common.IncomeExpenseToggle
 import com.insituledger.app.ui.common.LoadingIndicator
 import com.insituledger.app.ui.common.LocalSnackbarHostState
+import com.insituledger.app.ui.theme.AppSpacing
+import com.insituledger.app.ui.theme.BrandGradients
+import com.insituledger.app.ui.theme.InterFontFamily
 import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -39,6 +51,7 @@ fun TransactionFormScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = LocalSnackbarHostState.current
     val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
 
     LaunchedEffect(uiState.saved) {
         if (uiState.saved) {
@@ -51,12 +64,11 @@ fun TransactionFormScreen(
     var showTimePicker by remember { mutableStateOf(false) }
     var showCalculator by remember { mutableStateOf(false) }
 
-    // Parse date and time from the state string
     val datePart = if (uiState.date.contains("T")) uiState.date.substringBefore("T") else uiState.date
     val timePart = if (uiState.date.contains("T")) uiState.date.substringAfter("T") else "00:00"
     val formattedDate = try {
         LocalDate.parse(datePart, DateTimeFormatter.ISO_LOCAL_DATE)
-            .format(DateTimeFormatter.ofPattern("d MMMM yyyy"))
+            .format(DateTimeFormatter.ofPattern("d MMM yyyy"))
     } catch (_: Exception) { datePart }
     val hour = timePart.substringBefore(":").toIntOrNull() ?: 0
     val minute = timePart.substringAfter(":").toIntOrNull() ?: 0
@@ -79,127 +91,146 @@ fun TransactionFormScreen(
         }
 
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = AppSpacing.screenPadding)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = AppSpacing.screenPadding)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
         ) {
             Spacer(modifier = Modifier.height(AppSpacing.xs))
 
-            IncomeExpenseToggle(selected = uiState.type, onSelect = viewModel::updateType)
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(AppSpacing.lg),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = formattedDate,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { showDatePicker = true }
-                )
-                Text(
-                    text = timePart,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { showTimePicker = true }
-                )
-            }
-
-            CompactAccountChip(
-                accountDisplays = uiState.accountDisplays,
-                selectedId = uiState.accountId,
-                onSelect = { id, currency ->
-                    viewModel.updateAccountId(id)
-                    viewModel.updateCurrency(currency)
-                },
-                onCreateAccount = viewModel::createAccount
-            )
-
-            CategoryDropdownWithAdd(
-                categories = uiState.categories,
-                selectedId = uiState.categoryId,
-                type = uiState.type,
-                onSelect = viewModel::updateCategoryId,
-                onCreateCategory = viewModel::createCategory
-            )
-
-            // Name field (with autocomplete)
-            ExposedDropdownMenuBox(
-                expanded = uiState.showSuggestions,
-                onExpandedChange = { if (!it) viewModel.dismissSuggestions() }
-            ) {
-                OutlinedTextField(
-                    value = uiState.description,
-                    onValueChange = viewModel::updateDescription,
-                    label = { Text("Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable)
-                )
-                if (uiState.suggestions.isNotEmpty()) {
-                    ExposedDropdownMenu(
-                        expanded = uiState.showSuggestions,
-                        onDismissRequest = { viewModel.dismissSuggestions() }
-                    ) {
-                        uiState.suggestions.forEach { suggestion ->
-                            DropdownMenuItem(
-                                text = {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(suggestion.description)
-                                        val catName = uiState.categories.find { it.id == suggestion.categoryId }?.name ?: ""
-                                        if (catName.isNotEmpty()) {
-                                            Text(
-                                                catName,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+            SectionCard(title = "Name") {
+                ExposedDropdownMenuBox(
+                    expanded = uiState.showSuggestions,
+                    onExpandedChange = { if (!it) viewModel.dismissSuggestions() }
+                ) {
+                    OutlinedTextField(
+                        value = uiState.description,
+                        onValueChange = viewModel::updateDescription,
+                        label = { Text("Name") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(MenuAnchorType.PrimaryEditable)
+                    )
+                    if (uiState.suggestions.isNotEmpty()) {
+                        ExposedDropdownMenu(
+                            expanded = uiState.showSuggestions,
+                            onDismissRequest = { viewModel.dismissSuggestions() }
+                        ) {
+                            uiState.suggestions.forEach { suggestion ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(suggestion.description)
+                                            val catName = uiState.categories.find { it.id == suggestion.categoryId }?.name ?: ""
+                                            if (catName.isNotEmpty()) {
+                                                Text(
+                                                    catName,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                         }
-                                    }
-                                },
-                                onClick = { viewModel.selectSuggestion(suggestion) }
-                            )
+                                    },
+                                    onClick = { viewModel.selectSuggestion(suggestion) }
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            val amountError = uiState.amount.isNotEmpty() && uiState.amount.toDoubleOrNull().let { it == null || it <= 0 }
-            OutlinedTextField(value = uiState.amount, onValueChange = viewModel::updateAmount,
-                label = { Text("Amount") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true, modifier = Modifier.fillMaxWidth(),
-                prefix = { Text(uiState.currency) },
-                isError = amountError,
-                supportingText = if (amountError) {{ Text("Enter a valid amount") }} else null,
-                trailingIcon = {
-                    IconButton(onClick = { showCalculator = true }) {
-                        Icon(Icons.Default.Calculate, contentDescription = "Calculator")
-                    }
-                })
+            SectionCard(title = "Type & Amount") {
+                IncomeExpenseToggle(selected = uiState.type, onSelect = viewModel::updateType)
+                AmountInput(
+                    amount = uiState.amount,
+                    currency = uiState.currency,
+                    onAmountChange = viewModel::updateAmount,
+                    onCalculatorClick = { showCalculator = true }
+                )
+            }
+
+            SectionCard(title = "When") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+                ) {
+                    DateTimePill(
+                        icon = Icons.Default.CalendarMonth,
+                        label = formattedDate,
+                        onClick = { showDatePicker = true },
+                        modifier = Modifier.weight(1f)
+                    )
+                    DateTimePill(
+                        icon = Icons.Default.Schedule,
+                        label = timePart,
+                        onClick = { showTimePicker = true },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            SectionCard(title = "Account") {
+                CompactAccountChip(
+                    accountDisplays = uiState.accountDisplays,
+                    selectedId = uiState.accountId,
+                    onSelect = { id, currency ->
+                        viewModel.updateAccountId(id)
+                        viewModel.updateCurrency(currency)
+                    },
+                    onCreateAccount = viewModel::createAccount
+                )
+            }
+
+            SectionCard(title = "Category") {
+                CategoryDropdownWithAdd(
+                    categories = uiState.categories,
+                    selectedId = uiState.categoryId,
+                    type = uiState.type,
+                    onSelect = viewModel::updateCategoryId,
+                    onCreateCategory = viewModel::createCategory
+                )
+            }
+
+            SectionCard(title = "Note") {
+                OutlinedTextField(
+                    value = uiState.note,
+                    onValueChange = viewModel::updateNote,
+                    label = { Text("Note (optional)") },
+                    singleLine = false,
+                    minLines = 3,
+                    maxLines = 8,
+                    shape = RoundedCornerShape(12.dp),
+                    supportingText = if (uiState.note.isNotEmpty()) {
+                        { Text("${uiState.note.length}/2000") }
+                    } else null,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
             uiState.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
 
-            Button(
-                onClick = viewModel::save,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                enabled = !uiState.isSaving
-            ) {
-                if (uiState.isSaving) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                } else {
-                    Text(if (uiState.id != null) "Update" else "Create")
+            GradientSaveButton(
+                label = if (uiState.id != null) "Update" else "Create",
+                isSaving = uiState.isSaving,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    viewModel.save()
                 }
-            }
+            )
 
             Spacer(modifier = Modifier.height(AppSpacing.lg))
         }
     }
 
-    // Date picker dialog
     if (showDatePicker) {
         val initialMillis = try {
             LocalDate.parse(datePart, DateTimeFormatter.ISO_LOCAL_DATE)
@@ -231,7 +262,6 @@ fun TransactionFormScreen(
         }
     }
 
-    // Calculator dialog
     if (showCalculator) {
         CalculatorDialog(
             initialValue = uiState.amount,
@@ -243,7 +273,6 @@ fun TransactionFormScreen(
         )
     }
 
-    // Time picker dialog
     if (showTimePicker) {
         val timePickerState = rememberTimePickerState(initialHour = hour, initialMinute = minute)
         AlertDialog(
@@ -261,5 +290,151 @@ fun TransactionFormScreen(
                 TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
             }
         )
+    }
+}
+
+@Composable
+private fun SectionCard(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = title.uppercase(),
+            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = AppSpacing.sm, bottom = AppSpacing.xs)
+        )
+        AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(AppSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.md),
+                content = content
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AmountInput(
+    amount: String,
+    currency: String,
+    onAmountChange: (String) -> Unit,
+    onCalculatorClick: () -> Unit
+) {
+    val amountError = amount.isNotEmpty() && amount.toDoubleOrNull().let { it == null || it <= 0 }
+    OutlinedTextField(
+        value = amount,
+        onValueChange = onAmountChange,
+        label = { Text("Amount") },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        singleLine = true,
+        textStyle = TextStyle(
+            fontFamily = InterFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 28.sp,
+            fontFeatureSettings = "tnum"
+        ),
+        prefix = {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = currency,
+                    modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        },
+        isError = amountError,
+        supportingText = if (amountError) {{ Text("Enter a valid amount") }} else null,
+        trailingIcon = {
+            IconButton(onClick = onCalculatorClick) {
+                Icon(Icons.Default.Calculate, contentDescription = "Calculator")
+            }
+        },
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+private fun DateTimePill(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = AppSpacing.md, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun GradientSaveButton(
+    label: String,
+    isSaving: Boolean,
+    onClick: () -> Unit
+) {
+    val gradient = BrandGradients.hero()
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = Color.Transparent,
+        onClick = { if (!isSaving) onClick() }
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(brush = gradient),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isSaving) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    color = Color.White,
+                    strokeWidth = 2.5.dp
+                )
+            } else {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
     }
 }

@@ -266,7 +266,7 @@ class SyncRepository @Inject constructor(
         val transactions = transactionDao.getAllSync()
         for (t in transactions) {
             if (!t.isLocalOnly) continue
-            val input = TransactionInput(t.accountId, t.categoryId, t.type, t.amount, t.currency, t.description, t.date)
+            val input = TransactionInput(t.accountId, t.categoryId, t.type, t.amount, t.currency, t.description, t.note, t.date)
             pendingOpDao.insert(PendingOperationEntity(
                 entityType = "transaction",
                 operation = "CREATE",
@@ -279,7 +279,7 @@ class SyncRepository @Inject constructor(
         val scheduled = scheduledDao.getAllSync()
         for (s in scheduled) {
             if (!s.isLocalOnly) continue
-            val input = ScheduledInput(s.accountId, s.categoryId, s.type, s.amount, s.currency, s.description, s.rrule, s.nextOccurrence, s.maxOccurrences)
+            val input = ScheduledInput(s.accountId, s.categoryId, s.type, s.amount, s.currency, s.description, s.note, s.rrule, s.nextOccurrence, s.maxOccurrences)
             pendingOpDao.insert(PendingOperationEntity(
                 entityType = "scheduled",
                 operation = "CREATE",
@@ -310,14 +310,14 @@ class SyncRepository @Inject constructor(
     private fun TransactionDto.toEntity() = TransactionEntity(
         id = id, accountId = accountId, categoryId = categoryId,
         userId = userId, type = type, amount = amount, currency = currency,
-        description = description, date = date, createdAt = createdAt,
+        description = description, note = note, date = date, createdAt = createdAt,
         updatedAt = updatedAt, deletedAt = deletedAt, syncVersion = syncVersion
     )
 
     private fun ScheduledTransactionDto.toEntity() = ScheduledTransactionEntity(
         id = id, accountId = accountId, categoryId = categoryId,
         userId = userId, type = type, amount = amount, currency = currency,
-        description = description, rrule = rrule, nextOccurrence = nextOccurrence,
+        description = description, note = note, rrule = rrule, nextOccurrence = nextOccurrence,
         active = active, createdAt = createdAt, updatedAt = updatedAt,
         deletedAt = deletedAt, syncVersion = syncVersion
     )

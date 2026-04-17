@@ -14,6 +14,7 @@ data class ScheduledTransactionEntity(
     val amount: Double,
     val currency: String = "EUR",
     val description: String? = null,
+    val note: String? = null,
     val rrule: String,
     @ColumnInfo(name = "next_occurrence") val nextOccurrence: String,
     val active: Boolean = true,

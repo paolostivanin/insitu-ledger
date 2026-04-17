@@ -112,7 +112,7 @@ class TransactionRepository @Inject constructor(
             Transaction(
                 id = dto.id, accountId = dto.accountId, categoryId = dto.categoryId,
                 userId = dto.userId, type = dto.type, amount = dto.amount,
-                currency = dto.currency, description = dto.description, date = dto.date
+                currency = dto.currency, description = dto.description, note = dto.note, date = dto.date
             )
         } ?: emptyList()
     }
@@ -127,7 +127,7 @@ class TransactionRepository @Inject constructor(
 
     suspend fun create(
         accountId: Long, categoryId: Long, type: String,
-        amount: Double, currency: String, description: String?, date: String
+        amount: Double, currency: String, description: String?, note: String?, date: String
     ): Long {
         require(amount > 0) { "Amount must be positive" }
         require(type == "income" || type == "expense") { "Type must be 'income' or 'expense'" }
@@ -144,6 +144,7 @@ class TransactionRepository @Inject constructor(
                 amount = amount,
                 currency = currency,
                 description = description,
+                note = note,
                 date = date,
                 isLocalOnly = true
             )
@@ -154,7 +155,7 @@ class TransactionRepository @Inject constructor(
         }
 
         if (isSyncEnabled()) {
-            val input = TransactionInput(accountId, categoryId, type, amount, currency, description, date)
+            val input = TransactionInput(accountId, categoryId, type, amount, currency, description, note, date)
             pendingOpDao.insert(PendingOperationEntity(
                 entityType = "transaction",
                 operation = "CREATE",
@@ -168,7 +169,7 @@ class TransactionRepository @Inject constructor(
 
     suspend fun update(
         id: Long, accountId: Long, categoryId: Long, type: String,
-        amount: Double, currency: String, description: String?, date: String
+        amount: Double, currency: String, description: String?, note: String?, date: String
     ) {
         require(amount > 0) { "Amount must be positive" }
         require(type == "income" || type == "expense") { "Type must be 'income' or 'expense'" }
@@ -184,12 +185,12 @@ class TransactionRepository @Inject constructor(
 
             transactionDao.upsert(existing.copy(
                 accountId = accountId, categoryId = categoryId, type = type,
-                amount = amount, currency = currency, description = description, date = date
+                amount = amount, currency = currency, description = description, note = note, date = date
             ))
         }
 
         if (isSyncEnabled()) {
-            val input = TransactionInput(accountId, categoryId, type, amount, currency, description, date)
+            val input = TransactionInput(accountId, categoryId, type, amount, currency, description, note, date)
             pendingOpDao.insert(PendingOperationEntity(
                 entityType = "transaction",
                 operation = "UPDATE",
@@ -234,7 +235,7 @@ class TransactionRepository @Inject constructor(
     private fun TransactionEntity.toDomain() = Transaction(
         id = id, accountId = accountId, categoryId = categoryId,
         userId = userId, type = type, amount = amount,
-        currency = currency, description = description, date = date,
+        currency = currency, description = description, note = note, date = date,
         isLocalOnly = isLocalOnly
     )
 }

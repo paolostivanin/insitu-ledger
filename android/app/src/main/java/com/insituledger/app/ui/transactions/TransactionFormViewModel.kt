@@ -43,6 +43,7 @@ data class TransactionFormUiState(
     val amount: String = "",
     val currency: String = "EUR",
     val description: String = "",
+    val note: String = "",
     val date: String = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")),
     val accounts: List<Account> = emptyList(),
     val accountDisplays: List<AccountDisplay> = emptyList(),
@@ -112,6 +113,7 @@ class TransactionFormViewModel @Inject constructor(
                             accountId = txn.accountId, categoryId = txn.categoryId,
                             type = txn.type, amount = txn.amount.toString(),
                             currency = txn.currency, description = txn.description ?: "",
+                            note = txn.note ?: "",
                             date = txn.date, isLoading = false
                         )
                     }
@@ -185,6 +187,8 @@ class TransactionFormViewModel @Inject constructor(
         _uiState.update { it.copy(showSuggestions = false) }
     }
 
+    fun updateNote(note: String) { _uiState.update { it.copy(note = note) } }
+
     fun updateDate(date: String) { _uiState.update { it.copy(date = date) } }
 
     fun createAccount(name: String, currency: String) {
@@ -237,7 +241,8 @@ class TransactionFormViewModel @Inject constructor(
                 if (editId != null) {
                     transactionRepository.update(
                         editId, state.accountId, state.categoryId, state.type,
-                        amount, state.currency, state.description.ifBlank { null }, state.date
+                        amount, state.currency, state.description.ifBlank { null },
+                        state.note.ifBlank { null }, state.date
                     )
                 } else {
                     val isFuture = try {
@@ -253,6 +258,7 @@ class TransactionFormViewModel @Inject constructor(
                         scheduledRepository.create(
                             state.accountId, state.categoryId, state.type,
                             amount, state.currency, state.description.ifBlank { null },
+                            state.note.ifBlank { null },
                             rrule = "FREQ=DAILY", nextOccurrence = state.date, maxOccurrences = 1
                         )
                         // Schedule a check at the exact future time
@@ -268,7 +274,8 @@ class TransactionFormViewModel @Inject constructor(
                     } else {
                         transactionRepository.create(
                             state.accountId, state.categoryId, state.type,
-                            amount, state.currency, state.description.ifBlank { null }, state.date
+                            amount, state.currency, state.description.ifBlank { null },
+                            state.note.ifBlank { null }, state.date
                         )
                     }
                 }

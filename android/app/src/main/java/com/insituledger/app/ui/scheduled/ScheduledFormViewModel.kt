@@ -23,6 +23,7 @@ data class ScheduledFormUiState(
     val amount: String = "",
     val currency: String = "EUR",
     val description: String = "",
+    val note: String = "",
     val frequency: String = "monthly",
     val nextDate: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
     val nextTime: String = "09:00",
@@ -95,6 +96,7 @@ class ScheduledFormViewModel @Inject constructor(
                                 accountId = item.accountId, categoryId = item.categoryId,
                                 type = item.type, amount = item.amount.toString(),
                                 currency = item.currency, description = item.description ?: "",
+                                note = item.note ?: "",
                                 frequency = freq, nextDate = date, nextTime = time,
                                 maxOccurrences = item.maxOccurrences?.toString() ?: "",
                                 isLoading = false
@@ -116,6 +118,7 @@ class ScheduledFormViewModel @Inject constructor(
     fun updateAmount(amount: String) { _uiState.update { it.copy(amount = amount) } }
     fun updateCurrency(currency: String) { _uiState.update { it.copy(currency = currency) } }
     fun updateDescription(desc: String) { _uiState.update { it.copy(description = desc) } }
+    fun updateNote(note: String) { _uiState.update { it.copy(note = note) } }
     fun updateFrequency(frequency: String) { _uiState.update { it.copy(frequency = frequency) } }
     fun updateNextDate(date: String) { _uiState.update { it.copy(nextDate = date) } }
     fun updateNextTime(time: String) { _uiState.update { it.copy(nextTime = time) } }
@@ -143,12 +146,14 @@ class ScheduledFormViewModel @Inject constructor(
                     scheduledRepository.update(
                         editId, state.accountId, state.categoryId, state.type,
                         amount, state.currency, state.description.ifBlank { null },
+                        state.note.ifBlank { null },
                         state.rrule, state.nextOccurrence, maxOcc
                     )
                 } else {
                     scheduledRepository.create(
                         state.accountId, state.categoryId, state.type,
                         amount, state.currency, state.description.ifBlank { null },
+                        state.note.ifBlank { null },
                         state.rrule, state.nextOccurrence, maxOcc
                     )
                 }

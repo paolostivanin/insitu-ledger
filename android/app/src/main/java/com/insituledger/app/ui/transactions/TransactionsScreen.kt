@@ -2,48 +2,47 @@ package com.insituledger.app.ui.transactions
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import com.insituledger.app.ui.theme.AppSpacing
-import com.insituledger.app.ui.common.LocalSnackbarHostState
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import kotlinx.coroutines.launch
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AmountText
-import com.insituledger.app.ui.common.EmptyState
-import com.insituledger.app.ui.theme.LocalSemanticColors
-import com.insituledger.app.ui.common.TransactionListSkeleton
-import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import com.insituledger.app.ui.common.ColorUtils
 import com.insituledger.app.ui.common.CurrencyFormatter
+import com.insituledger.app.ui.common.EmptyState
+import com.insituledger.app.ui.common.LocalSnackbarHostState
+import com.insituledger.app.ui.common.TransactionListSkeleton
+import com.insituledger.app.ui.theme.AppSpacing
+import com.insituledger.app.ui.theme.BrandGradients
+import com.insituledger.app.ui.theme.LocalSemanticColors
+import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun TransactionsScreen(
     onAddClick: () -> Unit,
@@ -51,8 +50,6 @@ fun TransactionsScreen(
     viewModel: TransactionsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val semanticColors = LocalSemanticColors.current
-    val haptic = LocalHapticFeedback.current
     val snackbarHostState = LocalSnackbarHostState.current
     val scope = rememberCoroutineScope()
     var showFilters by remember { mutableStateOf(false) }
@@ -122,9 +119,7 @@ fun TransactionsScreen(
         },
         floatingActionButton = {
             if (!uiState.isReadOnly && !uiState.isSelectionMode) {
-                FloatingActionButton(onClick = onAddClick) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Transaction")
-                }
+                BrandFab(onClick = onAddClick)
             }
         }
     ) { padding ->
@@ -159,7 +154,13 @@ fun TransactionsScreen(
 
                 when {
                     uiState.isLoading -> TransactionListSkeleton()
-                    uiState.transactions.isEmpty() -> EmptyState("No transactions")
+                    uiState.transactions.isEmpty() -> EmptyState(
+                        icon = Icons.AutoMirrored.Filled.ReceiptLong,
+                        title = "No transactions yet",
+                        message = "Tap + to record your first transaction.",
+                        actionLabel = if (!uiState.isReadOnly) "Add transaction" else null,
+                        onAction = if (!uiState.isReadOnly) onAddClick else null
+                    )
                     else -> {
                         val categoryMap = remember(uiState.categories) {
                             uiState.categories.associateBy { it.id }
@@ -172,34 +173,52 @@ fun TransactionsScreen(
                                 uiState.transactions.groupBy { it.date.take(10) }
                             }
                             LazyColumn(
-                                contentPadding = PaddingValues(AppSpacing.lg),
+                                contentPadding = PaddingValues(
+                                    start = AppSpacing.lg,
+                                    end = AppSpacing.lg,
+                                    top = AppSpacing.sm,
+                                    bottom = AppSpacing.xxl
+                                ),
                                 verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)
                             ) {
                                 grouped.forEach { (date, txns) ->
-                                    item(key = "header_$date") {
-                                        val dailyExpense = txns.filter { it.type == "expense" }.sumOf { it.amount }
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().animateItem().padding(top = AppSpacing.sm, bottom = AppSpacing.xs),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = date,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            if (dailyExpense > 0) {
-                                                Text(
-                                                    text = "-${formatAmount(dailyExpense)}",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = semanticColors.expense
-                                                )
-                                            }
-                                        }
+                                    stickyHeader(key = "header_$date") {
+                                        DayHeader(date = date, txns = txns)
                                     }
                                     items(txns, key = { it.id }) { txn ->
                                         Box(modifier = Modifier.animateItem()) {
+                                            SwipeableTransactionRow(
+                                                txn = txn,
+                                                categoryMap = categoryMap,
+                                                isSelectionMode = isSelectionMode,
+                                                isSelected = selectedIds.contains(txn.id),
+                                                isReadOnly = isReadOnly,
+                                                onClick = {
+                                                    if (isSelectionMode) viewModel.toggleSelect(txn.id)
+                                                    else onTransactionClick(txn.id)
+                                                },
+                                                onLongClick = { viewModel.toggleSelect(txn.id) },
+                                                onSwipeDelete = {
+                                                    pendingDeleteId = txn.id
+                                                    showDeleteDialog = true
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            LazyColumn(
+                                contentPadding = PaddingValues(
+                                    start = AppSpacing.lg,
+                                    end = AppSpacing.lg,
+                                    top = AppSpacing.sm,
+                                    bottom = AppSpacing.xxl
+                                ),
+                                verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)
+                            ) {
+                                items(uiState.transactions, key = { it.id }) { txn ->
+                                    Box(modifier = Modifier.animateItem()) {
                                         SwipeableTransactionRow(
                                             txn = txn,
                                             categoryMap = categoryMap,
@@ -216,33 +235,6 @@ fun TransactionsScreen(
                                                 showDeleteDialog = true
                                             }
                                         )
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            LazyColumn(
-                                contentPadding = PaddingValues(AppSpacing.lg),
-                                verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)
-                            ) {
-                                items(uiState.transactions, key = { it.id }) { txn ->
-                                    Box(modifier = Modifier.animateItem()) {
-                                    SwipeableTransactionRow(
-                                        txn = txn,
-                                        categoryMap = categoryMap,
-                                        isSelectionMode = isSelectionMode,
-                                        isSelected = selectedIds.contains(txn.id),
-                                        isReadOnly = isReadOnly,
-                                        onClick = {
-                                            if (isSelectionMode) viewModel.toggleSelect(txn.id)
-                                            else onTransactionClick(txn.id)
-                                        },
-                                        onLongClick = { viewModel.toggleSelect(txn.id) },
-                                        onSwipeDelete = {
-                                            pendingDeleteId = txn.id
-                                            showDeleteDialog = true
-                                        }
-                                    )
                                     }
                                 }
                             }
@@ -253,7 +245,6 @@ fun TransactionsScreen(
         }
     }
 
-    // Single delete confirmation dialog
     if (showDeleteDialog && pendingDeleteId != null) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false; pendingDeleteId = null },
@@ -273,7 +264,6 @@ fun TransactionsScreen(
         )
     }
 
-    // Batch delete confirmation dialog
     if (showBatchDeleteDialog) {
         val count = uiState.selectedIds.size
         AlertDialog(
@@ -294,6 +284,51 @@ fun TransactionsScreen(
     }
 }
 
+@Composable
+private fun DayHeader(date: String, txns: List<Transaction>) {
+    val semantic = LocalSemanticColors.current
+    val income = txns.filter { it.type == "income" }.sumOf { it.amount }
+    val expense = txns.filter { it.type == "expense" }.sumOf { it.amount }
+    val net = income - expense
+    val currency = txns.firstOrNull()?.currency ?: "EUR"
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = AppSpacing.md, bottom = AppSpacing.xs),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = friendlyDayLabel(date),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (net != 0.0) {
+                val color = if (net >= 0) semantic.income else semantic.expense
+                val container = if (net >= 0) semantic.incomeContainer else semantic.expenseContainer
+                val sign = if (net >= 0) "+" else "-"
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = container
+                ) {
+                    Text(
+                        text = "$sign${CurrencyFormatter.format(kotlin.math.abs(net), currency)}",
+                        style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                        fontWeight = FontWeight.SemiBold,
+                        color = color,
+                        modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun SwipeableTransactionRow(
@@ -308,24 +343,26 @@ private fun SwipeableTransactionRow(
 ) {
     val haptic = LocalHapticFeedback.current
     if (isReadOnly || isSelectionMode) {
-        Card(
-            modifier = Modifier.fillMaxWidth().combinedClickable(
+        TransactionRowSurface(
+            txn = txn,
+            categoryMap = categoryMap,
+            isSelectionMode = isSelectionMode,
+            isSelected = isSelected,
+            modifier = Modifier.combinedClickable(
                 onClick = onClick,
                 onLongClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onLongClick()
                 }
             )
-        ) {
-            TransactionRowContent(txn, categoryMap, isSelectionMode, isSelected)
-        }
+        )
     } else {
         val dismissState = rememberSwipeToDismissBoxState(
             confirmValueChange = { value ->
                 if (value == SwipeToDismissBoxValue.EndToStart) {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSwipeDelete()
-                    false // Don't dismiss yet — wait for dialog confirmation
+                    false
                 } else {
                     false
                 }
@@ -336,75 +373,150 @@ private fun SwipeableTransactionRow(
             backgroundContent = {
                 val color by animateColorAsState(
                     targetValue = if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart)
-                        MaterialTheme.colorScheme.error else Color.Transparent,
+                        MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.errorContainer,
                     label = "swipe-bg"
                 )
-                Box(
-                    modifier = Modifier.fillMaxSize().background(color).padding(horizontal = 20.dp),
-                    contentAlignment = Alignment.CenterEnd
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = color
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = AppSpacing.lg),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete",
+                            tint = MaterialTheme.colorScheme.onError
+                        )
+                    }
                 }
             },
             enableDismissFromStartToEnd = false,
             enableDismissFromEndToStart = true
         ) {
-            Card(
-                modifier = Modifier.fillMaxWidth().combinedClickable(
+            TransactionRowSurface(
+                txn = txn,
+                categoryMap = categoryMap,
+                isSelectionMode = isSelectionMode,
+                isSelected = isSelected,
+                modifier = Modifier.combinedClickable(
                     onClick = onClick,
                     onLongClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onLongClick()
                     }
                 )
-            ) {
-                TransactionRowContent(txn, categoryMap, isSelectionMode, isSelected)
-            }
+            )
         }
     }
 }
 
 @Composable
-private fun TransactionRowContent(
+private fun TransactionRowSurface(
     txn: Transaction,
     categoryMap: Map<Long, Category>,
     isSelectionMode: Boolean,
-    isSelected: Boolean
+    isSelected: Boolean,
+    modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(AppSpacing.md),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+    val semantic = LocalSemanticColors.current
+    val isIncome = txn.type == "income"
+    val accent = if (isIncome) semantic.income else semantic.expense
+    val container = if (isIncome) semantic.incomeContainer else semantic.expenseContainer
+    val rowBg = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = rowBg,
+        shadowElevation = 1.dp
     ) {
-        if (isSelectionMode) {
-            Checkbox(
-                checked = isSelected,
-                onCheckedChange = null,
-                modifier = Modifier.padding(end = AppSpacing.sm)
-            )
-        }
         Row(
-            modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(AppSpacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val category = categoryMap[txn.categoryId]
-            if (category?.color != null) {
-                val color = ColorUtils.parseHex(category.color)
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .clip(CircleShape)
-                        .background(color)
-                        .semantics { contentDescription = "Category: ${category.name}" }
+            if (isSelectionMode) {
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = null,
+                    modifier = Modifier.padding(end = AppSpacing.sm)
                 )
             }
-            Text(
-                text = txn.description ?: txn.type.replaceFirstChar { it.uppercase() },
-                style = MaterialTheme.typography.bodyMedium
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(container),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isIncome) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(AppSpacing.md))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = txn.description?.takeIf { it.isNotBlank() }
+                        ?: txn.type.replaceFirstChar { it.uppercase() },
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1
+                )
+                val category = categoryMap[txn.categoryId]
+                val time = if (txn.date.contains("T")) txn.date.substringAfter("T").take(5) else null
+                val secondary = listOfNotNull(time, category?.name).joinToString("  ·  ")
+                if (secondary.isNotEmpty()) {
+                    Text(
+                        text = secondary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+            }
+            AmountText(
+                amount = txn.amount,
+                type = txn.type,
+                currency = txn.currency,
+                style = MaterialTheme.typography.titleMedium
             )
         }
-        AmountText(amount = txn.amount, type = txn.type, currency = txn.currency)
+    }
+}
+
+@Composable
+private fun BrandFab(onClick: () -> Unit) {
+    val gradient = BrandGradients.hero()
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = Color.Transparent,
+        shadowElevation = 8.dp,
+        modifier = Modifier.size(64.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(gradient),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.Add,
+                contentDescription = "Add Transaction",
+                tint = Color.White,
+                modifier = Modifier.size(28.dp)
+            )
+        }
     }
 }
 
@@ -465,7 +577,7 @@ private fun SortBar(
 @Composable
 private fun FilterBar(
     from: String, to: String,
-    categories: List<com.insituledger.app.domain.model.Category>,
+    categories: List<Category>,
     selectedCategoryId: Long?,
     onApply: (String, String, Long?) -> Unit
 ) {
@@ -594,7 +706,20 @@ private fun FilterBar(
     }
 }
 
-
-private fun formatAmount(amount: Double): String {
-    return CurrencyFormatter.format(amount, "EUR")
+private fun friendlyDayLabel(isoDate: String): String {
+    return try {
+        val date = LocalDate.parse(isoDate, DateTimeFormatter.ISO_LOCAL_DATE)
+        val today = LocalDate.now()
+        when (date) {
+            today -> "Today"
+            today.minusDays(1) -> "Yesterday"
+            else -> {
+                val sameYear = date.year == today.year
+                val pattern = if (sameYear) "EEE, d MMM" else "d MMM yyyy"
+                date.format(DateTimeFormatter.ofPattern(pattern))
+            }
+        }
+    } catch (_: Exception) {
+        isoDate
+    }
 }
