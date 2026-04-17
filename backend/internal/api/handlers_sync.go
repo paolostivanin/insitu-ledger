@@ -51,7 +51,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// Fetch changed transactions (including soft-deleted ones so mobile can remove them)
 	txnRows, err := tx.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency,
-		        description, date, created_at, updated_at, deleted_at, sync_version
+		        description, note, date, created_at, updated_at, deleted_at, sync_version
 		 FROM transactions WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
 	)
 	if err != nil {
@@ -65,16 +65,16 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		var id, accountID, categoryID, uid, sv int64
 		var typ, currency, date, createdAt, updatedAt string
 		var amount float64
-		var description, deletedAt *string
+		var description, note, deletedAt *string
 		if err := txnRows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
-			&description, &date, &createdAt, &updatedAt, &deletedAt, &sv); err != nil {
+			&description, &note, &date, &createdAt, &updatedAt, &deletedAt, &sv); err != nil {
 			log.Printf("sync: scan transaction error: %v", err)
 			continue
 		}
 		txns = append(txns, map[string]any{
 			"id": id, "account_id": accountID, "category_id": categoryID,
 			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
-			"description": description, "date": date, "created_at": createdAt,
+			"description": description, "note": note, "date": date, "created_at": createdAt,
 			"updated_at": updatedAt, "deleted_at": deletedAt, "sync_version": sv,
 		})
 	}
@@ -162,7 +162,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// Fetch changed scheduled transactions
 	schedRows, err := tx.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency,
-		        description, rrule, next_occurrence, active, max_occurrences, occurrence_count,
+		        description, note, rrule, next_occurrence, active, max_occurrences, occurrence_count,
 		        created_at, updated_at, deleted_at, sync_version
 		 FROM scheduled_transactions WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
 	)
@@ -178,10 +178,10 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		var active int
 		var typ, currency, rrule, nextOcc, createdAt, updatedAt string
 		var amount float64
-		var description, deletedAt *string
+		var description, note, deletedAt *string
 		var maxOccurrences *int64
 		if err := schedRows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
-			&description, &rrule, &nextOcc, &active, &maxOccurrences, &occurrenceCount,
+			&description, &note, &rrule, &nextOcc, &active, &maxOccurrences, &occurrenceCount,
 			&createdAt, &updatedAt, &deletedAt, &sv); err != nil {
 			log.Printf("sync: scan scheduled transaction error: %v", err)
 			continue
@@ -189,7 +189,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		scheds = append(scheds, map[string]any{
 			"id": id, "account_id": accountID, "category_id": categoryID,
 			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
-			"description": description, "rrule": rrule, "next_occurrence": nextOcc,
+			"description": description, "note": note, "rrule": rrule, "next_occurrence": nextOcc,
 			"active": active == 1, "max_occurrences": maxOccurrences, "occurrence_count": occurrenceCount,
 			"created_at": createdAt, "updated_at": updatedAt,
 			"deleted_at": deletedAt, "sync_version": sv,

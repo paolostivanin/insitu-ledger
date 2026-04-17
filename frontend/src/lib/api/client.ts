@@ -100,6 +100,7 @@ export interface Transaction {
 	amount: number;
 	currency: string;
 	description: string | null;
+	note: string | null;
 	date: string;
 	created_at: string;
 	updated_at: string;
@@ -113,6 +114,7 @@ export interface TransactionInput {
 	amount: number;
 	currency?: string;
 	description?: string;
+	note?: string | null;
 	date: string;
 }
 
@@ -203,6 +205,7 @@ export interface ScheduledTransaction {
 	amount: number;
 	currency: string;
 	description: string | null;
+	note: string | null;
 	rrule: string;
 	next_occurrence: string;
 	active: boolean;
@@ -220,6 +223,7 @@ export interface ScheduledInput {
 	amount: number;
 	currency?: string;
 	description?: string;
+	note?: string | null;
 	rrule: string;
 	next_occurrence: string;
 	max_occurrences?: number | null;

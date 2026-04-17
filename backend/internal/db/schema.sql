@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     amount REAL NOT NULL CHECK (amount > 0),
     currency TEXT NOT NULL DEFAULT 'EUR',
     description TEXT,
+    note TEXT,
     date TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
@@ -86,6 +87,7 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     amount REAL NOT NULL CHECK (amount > 0),
     currency TEXT NOT NULL DEFAULT 'EUR',
     description TEXT,
+    note TEXT,
     rrule TEXT NOT NULL,
     next_occurrence TEXT NOT NULL,  -- YYYY-MM-DD or YYYY-MM-DDTHH:MM
     active INTEGER NOT NULL DEFAULT 1,

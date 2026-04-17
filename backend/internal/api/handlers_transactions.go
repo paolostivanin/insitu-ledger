@@ -15,6 +15,7 @@ type createTransactionRequest struct {
 	Amount      float64 `json:"amount"`
 	Currency    string  `json:"currency"`
 	Description *string `json:"description"`
+	Note        *string `json:"note"`
 	Date        string  `json:"date"`
 }
 
@@ -66,13 +67,13 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 	var query string
 	if needsCategoryJoin {
 		query = `SELECT t.id, t.account_id, t.category_id, t.user_id, t.type, t.amount, t.currency,
-		           t.description, t.date, t.created_at, t.updated_at, t.sync_version
+		           t.description, t.note, t.date, t.created_at, t.updated_at, t.sync_version
 		           FROM transactions t
 		           JOIN categories c ON t.category_id = c.id
 		           WHERE t.user_id = ? AND t.deleted_at IS NULL`
 	} else {
 		query = `SELECT t.id, t.account_id, t.category_id, t.user_id, t.type, t.amount, t.currency,
-		           t.description, t.date, t.created_at, t.updated_at, t.sync_version
+		           t.description, t.note, t.date, t.created_at, t.updated_at, t.sync_version
 		           FROM transactions t WHERE t.user_id = ? AND t.deleted_at IS NULL`
 	}
 	args := []any{targetUserID}
@@ -105,17 +106,17 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 		var id, accountID, categoryID, uid, syncVersion int64
 		var typ, currency, date, createdAt, updatedAt string
 		var amount float64
-		var description *string
+		var description, note *string
 
 		if err := rows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
-			&description, &date, &createdAt, &updatedAt, &syncVersion); err != nil {
+			&description, &note, &date, &createdAt, &updatedAt, &syncVersion); err != nil {
 			http.Error(w, "scan error", http.StatusInternalServerError)
 			return
 		}
 		txns = append(txns, map[string]any{
 			"id": id, "account_id": accountID, "category_id": categoryID,
 			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
-			"description": description, "date": date,
+			"description": description, "note": note, "date": date,
 			"created_at": createdAt, "updated_at": updatedAt, "sync_version": syncVersion,
 		})
 	}
@@ -174,6 +175,12 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	if req.Note != nil {
+		if err := validateLength("note", *req.Note, 2000); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 	if req.Currency == "" {
 		req.Currency = "EUR"
 	}
@@ -190,9 +197,9 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 	}
 	if isFuture {
 		result, err := s.DB.Exec(
-			`INSERT INTO scheduled_transactions (account_id, category_id, user_id, type, amount, currency, description, rrule, next_occurrence, max_occurrences)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			req.AccountID, req.CategoryID, targetUserID, req.Type, req.Amount, req.Currency, req.Description, "FREQ=DAILY", req.Date, 1,
+			`INSERT INTO scheduled_transactions (account_id, category_id, user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			req.AccountID, req.CategoryID, targetUserID, req.Type, req.Amount, req.Currency, req.Description, req.Note, "FREQ=DAILY", req.Date, 1,
 		)
 		if err != nil {
 			http.Error(w, "failed to create scheduled transaction", http.StatusInternalServerError)
@@ -218,9 +225,9 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 	defer tx.Rollback()
 
 	result, err := tx.Exec(
-		`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, date)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.AccountID, req.CategoryID, targetUserID, req.Type, req.Amount, req.Currency, req.Description, req.Date,
+		`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, note, date)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.AccountID, req.CategoryID, targetUserID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.Date,
 	)
 	if err != nil {
 		http.Error(w, "failed to create transaction", http.StatusInternalServerError)
@@ -286,6 +293,18 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if req.Description != nil {
+		if err := validateLength("description", *req.Description, 500); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	if req.Note != nil {
+		if err := validateLength("note", *req.Note, 2000); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -319,9 +338,9 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 
 	// Apply update
 	if _, err := tx.Exec(
-		`UPDATE transactions SET account_id=?, category_id=?, type=?, amount=?, currency=?, description=?, date=?
+		`UPDATE transactions SET account_id=?, category_id=?, type=?, amount=?, currency=?, description=?, note=?, date=?
 		 WHERE id=? AND user_id=?`,
-		req.AccountID, req.CategoryID, req.Type, req.Amount, req.Currency, req.Description, req.Date, id, targetUserID,
+		req.AccountID, req.CategoryID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.Date, id, targetUserID,
 	); err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
 		return

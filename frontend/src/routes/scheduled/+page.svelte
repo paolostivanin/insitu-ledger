@@ -24,6 +24,7 @@
 	let fAmount = $state(0);
 	let fCurrency = $state('EUR');
 	let fDescription = $state('');
+	let fNote = $state('');
 	let fFrequency = $state('monthly');
 	let fNextDate = $state(new Date().toISOString().slice(0, 10));
 	let fNextTime = $state('09:00');
@@ -87,6 +88,7 @@
 		fAmount = 0;
 		fCurrency = 'EUR';
 		fDescription = '';
+		fNote = '';
 		fFrequency = 'monthly';
 		fNextDate = new Date().toISOString().slice(0, 10);
 		fNextTime = '09:00';
@@ -103,6 +105,7 @@
 		fAmount = item.amount;
 		fCurrency = item.currency;
 		fDescription = item.description || '';
+		fNote = item.note || '';
 		// Split next_occurrence into date and time parts
 		if (item.next_occurrence.includes('T')) {
 			const [d, t] = item.next_occurrence.split('T');
@@ -130,6 +133,7 @@
 			amount: fAmount,
 			currency: fCurrency,
 			description: fDescription || undefined,
+			note: fNote || undefined,
 			rrule: frequencyMap[fFrequency],
 			next_occurrence: `${fNextDate}T${fNextTime}`,
 			max_occurrences: maxOcc && maxOcc > 0 ? maxOcc : null
@@ -244,6 +248,10 @@
 				<div class="form-group">
 					<label for="desc">Description</label>
 					<input id="desc" type="text" bind:value={fDescription} placeholder="Optional" maxlength="500" />
+				</div>
+				<div class="form-group">
+					<label for="note">Note</label>
+					<textarea id="note" bind:value={fNote} maxlength="2000" rows="3" placeholder="Optional longer memo"></textarea>
 				</div>
 				<button class="btn-primary" type="submit" disabled={submitting}>{submitting ? 'Saving...' : editId ? 'Update' : 'Create'}</button>
 			</form>

@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.8.0"
+  version: "1.9.0"
 
 servers:
   - url: /api
@@ -89,6 +89,11 @@ components:
         description:
           type: string
           nullable: true
+          maxLength: 500
+        note:
+          type: string
+          nullable: true
+          maxLength: 2000
         date:
           type: string
           format: date
@@ -120,6 +125,10 @@ components:
           default: EUR
         description:
           type: string
+          maxLength: 500
+        note:
+          type: string
+          maxLength: 2000
         date:
           type: string
           format: date
@@ -226,6 +235,11 @@ components:
         description:
           type: string
           nullable: true
+          maxLength: 500
+        note:
+          type: string
+          nullable: true
+          maxLength: 2000
         rrule:
           type: string
         next_occurrence:
@@ -260,6 +274,10 @@ components:
           type: string
         description:
           type: string
+          maxLength: 500
+        note:
+          type: string
+          maxLength: 2000
         rrule:
           type: string
         next_occurrence:

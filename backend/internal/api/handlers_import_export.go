@@ -27,7 +27,7 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 
-	query := `SELECT t.date, t.type, t.amount, t.currency, t.description,
+	query := `SELECT t.date, t.type, t.amount, t.currency, t.description, COALESCE(t.note, ''),
 		COALESCE(c.name, ''), COALESCE(a.name, '')
 		FROM transactions t
 		LEFT JOIN categories c ON c.id = t.category_id
@@ -56,18 +56,18 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Disposition", "attachment; filename=transactions.csv")
 
 	cw := csv.NewWriter(w)
-	cw.Write([]string{"date", "type", "amount", "currency", "description", "category_name", "account_name"})
+	cw.Write([]string{"date", "type", "amount", "currency", "description", "note", "category_name", "account_name"})
 
 	for rows.Next() {
-		var date, typ, currency, description, catName, acctName string
+		var date, typ, currency, description, note, catName, acctName string
 		var amount float64
-		if err := rows.Scan(&date, &typ, &amount, &currency, &description, &catName, &acctName); err != nil {
+		if err := rows.Scan(&date, &typ, &amount, &currency, &description, &note, &catName, &acctName); err != nil {
 			log.Printf("export scan error: %v", err)
 			continue
 		}
 		cw.Write([]string{
 			truncDate(date), typ, strconv.FormatFloat(amount, 'f', 2, 64),
-			currency, description, catName, acctName,
+			currency, description, note, catName, acctName,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -117,16 +117,29 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		http.Error(w, "empty or invalid CSV", http.StatusBadRequest)
 		return
 	}
-	expectedHeader := []string{"date", "type", "amount", "currency", "description", "category_name", "account_name"}
-	if len(header) != len(expectedHeader) {
-		http.Error(w, fmt.Sprintf("expected %d columns, got %d", len(expectedHeader), len(header)), http.StatusBadRequest)
-		return
-	}
-	for i, h := range expectedHeader {
-		if strings.TrimSpace(strings.ToLower(header[i])) != h {
-			http.Error(w, fmt.Sprintf("column %d: expected '%s', got '%s'", i+1, h, header[i]), http.StatusBadRequest)
-			return
+	// Support both legacy (7-col, no note) and current (8-col, with note) headers.
+	headerNew := []string{"date", "type", "amount", "currency", "description", "note", "category_name", "account_name"}
+	headerOld := []string{"date", "type", "amount", "currency", "description", "category_name", "account_name"}
+	hasNoteCol := false
+	switch len(header) {
+	case len(headerNew):
+		hasNoteCol = true
+		for i, h := range headerNew {
+			if strings.TrimSpace(strings.ToLower(header[i])) != h {
+				http.Error(w, fmt.Sprintf("column %d: expected '%s', got '%s'", i+1, h, header[i]), http.StatusBadRequest)
+				return
+			}
 		}
+	case len(headerOld):
+		for i, h := range headerOld {
+			if strings.TrimSpace(strings.ToLower(header[i])) != h {
+				http.Error(w, fmt.Sprintf("column %d: expected '%s', got '%s'", i+1, h, header[i]), http.StatusBadRequest)
+				return
+			}
+		}
+	default:
+		http.Error(w, fmt.Sprintf("expected 7 or 8 columns, got %d", len(header)), http.StatusBadRequest)
+		return
 	}
 
 	// Build lookup maps for categories and accounts
@@ -198,8 +211,12 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		if len(record) != 7 {
-			http.Error(w, fmt.Sprintf("row %d: expected 7 columns, got %d", rowNum, len(record)), http.StatusBadRequest)
+		expectedCols := 7
+		if hasNoteCol {
+			expectedCols = 8
+		}
+		if len(record) != expectedCols {
+			http.Error(w, fmt.Sprintf("row %d: expected %d columns, got %d", rowNum, expectedCols, len(record)), http.StatusBadRequest)
 			return
 		}
 
@@ -208,11 +225,23 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		amountStr := strings.TrimSpace(record[2])
 		currency := strings.TrimSpace(record[3])
 		description := strings.TrimSpace(record[4])
-		catName := strings.TrimSpace(record[5])
-		acctName := strings.TrimSpace(record[6])
+		var note string
+		var catName, acctName string
+		if hasNoteCol {
+			note = strings.TrimSpace(record[5])
+			catName = strings.TrimSpace(record[6])
+			acctName = strings.TrimSpace(record[7])
+		} else {
+			catName = strings.TrimSpace(record[5])
+			acctName = strings.TrimSpace(record[6])
+		}
 
 		if len(description) > 500 {
 			http.Error(w, fmt.Sprintf("row %d: description exceeds 500 characters", rowNum), http.StatusBadRequest)
+			return
+		}
+		if len(note) > 2000 {
+			http.Error(w, fmt.Sprintf("row %d: note exceeds 2000 characters", rowNum), http.StatusBadRequest)
 			return
 		}
 
@@ -247,11 +276,15 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		if description != "" {
 			desc = &description
 		}
+		var notePtr *string
+		if note != "" {
+			notePtr = &note
+		}
 
 		if _, err := tx.Exec(
-			`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, date)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			acctID, catID, targetUserID, typ, amount, currency, desc, date,
+			`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, note, date)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			acctID, catID, targetUserID, typ, amount, currency, desc, notePtr, date,
 		); err != nil {
 			http.Error(w, fmt.Sprintf("row %d: insert error: %v", rowNum, err), http.StatusInternalServerError)
 			return

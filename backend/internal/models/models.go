@@ -47,6 +47,7 @@ type Transaction struct {
 	Amount      float64    `json:"amount"`
 	Currency    string     `json:"currency"`
 	Description *string    `json:"description,omitempty"`
+	Note        *string    `json:"note,omitempty"`
 	Date        string     `json:"date"` // YYYY-MM-DD
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
@@ -63,6 +64,7 @@ type ScheduledTransaction struct {
 	Amount         float64    `json:"amount"`
 	Currency       string     `json:"currency"`
 	Description    *string    `json:"description,omitempty"`
+	Note           *string    `json:"note,omitempty"`
 	RRule          string     `json:"rrule"`
 	NextOccurrence string     `json:"next_occurrence"` // YYYY-MM-DD
 	Active         bool       `json:"active"`

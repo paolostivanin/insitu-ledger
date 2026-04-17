@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     amount REAL NOT NULL CHECK (amount > 0),
     currency TEXT NOT NULL DEFAULT 'EUR',
     description TEXT,
+    note TEXT,
     date TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     amount REAL NOT NULL CHECK (amount > 0),
     currency TEXT NOT NULL DEFAULT 'EUR',
     description TEXT,
+    note TEXT,
     rrule TEXT NOT NULL,
     next_occurrence DATE NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
@@ -434,6 +436,48 @@ func TestTransactionsCRUD(t *testing.T) {
 	balance = accts[0]["balance"].(float64)
 	if balance != 0.0 {
 		t.Errorf("balance after delete = %v, want 0", balance)
+	}
+}
+
+func TestTransactionNoteRoundTrip(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	// Create with a note.
+	body := fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"date":"2025-01-15","description":"Lunch","note":"Met with client at cafe"}`, acctID, catID)
+	req := authedRequest("POST", "/api/transactions", body, token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("create transaction: got %d: %s", w.Code, w.Body.String())
+	}
+
+	// List and verify note round-trips.
+	req = authedRequest("GET", "/api/transactions", "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var txns []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	if len(txns) != 1 {
+		t.Fatalf("expected 1 transaction, got %d", len(txns))
+	}
+	gotNote, _ := txns[0]["note"].(string)
+	if gotNote != "Met with client at cafe" {
+		t.Errorf("note round-trip: got %q", gotNote)
+	}
+
+	// Reject notes longer than 2000 characters.
+	tooLong := strings.Repeat("x", 2001)
+	body = fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":1,"date":"2025-01-16","note":"%s"}`, acctID, catID, tooLong)
+	req = authedRequest("POST", "/api/transactions", body, token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("oversize note: got %d, want 400", w.Code)
 	}
 }
 

@@ -35,6 +35,7 @@
 	let fCategoryId = $state(0);
 	let fAmount = $state(0);
 	let fDescription = $state('');
+	let fNote = $state('');
 	let fDate = $state(new Date().toISOString().slice(0, 10));
 	let fTime = $state(new Date().toTimeString().slice(0, 5));
 	let fCurrency = $state('EUR');
@@ -231,6 +232,7 @@
 		fType = 'expense';
 		fAmount = 0;
 		fDescription = '';
+		fNote = '';
 		fDate = new Date().toISOString().slice(0, 10);
 		fTime = new Date().toTimeString().slice(0, 5);
 		fCurrency = 'EUR';
@@ -245,6 +247,7 @@
 		fCategoryId = txn.category_id;
 		fAmount = txn.amount;
 		fDescription = txn.description || '';
+		fNote = txn.note || '';
 		if (txn.date.includes('T')) {
 			fDate = txn.date.slice(0, 10);
 			fTime = txn.date.slice(11, 16);
@@ -267,6 +270,7 @@
 			amount: fAmount,
 			currency: fCurrency,
 			description: fDescription || undefined,
+			note: fNote || undefined,
 			date: `${fDate}T${fTime}`
 		};
 		const oid = $sharedOwnerUserId || undefined;
@@ -284,6 +288,7 @@
 						amount: fAmount,
 						currency: fCurrency,
 						description: fDescription || undefined,
+						note: fNote || undefined,
 						rrule: 'FREQ=DAILY',
 						next_occurrence: `${fDate}T${fTime}`,
 						max_occurrences: 1
@@ -492,6 +497,11 @@
 							{/each}
 						</ul>
 					{/if}
+				</div>
+				<div class="form-group">
+					<label for="note">Note</label>
+					<textarea id="note" bind:value={fNote} maxlength="2000" rows="3"
+						placeholder="Optional longer memo" autocomplete="off"></textarea>
 				</div>
 				<button class="btn-primary" type="submit" disabled={submitting}>{submitting ? 'Saving...' : editId ? 'Update' : 'Create'}</button>
 			</form>
