@@ -85,7 +85,7 @@ fun ScheduledFormScreen(
                 singleLine = true, modifier = Modifier.fillMaxWidth())
 
             OutlinedTextField(value = uiState.description, onValueChange = viewModel::updateDescription,
-                label = { Text("Description") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 
             // Frequency dropdown
             var freqExpanded by remember { mutableStateOf(false) }

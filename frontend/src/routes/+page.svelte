@@ -102,7 +102,7 @@
 					<div class="table-wrap">
 						<table>
 							<thead>
-								<tr><th>Date</th><th>Time</th><th>Description</th><th>Amount</th></tr>
+								<tr><th>Date</th><th>Time</th><th>Name</th><th>Amount</th></tr>
 							</thead>
 							<tbody>
 								{#each recentTxns as txn}

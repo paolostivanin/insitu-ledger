@@ -527,7 +527,7 @@ private fun SortBar(
     sortDir: String,
     onSortChanged: (String, String) -> Unit
 ) {
-    val sortOptions = listOf("date" to "Date", "amount" to "Amount", "description" to "Description")
+    val sortOptions = listOf("date" to "Date", "amount" to "Amount", "description" to "Name")
     var expanded by remember { mutableStateOf(false) }
 
     Row(

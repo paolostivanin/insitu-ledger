@@ -246,7 +246,7 @@
 					</div>
 				</div>
 				<div class="form-group">
-					<label for="desc">Description</label>
+					<label for="desc">Name</label>
 					<input id="desc" type="text" bind:value={fDescription} placeholder="Optional" maxlength="500" />
 				</div>
 				<div class="form-group">
@@ -273,7 +273,7 @@
 						<th>Type</th>
 						<th>Category</th>
 						<th>Account</th>
-						<th>Description</th>
+						<th>Name</th>
 						<th>Amount</th>
 						<th>Progress</th>
 						<th>Status</th>
