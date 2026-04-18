@@ -1,5 +1,6 @@
 package com.insituledger.app.ui.transactions
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -8,14 +9,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Calculate
-import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
@@ -120,7 +118,7 @@ fun TransactionFormScreen(
         ) {
             Spacer(modifier = Modifier.height(AppSpacing.xs))
 
-            SectionCard(title = "Name") {
+            PlainCard {
                 ExposedDropdownMenuBox(
                     expanded = uiState.showSuggestions,
                     onExpandedChange = { if (!it) viewModel.dismissSuggestions() }
@@ -164,6 +162,41 @@ fun TransactionFormScreen(
                         }
                     }
                 }
+
+                CategoryDropdownWithAdd(
+                    categories = uiState.categories,
+                    selectedId = uiState.categoryId,
+                    type = uiState.type,
+                    onSelect = viewModel::updateCategoryId,
+                    onCreateCategory = viewModel::createCategory
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+                ) {
+                    Text(
+                        text = formattedDate,
+                        modifier = Modifier
+                            .clickable { showDatePicker = true }
+                            .padding(vertical = 6.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "·",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = timePart,
+                        modifier = Modifier
+                            .clickable { showTimePicker = true }
+                            .padding(vertical = 6.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             SectionCard(title = "Type & Amount") {
@@ -176,26 +209,6 @@ fun TransactionFormScreen(
                 )
             }
 
-            SectionCard(title = "When") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
-                ) {
-                    DateTimePill(
-                        icon = Icons.Default.CalendarMonth,
-                        label = formattedDate,
-                        onClick = { showDatePicker = true },
-                        modifier = Modifier.weight(1f)
-                    )
-                    DateTimePill(
-                        icon = Icons.Default.Schedule,
-                        label = timePart,
-                        onClick = { showTimePicker = true },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
             SectionCard(title = "Account") {
                 CompactAccountChip(
                     accountDisplays = uiState.accountDisplays,
@@ -205,16 +218,6 @@ fun TransactionFormScreen(
                         viewModel.updateCurrency(currency)
                     },
                     onCreateAccount = viewModel::createAccount
-                )
-            }
-
-            SectionCard(title = "Category") {
-                CategoryDropdownWithAdd(
-                    categories = uiState.categories,
-                    selectedId = uiState.categoryId,
-                    type = uiState.type,
-                    onSelect = viewModel::updateCategoryId,
-                    onCreateCategory = viewModel::createCategory
                 )
             }
 
@@ -329,6 +332,19 @@ private fun SectionCard(
     }
 }
 
+@Composable
+private fun PlainCard(content: @Composable ColumnScope.() -> Unit) {
+    AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(AppSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.sm),
+            content = content
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AmountInput(
@@ -374,41 +390,5 @@ private fun AmountInput(
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth()
     )
-}
-
-@Composable
-private fun DateTimePill(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier,
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        contentColor = MaterialTheme.colorScheme.onSurface
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = AppSpacing.md, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium
-            )
-        }
-    }
 }
 
