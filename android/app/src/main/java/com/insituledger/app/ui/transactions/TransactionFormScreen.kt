@@ -14,8 +14,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -48,11 +51,22 @@ fun TransactionFormScreen(
     val snackbarHostState = LocalSnackbarHostState.current
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
+    val nameFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var didAutoFocus by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.saved) {
         if (uiState.saved) {
             scope.launch { snackbarHostState.showSnackbar(if (uiState.id != null) "Transaction updated" else "Transaction created") }
             onBack()
+        }
+    }
+
+    LaunchedEffect(uiState.isLoading, uiState.id) {
+        if (!didAutoFocus && !uiState.isLoading && uiState.id == null) {
+            didAutoFocus = true
+            nameFocusRequester.requestFocus()
+            keyboardController?.show()
         }
     }
 
@@ -131,6 +145,7 @@ fun TransactionFormScreen(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .focusRequester(nameFocusRequester)
                             .menuAnchor(MenuAnchorType.PrimaryEditable)
                     )
                     if (uiState.suggestions.isNotEmpty()) {
