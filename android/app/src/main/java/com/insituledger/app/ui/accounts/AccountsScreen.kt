@@ -26,16 +26,15 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.ui.common.AppCard
+import com.insituledger.app.ui.common.CurrencyFormatter
 import com.insituledger.app.ui.common.EmptyState
 import com.insituledger.app.ui.common.LoadingIndicator
+import com.insituledger.app.ui.common.LocalCurrencySymbol
 import com.insituledger.app.ui.common.LocalSnackbarHostState
 import com.insituledger.app.ui.theme.AppSpacing
 import com.insituledger.app.ui.theme.BrandGradients
 import com.insituledger.app.ui.theme.TabularNumStyle
 import kotlinx.coroutines.launch
-import java.text.NumberFormat
-import java.util.Currency
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,6 +110,7 @@ private fun AccountRow(
     onDelete: (() -> Unit)?,
     modifier: Modifier = Modifier
 ) {
+    val symbol = LocalCurrencySymbol.current
     AppCard(modifier = modifier.fillMaxWidth(), level = 1) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(AppSpacing.md),
@@ -140,7 +140,7 @@ private fun AccountRow(
                     }
                 }
                 Text(
-                    text = formatBalance(account.balance, account.currency),
+                    text = CurrencyFormatter.formatWithSymbol(account.balance, symbol),
                     style = MaterialTheme.typography.titleMedium.merge(TabularNumStyle),
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -218,12 +218,3 @@ private fun BrandFab(onClick: () -> Unit, contentDescription: String) {
     }
 }
 
-private fun formatBalance(balance: Double, currency: String): String {
-    return try {
-        val fmt = NumberFormat.getCurrencyInstance(Locale.getDefault())
-        fmt.currency = Currency.getInstance(currency)
-        fmt.format(balance)
-    } catch (_: Exception) {
-        "$currency %.2f".format(balance)
-    }
-}

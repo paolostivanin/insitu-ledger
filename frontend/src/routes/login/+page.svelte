@@ -26,7 +26,7 @@
 			}
 
 			setToken(res.token);
-			setAuthUser(res.name, res.user_id, res.is_admin, res.force_password_change, res.totp_enabled);
+			setAuthUser(res.name, res.user_id, res.is_admin, res.force_password_change, res.totp_enabled, res.currency_symbol);
 			if (res.force_password_change) {
 				goto('/change-password');
 			} else if (!res.totp_enabled) {

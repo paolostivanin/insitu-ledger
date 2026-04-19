@@ -45,7 +45,9 @@ data class SettingsUiState(
     val autoBackupMonthlyRetention: Int = 6,
     // mTLS fields
     val mtlsEnabled: Boolean = false,
-    val mtlsAlias: String? = null
+    val mtlsAlias: String? = null,
+    // Display preferences
+    val currencySymbol: String = "€"
 )
 
 @HiltViewModel
@@ -110,6 +112,12 @@ class SettingsViewModel @Inject constructor(
             combine(prefs.mtlsEnabledFlow, prefs.mtlsAliasFlow) { enabled, alias ->
                 _uiState.update { it.copy(mtlsEnabled = enabled, mtlsAlias = alias) }
             }.collect()
+        }
+
+        viewModelScope.launch {
+            prefs.currencySymbolFlow.collect { symbol ->
+                _uiState.update { it.copy(currencySymbol = symbol) }
+            }
         }
 
         viewModelScope.launch {
@@ -279,6 +287,16 @@ class SettingsViewModel @Inject constructor(
             prefs.saveMtlsEnabled(enabled)
             if (!enabled) prefs.saveMtlsAlias(null)
             okHttpClient.connectionPool.evictAll()
+        }
+    }
+
+    fun setCurrencySymbol(symbol: String) {
+        viewModelScope.launch {
+            val trimmed = symbol.take(8)
+            prefs.saveCurrencySymbol(trimmed)
+            if (prefs.getSyncModeImmediate() == "webapp") {
+                authRepository.updateCurrencySymbol(trimmed)
+            }
         }
     }
 

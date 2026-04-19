@@ -5,6 +5,8 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { addToast } from '$lib/stores/toast';
 	import { sharedOwnerUserId, sharedOwnerPermission } from '$lib/stores/shared';
+	import { currencySymbol } from '$lib/stores/auth';
+	import { formatMoney } from '$lib/format';
 
 	let txns = $state<Transaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -210,7 +212,7 @@
 	}
 
 	function fmt(n: number): string {
-		return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+		return formatMoney(n, $currencySymbol);
 	}
 
 	function extractTime(dt: string): string {

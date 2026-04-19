@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS users (
     force_password_change INTEGER NOT NULL DEFAULT 0,
     totp_secret TEXT,
     totp_enabled INTEGER NOT NULL DEFAULT 0,
+    currency_symbol TEXT NOT NULL DEFAULT '€',
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     sync_version INTEGER NOT NULL DEFAULT 0

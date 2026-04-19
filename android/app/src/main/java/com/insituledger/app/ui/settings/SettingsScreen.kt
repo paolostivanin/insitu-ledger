@@ -113,6 +113,36 @@ fun SettingsScreen(
                 }
             }
 
+            // Currency symbol
+            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
+                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
+                    Text("Currency symbol", style = MaterialTheme.typography.titleSmall)
+                    Spacer(modifier = Modifier.height(AppSpacing.xs))
+                    Text(
+                        "Shown next to every amount across the app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
+                    var symbolDraft by remember(uiState.currencySymbol) { mutableStateOf(uiState.currencySymbol) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                        OutlinedTextField(
+                            value = symbolDraft,
+                            onValueChange = { symbolDraft = it.take(8) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            label = { Text("Symbol") }
+                        )
+                        Button(
+                            onClick = { viewModel.setCurrencySymbol(symbolDraft) },
+                            enabled = symbolDraft != uiState.currencySymbol
+                        ) {
+                            Text("Save")
+                        }
+                    }
+                }
+            }
+
             // Biometric unlock
             AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
                 Row(

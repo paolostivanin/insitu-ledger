@@ -109,6 +109,7 @@ export interface LoginResponse {
 	force_password_change: boolean;
 	totp_enabled: boolean;
 	totp_required?: boolean;
+	currency_symbol?: string;
 }
 
 export const auth = {
@@ -333,13 +334,14 @@ export interface UserProfile {
 	is_admin: boolean;
 	force_password_change: boolean;
 	totp_enabled: boolean;
+	currency_symbol: string;
 }
 
 export const me = {
 	get: () => request<UserProfile>('/auth/me'),
 	changePassword: (current_password: string, new_password: string) =>
 		request<void>('/auth/change-password', { method: 'POST', body: { current_password, new_password } }),
-	updateProfile: (data: { username?: string; email?: string; name?: string }) =>
+	updateProfile: (data: { username?: string; email?: string; name?: string; currency_symbol?: string }) =>
 		request<void>('/auth/profile', { method: 'PUT', body: data }),
 	totpSetup: () => request<{ secret: string; qr_code: string; otpauth: string }>('/auth/totp/setup', { method: 'POST' }),
 	totpVerify: (code: string) => request<void>('/auth/totp/verify', { method: 'POST', body: { code } }),

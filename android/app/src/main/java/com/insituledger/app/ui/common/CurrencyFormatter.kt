@@ -25,4 +25,11 @@ object CurrencyFormatter {
             "$currency %.2f".format(amount)
         }
     }
+
+    // Renders with the user's preferred display symbol (per-user setting).
+    // Symbol may be empty — in that case the amount is returned bare.
+    fun formatWithSymbol(amount: Double, symbol: String): String {
+        val n = "%,.2f".format(amount)
+        return if (symbol.isEmpty()) n else "$symbol $n"
+    }
 }

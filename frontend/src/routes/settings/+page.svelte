@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { shared, me, type SharedAccess, type UserProfile } from '$lib/api/client';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { setCurrencySymbol, DEFAULT_CURRENCY_SYMBOL } from '$lib/stores/auth';
 
 	let profile = $state<UserProfile | null>(null);
 	let sharedList = $state<SharedAccess[]>([]);
@@ -31,6 +32,11 @@
 	let profileError = $state('');
 	let profileSuccess = $state(false);
 
+	// Currency symbol
+	let currencyInput = $state(DEFAULT_CURRENCY_SYMBOL);
+	let currencyError = $state('');
+	let currencySaved = $state(false);
+
 	// 2FA
 	let totpQR = $state('');
 	let totpSecret = $state('');
@@ -47,9 +53,26 @@
 		profileUsername = p.username;
 		profileEmail = p.email;
 		profileName = p.name;
+		currencyInput = p.currency_symbol ?? DEFAULT_CURRENCY_SYMBOL;
+		setCurrencySymbol(currencyInput);
 		sharedList = s;
 		loading = false;
 	});
+
+	async function saveCurrency(e: Event) {
+		e.preventDefault();
+		currencyError = '';
+		currencySaved = false;
+		const sym = currencyInput.trim();
+		try {
+			await me.updateProfile({ currency_symbol: sym });
+			setCurrencySymbol(sym);
+			if (profile) profile.currency_symbol = sym;
+			currencySaved = true;
+		} catch (e: any) {
+			currencyError = e.message || 'Failed to update currency symbol';
+		}
+	}
 
 	async function loadShared() {
 		sharedList = await shared.list();
@@ -180,6 +203,25 @@
 					<div class="form-group">
 						<label for="p-name">Name</label>
 						<input id="p-name" type="text" bind:value={profileName} required />
+					</div>
+					<div class="form-group" style="display: flex; align-items: flex-end">
+						<button class="btn-primary" type="submit">Save</button>
+					</div>
+				</div>
+			</form>
+		</div>
+
+		<!-- Currency -->
+		<div class="card section">
+			<h2>Currency Symbol</h2>
+			<p class="desc">Shown in front of every amount across the app. Examples: €, $, £, ¥, kr, zł.</p>
+			{#if currencyError}<p class="error-msg">{currencyError}</p>{/if}
+			{#if currencySaved}<p class="success-msg">Saved.</p>{/if}
+			<form onsubmit={saveCurrency}>
+				<div class="form-row">
+					<div class="form-group">
+						<label for="cur-sym">Symbol</label>
+						<input id="cur-sym" type="text" maxlength="8" bind:value={currencyInput} style="max-width: 8rem" />
 					</div>
 					<div class="form-group" style="display: flex; align-items: flex-end">
 						<button class="btn-primary" type="submit">Save</button>

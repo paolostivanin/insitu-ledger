@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { isAuthenticated, accounts, transactions, reports, type Account, type Transaction, type CategoryReport, type MonthReport } from '$lib/api/client';
+	import { currencySymbol } from '$lib/stores/auth';
+	import { formatMoney } from '$lib/format';
 
 	let accts = $state<Account[]>([]);
 	let recentTxns = $state<Transaction[]>([]);
@@ -57,7 +59,7 @@
 	}
 
 	function fmt(n: number): string {
-		return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+		return formatMoney(n, $currencySymbol);
 	}
 
 	function extractTime(dt: string): string {

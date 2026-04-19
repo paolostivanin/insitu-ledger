@@ -31,6 +31,7 @@ import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AmountText
 import com.insituledger.app.ui.common.CurrencyFormatter
 import com.insituledger.app.ui.common.EmptyState
+import com.insituledger.app.ui.common.LocalCurrencySymbol
 import com.insituledger.app.ui.common.LocalSnackbarHostState
 import com.insituledger.app.ui.common.TransactionListSkeleton
 import com.insituledger.app.ui.theme.AppSpacing
@@ -287,10 +288,10 @@ fun TransactionsScreen(
 @Composable
 private fun DayHeader(date: String, txns: List<Transaction>) {
     val semantic = LocalSemanticColors.current
+    val symbol = LocalCurrencySymbol.current
     val income = txns.filter { it.type == "income" }.sumOf { it.amount }
     val expense = txns.filter { it.type == "expense" }.sumOf { it.amount }
     val net = income - expense
-    val currency = txns.firstOrNull()?.currency ?: "EUR"
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.background
@@ -317,7 +318,7 @@ private fun DayHeader(date: String, txns: List<Transaction>) {
                     color = container
                 ) {
                     Text(
-                        text = "$sign${CurrencyFormatter.format(kotlin.math.abs(net), currency)}",
+                        text = "$sign${CurrencyFormatter.formatWithSymbol(kotlin.math.abs(net), symbol)}",
                         style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                         fontWeight = FontWeight.SemiBold,
                         color = color,
@@ -487,7 +488,6 @@ private fun TransactionRowSurface(
             AmountText(
                 amount = txn.amount,
                 type = txn.type,
-                currency = txn.currency,
                 style = MaterialTheme.typography.titleMedium
             )
         }

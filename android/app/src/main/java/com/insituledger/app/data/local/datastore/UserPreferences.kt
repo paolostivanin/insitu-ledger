@@ -49,6 +49,8 @@ class UserPreferences @Inject constructor(
         val AUTO_BACKUP_MONTHLY_RETENTION = intPreferencesKey("auto_backup_monthly_retention")
         val MTLS_ENABLED = booleanPreferencesKey("mtls_enabled")
         val MTLS_ALIAS = stringPreferencesKey("mtls_alias")
+        val CURRENCY_SYMBOL = stringPreferencesKey("currency_symbol")
+        const val DEFAULT_CURRENCY_SYMBOL = "€"
 
         private const val ENCRYPTED_PREFS_FILE = "secure_prefs"
         private const val KEY_TOKEN = "token"
@@ -91,6 +93,7 @@ class UserPreferences @Inject constructor(
     val autoBackupMonthlyRetentionFlow: Flow<Int> = context.dataStore.data.map { it[AUTO_BACKUP_MONTHLY_RETENTION] ?: 6 }
     val mtlsEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[MTLS_ENABLED] ?: false }
     val mtlsAliasFlow: Flow<String?> = context.dataStore.data.map { it[MTLS_ALIAS] }
+    val currencySymbolFlow: Flow<String> = context.dataStore.data.map { it[CURRENCY_SYMBOL] ?: DEFAULT_CURRENCY_SYMBOL }
 
     suspend fun saveToken(token: String) {
         encryptedPrefs.edit().putString(KEY_TOKEN, token).apply()
@@ -188,6 +191,10 @@ class UserPreferences @Inject constructor(
         }
     }
 
+    suspend fun saveCurrencySymbol(symbol: String) {
+        context.dataStore.edit { it[CURRENCY_SYMBOL] = symbol }
+    }
+
     @Volatile
     private var _syncModeCache: String = "none"
     @Volatile
@@ -208,6 +215,8 @@ class UserPreferences @Inject constructor(
     private var _mtlsEnabledCache: Boolean = false
     @Volatile
     private var _mtlsAliasCache: String? = null
+    @Volatile
+    private var _currencySymbolCache: String = DEFAULT_CURRENCY_SYMBOL
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -222,6 +231,7 @@ class UserPreferences @Inject constructor(
         autoBackupMonthlyRetentionFlow.onEach { _autoBackupMonthlyRetentionCache = it }.launchIn(scope)
         mtlsEnabledFlow.onEach { _mtlsEnabledCache = it }.launchIn(scope)
         mtlsAliasFlow.onEach { _mtlsAliasCache = it }.launchIn(scope)
+        currencySymbolFlow.onEach { _currencySymbolCache = it }.launchIn(scope)
     }
 
     fun getSyncModeImmediate(): String = _syncModeCache
@@ -234,6 +244,7 @@ class UserPreferences @Inject constructor(
     fun getAutoBackupMonthlyRetentionImmediate(): Int = _autoBackupMonthlyRetentionCache
     fun getMtlsEnabledImmediate(): Boolean = _mtlsEnabledCache
     fun getMtlsAliasImmediate(): String? = _mtlsAliasCache
+    fun getCurrencySymbolImmediate(): String = _currencySymbolCache
 
     suspend fun clearAll() {
         encryptedPrefs.edit().remove(KEY_TOKEN).apply()

@@ -15,7 +15,8 @@ data class LoginResponse(
     @SerializedName("is_admin") val isAdmin: Boolean,
     @SerializedName("force_password_change") val forcePasswordChange: Boolean,
     @SerializedName("totp_enabled") val totpEnabled: Boolean,
-    @SerializedName("totp_required") val totpRequired: Boolean?
+    @SerializedName("totp_required") val totpRequired: Boolean?,
+    @SerializedName("currency_symbol") val currencySymbol: String? = null
 )
 
 data class UserProfileDto(
@@ -25,7 +26,8 @@ data class UserProfileDto(
     val email: String,
     @SerializedName("is_admin") val isAdmin: Boolean,
     @SerializedName("force_password_change") val forcePasswordChange: Boolean,
-    @SerializedName("totp_enabled") val totpEnabled: Boolean
+    @SerializedName("totp_enabled") val totpEnabled: Boolean,
+    @SerializedName("currency_symbol") val currencySymbol: String? = null
 )
 
 data class ChangePasswordRequest(
@@ -36,7 +38,8 @@ data class ChangePasswordRequest(
 data class UpdateProfileRequest(
     val username: String? = null,
     val email: String? = null,
-    val name: String? = null
+    val name: String? = null,
+    @SerializedName("currency_symbol") val currencySymbol: String? = null
 )
 
 data class TotpSetupResponse(

@@ -3,6 +3,8 @@
 	import { scheduled, categories, accounts, type ScheduledTransaction, type Category, type Account } from '$lib/api/client';
 	import CategoryPicker from '$lib/components/CategoryPicker.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { currencySymbol } from '$lib/stores/auth';
+	import { formatMoney } from '$lib/format';
 
 	let items = $state<ScheduledTransaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -70,7 +72,7 @@
 	}
 
 	function fmt(n: number): string {
-		return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+		return formatMoney(n, $currencySymbol);
 	}
 
 	function rruleLabel(rrule: string): string {

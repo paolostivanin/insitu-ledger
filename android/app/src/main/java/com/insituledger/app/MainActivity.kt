@@ -23,8 +23,10 @@ import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.sync.BackupManager
 import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.ui.common.LoadingIndicator
+import com.insituledger.app.ui.common.LocalCurrencySymbol
 import com.insituledger.app.ui.navigation.AppNavigation
 import com.insituledger.app.ui.theme.InSituLedgerTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import com.insituledger.app.widget.AddTransactionWidgetProvider
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -95,6 +97,7 @@ class MainActivity : AppCompatActivity() {
             val themeMode by userPreferences.themeModeFlow.collectAsStateWithLifecycle(initialValue = "system")
             val biometricEnabled by userPreferences.biometricEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
             val screenSecure by userPreferences.screenSecureFlow.collectAsStateWithLifecycle(initialValue = true)
+            val currencySymbol by userPreferences.currencySymbolFlow.collectAsStateWithLifecycle(initialValue = "€")
             val unlocked by biometricUnlocked
 
             LaunchedEffect(screenSecure, biometricEnabled, unlocked) {
@@ -112,17 +115,19 @@ class MainActivity : AppCompatActivity() {
             LaunchedEffect(Unit) { contentReady = true }
 
             InSituLedgerTheme(themeMode = themeMode) {
-                if (biometricEnabled && !unlocked) {
-                    LoadingIndicator()
-                    LaunchedEffect(Unit) {
-                        biometricRequested = true
-                        maybeShowBiometricPrompt()
+                CompositionLocalProvider(LocalCurrencySymbol provides currencySymbol) {
+                    if (biometricEnabled && !unlocked) {
+                        LoadingIndicator()
+                        LaunchedEffect(Unit) {
+                            biometricRequested = true
+                            maybeShowBiometricPrompt()
+                        }
+                    } else {
+                        AppNavigation(
+                            newTransactionEvents = newTransactionEvents,
+                            launchedFromWidget = fromWidget
+                        )
                     }
-                } else {
-                    AppNavigation(
-                        newTransactionEvents = newTransactionEvents,
-                        launchedFromWidget = fromWidget
-                    )
                 }
             }
         }

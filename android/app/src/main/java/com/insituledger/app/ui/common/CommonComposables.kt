@@ -32,14 +32,14 @@ import com.insituledger.app.ui.theme.LocalSemanticColors
 fun AmountText(
     amount: Double,
     type: String,
-    currency: String,
     modifier: Modifier = Modifier,
     style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.titleMedium
 ) {
     val semanticColors = LocalSemanticColors.current
     val color = if (type == "income") semanticColors.income else semanticColors.expense
     val prefix = if (type == "income") "+" else "-"
-    val formatted = CurrencyFormatter.format(amount, currency)
+    val symbol = LocalCurrencySymbol.current
+    val formatted = CurrencyFormatter.formatWithSymbol(amount, symbol)
     Text(
         text = "$prefix$formatted",
         color = color,

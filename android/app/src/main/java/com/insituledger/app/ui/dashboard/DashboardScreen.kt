@@ -35,6 +35,7 @@ import com.insituledger.app.ui.common.AmountText
 import com.insituledger.app.ui.common.CurrencyFormatter
 import com.insituledger.app.ui.common.DashboardSkeleton
 import com.insituledger.app.ui.common.EmptyState
+import com.insituledger.app.ui.common.LocalCurrencySymbol
 import com.insituledger.app.ui.common.SectionHeader
 import com.insituledger.app.ui.theme.AppSpacing
 import com.insituledger.app.ui.theme.BrandGradients
@@ -106,7 +107,6 @@ fun DashboardScreen(
 					HeroNetWorthCard(
 						balance = data.totalBalance,
 						monthNet = data.monthIncome - data.monthExpense,
-						currency = data.accounts.firstOrNull()?.currency ?: "EUR",
 						modifier = Modifier.animateItem()
 					)
 				}
@@ -194,10 +194,10 @@ fun DashboardScreen(
 private fun HeroNetWorthCard(
 	balance: Double,
 	monthNet: Double,
-	currency: String,
 	modifier: Modifier = Modifier
 ) {
 	val gradient = BrandGradients.hero()
+	val symbol = LocalCurrencySymbol.current
 	val netPrefix = if (monthNet >= 0) "+" else ""
 	Surface(
 		modifier = modifier
@@ -222,7 +222,7 @@ private fun HeroNetWorthCard(
 				)
 				Spacer(modifier = Modifier.height(AppSpacing.xs))
 				Text(
-					text = CurrencyFormatter.format(balance, currency),
+					text = CurrencyFormatter.formatWithSymbol(balance, symbol),
 					style = MaterialTheme.typography.displayMedium.copy(fontFeatureSettings = "tnum"),
 					color = Color.White,
 					fontWeight = FontWeight.Bold
@@ -245,7 +245,7 @@ private fun HeroNetWorthCard(
 								modifier = Modifier.size(14.dp)
 							)
 							Text(
-								text = "$netPrefix${CurrencyFormatter.format(monthNet, currency)}",
+								text = "$netPrefix${CurrencyFormatter.formatWithSymbol(monthNet, symbol)}",
 								style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
 								color = Color.White,
 								fontWeight = FontWeight.SemiBold
@@ -272,6 +272,7 @@ private fun FlowSummaryCard(
 	modifier: Modifier = Modifier
 ) {
 	val semantic = LocalSemanticColors.current
+	val symbol = LocalCurrencySymbol.current
 	val accent = if (isIncome) semantic.income else semantic.expense
 	val container = if (isIncome) semantic.incomeContainer else semantic.expenseContainer
 	val icon = if (isIncome) Icons.Default.TrendingUp else Icons.Default.TrendingDown
@@ -300,7 +301,7 @@ private fun FlowSummaryCard(
 			)
 			Spacer(modifier = Modifier.height(AppSpacing.xxs))
 			Text(
-				text = CurrencyFormatter.format(amount, "EUR"),
+				text = CurrencyFormatter.formatWithSymbol(amount, symbol),
 				style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
 				color = accent,
 				fontWeight = FontWeight.Bold
@@ -316,6 +317,7 @@ private fun AccountRow(
 	currency: String,
 	modifier: Modifier = Modifier
 ) {
+	val symbol = LocalCurrencySymbol.current
 	Surface(
 		modifier = modifier.fillMaxWidth(),
 		shape = RoundedCornerShape(16.dp),
@@ -342,7 +344,7 @@ private fun AccountRow(
 				)
 			}
 			Text(
-				text = CurrencyFormatter.format(balance, currency),
+				text = CurrencyFormatter.formatWithSymbol(balance, symbol),
 				style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
 				fontWeight = FontWeight.SemiBold,
 				color = MaterialTheme.colorScheme.onSurface
@@ -405,7 +407,6 @@ private fun TransactionRow(
 			AmountText(
 				amount = txn.amount,
 				type = txn.type,
-				currency = txn.currency,
 				style = MaterialTheme.typography.titleMedium
 			)
 		}

@@ -26,9 +26,10 @@ type changePasswordRequest struct {
 }
 
 type updateProfileRequest struct {
-	Username string `json:"username,omitempty"`
-	Email    string `json:"email,omitempty"`
-	Name     string `json:"name,omitempty"`
+	Username       string  `json:"username,omitempty"`
+	Email          string  `json:"email,omitempty"`
+	Name           string  `json:"name,omitempty"`
+	CurrencySymbol *string `json:"currency_symbol,omitempty"`
 }
 
 type authResponse struct {
@@ -39,6 +40,7 @@ type authResponse struct {
 	ForcePasswordChange bool   `json:"force_password_change"`
 	TOTPEnabled         bool   `json:"totp_enabled"`
 	TOTPRequired        bool   `json:"totp_required,omitempty"`
+	CurrencySymbol      string `json:"currency_symbol,omitempty"`
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -64,13 +66,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userID int64
-	var name, passwordHash string
+	var name, passwordHash, currencySymbol string
 	var isAdmin, forcePasswordChange, totpEnabled bool
 	var totpSecret *string
 	err := s.DB.QueryRow(
-		`SELECT id, name, password_hash, is_admin, force_password_change, totp_enabled, totp_secret
+		`SELECT id, name, password_hash, is_admin, force_password_change, totp_enabled, totp_secret, currency_symbol
 		 FROM users WHERE email = ? OR username = ?`, req.Login, req.Login,
-	).Scan(&userID, &name, &passwordHash, &isAdmin, &forcePasswordChange, &totpEnabled, &totpSecret)
+	).Scan(&userID, &name, &passwordHash, &isAdmin, &forcePasswordChange, &totpEnabled, &totpSecret, &currencySymbol)
 	if err == sql.ErrNoRows {
 		// Prevent timing-based user enumeration: run bcrypt against a dummy
 		// hash so the response time is similar to a valid-user-wrong-password path.
@@ -128,6 +130,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		IsAdmin:             isAdmin,
 		ForcePasswordChange: forcePasswordChange,
 		TOTPEnabled:         totpEnabled,
+		CurrencySymbol:      currencySymbol,
 	})
 }
 
@@ -228,17 +231,31 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.CurrencySymbol != nil {
+		// Empty string allowed (renders as no symbol). Cap at 8 chars to fit
+		// any currency glyph or short code without abuse.
+		sym := strings.TrimSpace(*req.CurrencySymbol)
+		if len([]rune(sym)) > 8 {
+			http.Error(w, "currency_symbol too long", http.StatusBadRequest)
+			return
+		}
+		if _, err := s.DB.Exec("UPDATE users SET currency_symbol = ? WHERE id = ?", sym, userID); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleGetMe returns the current user's profile.
 func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
-	var username, name, email string
+	var username, name, email, currencySymbol string
 	var isAdmin, forcePasswordChange, totpEnabled bool
 	err := s.DB.QueryRow(
-		"SELECT username, name, email, is_admin, force_password_change, totp_enabled FROM users WHERE id = ?", userID,
-	).Scan(&username, &name, &email, &isAdmin, &forcePasswordChange, &totpEnabled)
+		"SELECT username, name, email, is_admin, force_password_change, totp_enabled, currency_symbol FROM users WHERE id = ?", userID,
+	).Scan(&username, &name, &email, &isAdmin, &forcePasswordChange, &totpEnabled, &currencySymbol)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -252,6 +269,7 @@ func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
 		"is_admin":              isAdmin,
 		"force_password_change": forcePasswordChange,
 		"totp_enabled":          totpEnabled,
+		"currency_symbol":       currencySymbol,
 	})
 }
 

@@ -26,6 +26,7 @@ import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AmountText
 import com.insituledger.app.ui.common.ColorUtils
 import com.insituledger.app.ui.common.CurrencyFormatter
+import com.insituledger.app.ui.common.LocalCurrencySymbol
 import com.insituledger.app.ui.theme.LocalSemanticColors
 import com.insituledger.app.ui.common.LoadingIndicator
 import java.time.Instant
@@ -347,7 +348,7 @@ private fun DrillDownTransactionRow(txn: Transaction, modifier: Modifier = Modif
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f)
             )
-            AmountText(amount = txn.amount, type = txn.type, currency = txn.currency)
+            AmountText(amount = txn.amount, type = txn.type)
         }
     }
 }
@@ -379,6 +380,7 @@ private fun presetLabel(preset: DateRangePreset): String = when (preset) {
 }
 
 
+@Composable
 private fun formatCurrency(amount: Double): String {
-    return CurrencyFormatter.format(amount, "EUR")
+    return CurrencyFormatter.formatWithSymbol(amount, LocalCurrencySymbol.current)
 }

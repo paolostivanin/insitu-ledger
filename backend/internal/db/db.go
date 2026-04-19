@@ -49,6 +49,7 @@ func Open(dataDir string) (*sql.DB, error) {
 		"ALTER TABLE scheduled_transactions ADD COLUMN occurrence_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE transactions ADD COLUMN note TEXT",
 		"ALTER TABLE scheduled_transactions ADD COLUMN note TEXT",
+		"ALTER TABLE users ADD COLUMN currency_symbol TEXT NOT NULL DEFAULT '€'",
 	}
 	for _, m := range migrations {
 		if _, err := conn.Exec(m); err != nil {

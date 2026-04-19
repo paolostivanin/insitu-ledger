@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { accounts, type Account } from '$lib/api/client';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { currencySymbol } from '$lib/stores/auth';
+	import { formatMoney } from '$lib/format';
 
 	let accts = $state<Account[]>([]);
 	let loading = $state(true);
@@ -68,7 +70,7 @@
 	}
 
 	function fmt(n: number): string {
-		return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+		return formatMoney(n, $currencySymbol);
 	}
 
 	function totalBalance(): number {

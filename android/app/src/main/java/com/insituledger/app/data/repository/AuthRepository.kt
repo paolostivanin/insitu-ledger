@@ -37,6 +37,7 @@ class AuthRepository @Inject constructor(
                         forcePasswordChange = body.forcePasswordChange,
                         totpEnabled = body.totpEnabled
                     )
+                    body.currencySymbol?.let { prefs.saveCurrencySymbol(it) }
                     Result.success(body)
                 }
             } else {
@@ -88,6 +89,16 @@ class AuthRepository @Inject constructor(
     suspend fun updateProfile(username: String?, email: String?, name: String?): Result<Unit> {
         return try {
             val response = authApi.updateProfile(UpdateProfileRequest(username, email, name))
+            if (response.isSuccessful) Result.success(Unit)
+            else Result.failure(Exception(response.errorBody()?.string()))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateCurrencySymbol(symbol: String): Result<Unit> {
+        return try {
+            val response = authApi.updateProfile(UpdateProfileRequest(currencySymbol = symbol))
             if (response.isSuccessful) Result.success(Unit)
             else Result.failure(Exception(response.errorBody()?.string()))
         } catch (e: Exception) {

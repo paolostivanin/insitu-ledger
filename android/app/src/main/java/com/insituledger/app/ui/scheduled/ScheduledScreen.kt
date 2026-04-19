@@ -168,7 +168,7 @@ private fun ScheduledRow(
                 }
             }
             Column(horizontalAlignment = Alignment.End) {
-                AmountText(amount = item.amount, type = item.type, currency = item.currency)
+                AmountText(amount = item.amount, type = item.type)
                 if (onEdit != null || onDelete != null) {
                     Row {
                         if (onEdit != null) {
