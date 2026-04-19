@@ -1,8 +1,10 @@
 package db
 
 import (
+	"crypto/rand"
 	"database/sql"
 	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -63,7 +65,9 @@ func Open(dataDir string) (*sql.DB, error) {
 	return conn, nil
 }
 
-// seedDefaultAdmin creates the default admin user if no users exist.
+// seedDefaultAdmin creates the default admin user with a randomly generated
+// initial password if no users exist. The password is printed once to stderr;
+// force_password_change=1 ensures the operator must rotate it on first login.
 func seedDefaultAdmin(db *sql.DB) {
 	var count int
 	db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
@@ -71,7 +75,13 @@ func seedDefaultAdmin(db *sql.DB) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+	password, err := generateInitialPassword()
+	if err != nil {
+		log.Printf("seed admin: failed to generate password: %v", err)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		log.Printf("seed admin: failed to hash password: %v", err)
 		return
@@ -87,5 +97,24 @@ func seedDefaultAdmin(db *sql.DB) {
 		return
 	}
 
-	log.Println("Created default admin user (login: admin@localhost / admin)")
+	// Print to stderr so it lands in container/service logs but is not
+	// confused with the structured access log on stdout.
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "================================================================")
+	fmt.Fprintln(os.Stderr, "  InSitu Ledger — initial admin account created")
+	fmt.Fprintln(os.Stderr, "    email:    admin@localhost")
+	fmt.Fprintln(os.Stderr, "    password:", password)
+	fmt.Fprintln(os.Stderr, "  You will be required to change this password on first login.")
+	fmt.Fprintln(os.Stderr, "================================================================")
+	fmt.Fprintln(os.Stderr, "")
+}
+
+// generateInitialPassword returns a 24-character URL-safe random password
+// (~144 bits of entropy).
+func generateInitialPassword() (string, error) {
+	b := make([]byte, 18)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }

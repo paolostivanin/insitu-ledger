@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
@@ -11,6 +12,14 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+// hashToken returns the lowercase hex SHA-256 of a bearer token. We store
+// only the hash in the sessions table so that a database leak does not
+// hand attackers any active sessions.
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
 
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
@@ -44,6 +53,8 @@ func CheckPassword(password, hash string) bool {
 }
 
 // CreateToken generates a new session token for the given user and persists it.
+// The plaintext token is returned to the caller (and on to the client); only
+// its SHA-256 hash is stored in the database.
 func (s *Store) CreateToken(userID int64) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -54,7 +65,7 @@ func (s *Store) CreateToken(userID int64) (string, error) {
 
 	_, err := s.db.Exec(
 		"INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)",
-		token, userID, expiresAt.UTC().Format(time.RFC3339),
+		hashToken(token), userID, expiresAt.UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		return "", err
@@ -67,7 +78,7 @@ func (s *Store) ValidateToken(token string) (int64, error) {
 	var userID int64
 	var expiresAt string
 	err := s.db.QueryRow(
-		"SELECT user_id, expires_at FROM sessions WHERE token = ?", token,
+		"SELECT user_id, expires_at FROM sessions WHERE token = ?", hashToken(token),
 	).Scan(&userID, &expiresAt)
 	if err == sql.ErrNoRows {
 		return 0, ErrUnauthorized
@@ -96,7 +107,7 @@ func (s *Store) ValidateToken(token string) (int64, error) {
 
 // RevokeToken removes a token from the database.
 func (s *Store) RevokeToken(token string) {
-	s.db.Exec("DELETE FROM sessions WHERE token = ?", token)
+	s.db.Exec("DELETE FROM sessions WHERE token = ?", hashToken(token))
 }
 
 // RevokeAllForUser removes all session tokens for the given user.

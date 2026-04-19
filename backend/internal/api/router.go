@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/pstivanin/insitu-ledger/backend/internal/auth"
 )
@@ -23,9 +25,18 @@ func NewRouter(s *Server) http.Handler {
 	mux := http.NewServeMux()
 	authMw := AuthMiddleware(s.AuthStore)
 
-	// Health check (unauthenticated)
+	// Health check (unauthenticated). Probes the DB so this also serves as a
+	// readiness check — readiness probes that do not touch the data path are
+	// useless for catching connection-pool / disk-full / locked-DB failures.
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.DB.PingContext(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"status": "db_unavailable"})
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
