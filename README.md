@@ -150,3 +150,18 @@ ledger.example.com {
 | `-data` / `INSITU_DATA_DIR` | `./data`  | Directory for the SQLite database |
 
 Environment variables take precedence over flags.
+
+### First-boot admin
+
+When the backend starts against an empty database, it creates a single admin user (`admin@localhost`) and prints a randomly generated initial password to **stderr**, once. Capture it from your container/service logs and change it on first login.
+
+## Security & Privacy
+
+- See [`SECURITY.md`](SECURITY.md) for the threat model, supported versions, and how to report a vulnerability.
+- See [`PRIVACY.md`](PRIVACY.md) for what data the software collects (spoiler: nothing leaves your server / device).
+
+A few notes worth surfacing:
+
+- The web UI stores its bearer token in `localStorage`. This is the standard SPA tradeoff; an XSS in any frontend dependency would be able to read it. Mitigations: a strict Content-Security-Policy is set, and dependencies are kept current.
+- The Android app intentionally lets the home-screen widget add a transaction without biometric unlock. The widget never displays existing data.
+- The Android app keeps `minSdk = 34` (Android 14). This is a deliberate choice in exchange for relying on modern platform security primitives (Keystore-bound DB encryption, predictive back, edge-to-edge); it does narrow the supported device range.

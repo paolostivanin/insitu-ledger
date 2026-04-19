@@ -13,6 +13,21 @@ self.addEventListener('activate', (event) => {
 	self.clients.claim();
 });
 
+// Drop cached /api/ responses on demand (logout, 401). Static assets are kept.
+self.addEventListener('message', (event) => {
+	if (event.data?.type !== 'clear-api-cache') return;
+	event.waitUntil(
+		caches.open(CACHE_NAME).then(async (cache) => {
+			const keys = await cache.keys();
+			await Promise.all(
+				keys
+					.filter((req) => new URL(req.url).pathname.startsWith('/api/'))
+					.map((req) => cache.delete(req))
+			);
+		})
+	);
+});
+
 self.addEventListener('fetch', (event) => {
 	const url = new URL(event.request.url);
 

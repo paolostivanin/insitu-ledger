@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { authenticated, userName, isAdmin, forcePasswordChange, forceTotpSetup, initAuth, clearAuth } from '$lib/stores/auth';
-	import { auth as authApi, shared as sharedApi, clearToken, type AccessibleOwner } from '$lib/api/client';
+	import { auth as authApi, shared as sharedApi, clearToken, clearApiCache, type AccessibleOwner } from '$lib/api/client';
 	import { initTheme } from '$lib/stores/theme';
 	import { sharedOwnerUserId, setSharedOwner, clearSharedOwner } from '$lib/stores/shared';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
@@ -116,6 +116,7 @@
 		}
 		clearToken();
 		clearAuth();
+		clearApiCache();
 		goto('/login');
 	}
 </script>

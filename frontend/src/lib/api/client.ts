@@ -32,6 +32,35 @@ export function isAuthenticated(): boolean {
 	return !!getToken();
 }
 
+// Ask the service worker to drop any cached API responses. Used after logout
+// or 401 so a different user signing in on the same browser does not see
+// stale data from the previous session.
+export function clearApiCache() {
+	if (typeof navigator === 'undefined') return;
+	if (!navigator.serviceWorker?.controller) return;
+	navigator.serviceWorker.controller.postMessage({ type: 'clear-api-cache' });
+}
+
+// Map an HTTP status + optional server message to a user-friendly string.
+// We deliberately do not surface raw 5xx bodies (which may contain stack
+// traces or internal paths) to end users.
+function friendlyError(status: number, body: string): string {
+	const trimmed = body.trim();
+	const isShortPlain =
+		trimmed.length > 0 && trimmed.length < 200 && !trimmed.startsWith('<') && !trimmed.startsWith('{');
+
+	if (status === 400) return isShortPlain ? trimmed : 'The request was invalid.';
+	if (status === 401) return 'Your session has expired. Please log in again.';
+	if (status === 403) return "You don't have permission to do that.";
+	if (status === 404) return 'Not found.';
+	if (status === 409) return isShortPlain ? trimmed : 'That conflicts with existing data.';
+	if (status === 413) return 'The file is too large.';
+	if (status === 422) return isShortPlain ? trimmed : 'Some fields are invalid.';
+	if (status === 429) return 'Too many requests. Please slow down and try again.';
+	if (status >= 500) return 'The server ran into a problem. Please try again.';
+	return isShortPlain ? trimmed : `Request failed (${status}).`;
+}
+
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 	const { method = 'GET', body, params } = opts;
 
@@ -57,13 +86,14 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 
 	if (res.status === 401 && !path.startsWith('/auth/login')) {
 		clearToken();
+		clearApiCache();
 		if (typeof window !== 'undefined') window.location.href = '/login';
-		throw new ApiError(401, 'Unauthorized');
+		throw new ApiError(401, 'Your session has expired. Please log in again.');
 	}
 
 	if (!res.ok) {
 		const text = await res.text();
-		throw new ApiError(res.status, text);
+		throw new ApiError(res.status, friendlyError(res.status, text));
 	}
 
 	if (res.status === 204) return undefined as T;
