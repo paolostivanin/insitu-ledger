@@ -87,20 +87,24 @@ func BodyLimitMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// LoginRateLimiter tracks per-IP login attempt rates.
-type LoginRateLimiter struct {
+// slidingWindowLimiter is a simple per-key sliding-window counter used for
+// both login throttling (per IP) and TOTP throttling (per user). It is in
+// memory only and resets on restart, which is acceptable for rate limiting.
+type slidingWindowLimiter struct {
 	mu       sync.Mutex
+	window   time.Duration
+	max      int
 	attempts map[string][]time.Time
 	done     chan struct{}
 }
 
-// NewLoginRateLimiter creates a rate limiter for login attempts.
-func NewLoginRateLimiter() *LoginRateLimiter {
-	rl := &LoginRateLimiter{
+func newSlidingWindowLimiter(window time.Duration, max int) *slidingWindowLimiter {
+	rl := &slidingWindowLimiter{
+		window:   window,
+		max:      max,
 		attempts: make(map[string][]time.Time),
 		done:     make(chan struct{}),
 	}
-	// Periodically clean up stale entries
 	go func() {
 		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
@@ -116,47 +120,47 @@ func NewLoginRateLimiter() *LoginRateLimiter {
 	return rl
 }
 
-// Stop terminates the background cleanup goroutine.
-func (rl *LoginRateLimiter) Stop() {
+func (rl *slidingWindowLimiter) Stop() {
 	close(rl.done)
 }
 
-const (
-	loginRateWindow = 15 * time.Minute
-	loginRateMax    = 10
-)
-
-// Allow returns true if the IP is allowed to attempt a login.
-func (rl *LoginRateLimiter) Allow(ip string) bool {
+func (rl *slidingWindowLimiter) Allow(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	now := time.Now()
-	cutoff := now.Add(-loginRateWindow)
+	cutoff := now.Add(-rl.window)
 
-	// Filter to recent attempts only
-	recent := rl.attempts[ip][:0]
-	for _, t := range rl.attempts[ip] {
+	recent := rl.attempts[key][:0]
+	for _, t := range rl.attempts[key] {
 		if t.After(cutoff) {
 			recent = append(recent, t)
 		}
 	}
 
-	if len(recent) >= loginRateMax {
-		rl.attempts[ip] = recent
+	if len(recent) >= rl.max {
+		rl.attempts[key] = recent
 		return false
 	}
 
-	rl.attempts[ip] = append(recent, now)
+	rl.attempts[key] = append(recent, now)
 	return true
 }
 
-func (rl *LoginRateLimiter) cleanup() {
+// Reset drops all recorded attempts for a key — used to clear TOTP failures
+// after a successful login.
+func (rl *slidingWindowLimiter) Reset(key string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	delete(rl.attempts, key)
+}
+
+func (rl *slidingWindowLimiter) cleanup() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	cutoff := time.Now().Add(-loginRateWindow)
-	for ip, times := range rl.attempts {
+	cutoff := time.Now().Add(-rl.window)
+	for k, times := range rl.attempts {
 		recent := times[:0]
 		for _, t := range times {
 			if t.After(cutoff) {
@@ -164,9 +168,49 @@ func (rl *LoginRateLimiter) cleanup() {
 			}
 		}
 		if len(recent) == 0 {
-			delete(rl.attempts, ip)
+			delete(rl.attempts, k)
 		} else {
-			rl.attempts[ip] = recent
+			rl.attempts[k] = recent
 		}
+	}
+}
+
+// LoginRateLimiter throttles login attempts per IP (10 / 15 min).
+type LoginRateLimiter struct{ *slidingWindowLimiter }
+
+// NewLoginRateLimiter creates a rate limiter for the login endpoint.
+func NewLoginRateLimiter() *LoginRateLimiter {
+	return &LoginRateLimiter{newSlidingWindowLimiter(15*time.Minute, 10)}
+}
+
+// TOTPRateLimiter throttles TOTP attempts per user account (5 / 15 min).
+// Reset on successful login.
+type TOTPRateLimiter struct{ *slidingWindowLimiter }
+
+func NewTOTPRateLimiter() *TOTPRateLimiter {
+	return &TOTPRateLimiter{newSlidingWindowLimiter(15*time.Minute, 5)}
+}
+
+// APIRateLimiter throttles all authenticated API calls per IP. The threshold
+// is well above any human use of the UI — its purpose is to bound damage
+// from runaway scripts or scrapers, not to slow down normal use.
+type APIRateLimiter struct{ *slidingWindowLimiter }
+
+func NewAPIRateLimiter() *APIRateLimiter {
+	return &APIRateLimiter{newSlidingWindowLimiter(1*time.Minute, 300)}
+}
+
+// APIRateLimitMiddleware applies a per-IP cap to every /api/ request.
+// Health and docs endpoints are excluded so monitoring doesn't get throttled.
+func APIRateLimitMiddleware(rl *APIRateLimiter, ipFn func(*http.Request) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !rl.Allow(ipFn(r)) {
+				w.Header().Set("Retry-After", "60")
+				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
 	}
 }

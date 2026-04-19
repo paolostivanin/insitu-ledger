@@ -74,6 +74,17 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 		log.Printf("export rows iteration error: %v", err)
 	}
 	cw.Flush()
+	rows.Close()
+
+	// Data-access audit: bulk export of one user's transactions is sensitive
+	// even when performed by the owner. Record who, when, on whose data.
+	// Logged after rows.Close() so the audit INSERT doesn't contend with the
+	// open SELECT for a SQLite connection.
+	details := "self"
+	if targetUserID != userID {
+		details = fmt.Sprintf("on_behalf_of=%d", targetUserID)
+	}
+	writeAuditLog(s.DB, userID, "export_transactions", int64Ptr(targetUserID), details, s.clientIP(r))
 }
 
 const maxImportSize = 10 << 20 // 10 MB
@@ -307,6 +318,12 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+
+	importDetails := fmt.Sprintf("imported=%d", imported)
+	if targetUserID != userID {
+		importDetails = fmt.Sprintf("on_behalf_of=%d %s", targetUserID, importDetails)
+	}
+	writeAuditLog(s.DB, userID, "import_transactions", int64Ptr(targetUserID), importDetails, s.clientIP(r))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"imported": imported})

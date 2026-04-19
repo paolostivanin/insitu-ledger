@@ -77,7 +77,22 @@ func processDue(db *sql.DB) {
 	}
 
 	for _, s := range due {
-		tx, err := db.Begin()
+		// Retry up to 3 times with short backoff for transient SQLite "database
+		// is locked" errors that can happen if the API is mid-write at the
+		// moment the scheduler tick fires.
+		var tx *sql.Tx
+		var err error
+		for attempt := 0; attempt < 3; attempt++ {
+			tx, err = db.Begin()
+			if err == nil {
+				break
+			}
+			if !strings.Contains(strings.ToLower(err.Error()), "locked") &&
+				!strings.Contains(strings.ToLower(err.Error()), "busy") {
+				break
+			}
+			time.Sleep(time.Duration(50*(attempt+1)) * time.Millisecond)
+		}
 		if err != nil {
 			log.Printf("scheduler: begin tx error for scheduled %d: %v", s.id, err)
 			continue

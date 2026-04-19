@@ -15,12 +15,16 @@ type Server struct {
 	DB               *sql.DB
 	AuthStore        *auth.Store
 	LoginRateLimiter *LoginRateLimiter
+	TOTPRateLimiter  *TOTPRateLimiter
+	APIRateLimiter   *APIRateLimiter
 	TrustProxy       bool
 }
 
 // NewRouter sets up all routes and returns the root handler.
 func NewRouter(s *Server) http.Handler {
 	s.LoginRateLimiter = NewLoginRateLimiter()
+	s.TOTPRateLimiter = NewTOTPRateLimiter()
+	s.APIRateLimiter = NewAPIRateLimiter()
 
 	mux := http.NewServeMux()
 	authMw := AuthMiddleware(s.AuthStore)
@@ -121,8 +125,10 @@ func NewRouter(s *Server) http.Handler {
 	admin.HandleFunc("PUT /api/admin/backup/settings", s.handleUpdateBackupSettings)
 	protected.Handle("/api/admin/", s.AdminMiddleware(admin))
 
-	// Mount protected routes behind auth middleware
-	mux.Handle("/api/", authMw(protected))
+	// Mount protected routes behind generic API rate limit + auth middleware.
+	// Rate limit is applied before auth so that anonymous floods are bounded too.
+	apiRL := APIRateLimitMiddleware(s.APIRateLimiter, s.clientIP)
+	mux.Handle("/api/", apiRL(authMw(protected)))
 
 	// Serve frontend static files
 	mux.Handle("/", http.FileServer(http.Dir("static")))

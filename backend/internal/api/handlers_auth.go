@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"image/png"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/pquerna/otp/totp"
@@ -99,10 +100,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		// Per-user TOTP throttle. 6 digits + ±1 step window are guessable in
+		// hours of unattended brute force, so cap failed attempts.
+		totpKey := strconv.FormatInt(userID, 10)
+		if !s.TOTPRateLimiter.Allow(totpKey) {
+			http.Error(w, "too many 2FA attempts, try again later", http.StatusTooManyRequests)
+			return
+		}
 		if !totp.Validate(req.TOTPCode, *totpSecret) {
 			http.Error(w, "invalid 2FA code", http.StatusUnauthorized)
 			return
 		}
+		s.TOTPRateLimiter.Reset(totpKey)
 	}
 
 	token, err := s.AuthStore.CreateToken(userID)
