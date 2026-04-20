@@ -29,5 +29,8 @@
 	"dependencies": {
 		"@sveltejs/adapter-static": "^3.0.10",
 		"echarts": "^6.0.0"
+	},
+	"overrides": {
+		"cookie": "^0.7.0"
 	}
 }

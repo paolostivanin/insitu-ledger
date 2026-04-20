@@ -100,7 +100,7 @@
 	}
 
 	// Import
-	let importInput: HTMLInputElement;
+	let importInput: HTMLInputElement | undefined = $state();
 
 	// Pagination
 	const PAGE_SIZE = 50;
@@ -400,7 +400,7 @@
 		<div class="header-actions">
 			<button class="btn-ghost" onclick={exportCsv}>Export CSV</button>
 			{#if $sharedOwnerPermission === 'write'}
-				<button class="btn-ghost" onclick={() => importInput.click()}>Import CSV</button>
+				<button class="btn-ghost" onclick={() => importInput?.click()}>Import CSV</button>
 				<input type="file" accept=".csv" bind:this={importInput} onchange={importCsv} style="display:none" />
 				<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
 					{showForm ? 'Cancel' : '+ New Transaction'}
@@ -462,8 +462,9 @@
 						</select>
 					</div>
 					<div class="form-group">
-						<label>Category</label>
+						<label for="form-category">Category</label>
 						<CategoryPicker
+							id="form-category"
 							cats={cats}
 							type={fType}
 							value={fCategoryId}

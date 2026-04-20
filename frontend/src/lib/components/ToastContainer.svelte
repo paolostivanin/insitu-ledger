@@ -5,9 +5,9 @@
 {#if $toasts.length > 0}
 	<div class="toast-container">
 		{#each $toasts as toast (toast.id)}
-			<div class="toast toast-{toast.type}" onclick={() => dismissToast(toast.id)} onkeydown={() => {}} role="alert" tabindex="-1">
+			<div class="toast toast-{toast.type}" role="alert">
 				<span>{toast.message}</span>
-				<button class="toast-close" onclick={() => dismissToast(toast.id)}>&times;</button>
+				<button class="toast-close" onclick={() => dismissToast(toast.id)} aria-label="Dismiss">&times;</button>
 			</div>
 		{/each}
 	</div>
@@ -32,7 +32,6 @@
 		padding: 0.75rem 1rem;
 		border-radius: var(--radius);
 		font-size: 0.875rem;
-		cursor: pointer;
 		animation: slideIn 0.2s ease-out;
 		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 	}

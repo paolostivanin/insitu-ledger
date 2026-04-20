@@ -168,9 +168,10 @@
 <ToastContainer />
 
 {#if showShortcutsHelp}
-	<div class="overlay" onclick={() => showShortcutsHelp = false} onkeydown={(e) => e.key === 'Escape' && (showShortcutsHelp = false)} role="dialog" aria-modal="true" tabindex="-1">
-		<div class="shortcuts-modal card" onclick={(e) => e.stopPropagation()} onkeydown={() => {}} role="document" tabindex="-1">
-			<h2>Keyboard Shortcuts</h2>
+	<div class="overlay" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+		<button type="button" class="backdrop" onclick={() => showShortcutsHelp = false} aria-label="Close shortcuts"></button>
+		<div class="shortcuts-modal card">
+			<h2 id="shortcuts-title">Keyboard Shortcuts</h2>
 			<table class="shortcuts-table">
 				<tbody>
 					<tr><td class="key"><kbd>n</kbd></td><td>New item (on list pages)</td></tr>
@@ -277,13 +278,22 @@
 	.overlay {
 		position: fixed;
 		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		z-index: 200;
 	}
+	.backdrop {
+		position: absolute;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.6);
+		border: none;
+		padding: 0;
+		margin: 0;
+		cursor: default;
+	}
 	.shortcuts-modal {
+		position: relative;
 		max-width: 400px;
 		width: 90%;
 	}

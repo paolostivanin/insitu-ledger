@@ -34,8 +34,7 @@
 {#if open}
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<div class="overlay" role="dialog" aria-modal="true" tabindex="-1" onkeydown={handleKeydown}>
-		<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-		<div class="backdrop" onclick={handleCancel}></div>
+		<button type="button" class="backdrop" onclick={handleCancel} aria-label="Close dialog"></button>
 		<div class="dialog">
 			<h3>{title}</h3>
 			<p>{message}</p>
@@ -60,6 +59,10 @@
 		position: absolute;
 		inset: 0;
 		background: rgba(0, 0, 0, 0.5);
+		border: none;
+		padding: 0;
+		margin: 0;
+		cursor: default;
 	}
 	.dialog {
 		position: relative;

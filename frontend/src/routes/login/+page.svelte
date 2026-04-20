@@ -8,6 +8,11 @@
 	let totpCode = $state('');
 	let error = $state('');
 	let needsTOTP = $state(false);
+	let totpInput: HTMLInputElement | undefined = $state();
+
+	$effect(() => {
+		if (needsTOTP) totpInput?.focus();
+	});
 
 	async function submit(e: Event) {
 		e.preventDefault();
@@ -69,9 +74,9 @@
 						pattern="[0-9]*"
 						maxlength="6"
 						bind:value={totpCode}
+						bind:this={totpInput}
 						required
 						placeholder="6-digit code"
-						autofocus
 					/>
 					<p class="hint">Enter the code from your authenticator app</p>
 				</div>

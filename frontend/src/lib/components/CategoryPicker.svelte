@@ -7,9 +7,10 @@
 		value: number;
 		onchange: (id: number) => void;
 		onCreated: (cat: Category) => void;
+		id?: string;
 	}
 
-	let { cats, type, value, onchange, onCreated }: Props = $props();
+	let { cats, type, value, onchange, onCreated, id }: Props = $props();
 
 	let showQuickCreate = $state(false);
 	let newName = $state('');
@@ -80,7 +81,7 @@
 </script>
 
 <div class="cat-picker">
-	<select {value} onchange={handleSelect}>
+	<select {id} {value} onchange={handleSelect}>
 		{#each topLevel() as parent}
 			<option value={parent.id}>{parent.icon || ''} {parent.name}</option>
 			{#each childrenOf(parent.id) as child}

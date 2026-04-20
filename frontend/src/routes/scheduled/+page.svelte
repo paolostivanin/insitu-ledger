@@ -223,8 +223,9 @@
 						</select>
 					</div>
 					<div class="form-group">
-						<label>Category</label>
+						<label for="form-category">Category</label>
 						<CategoryPicker
+							id="form-category"
 							cats={cats}
 							type={fType}
 							value={fCategoryId}
