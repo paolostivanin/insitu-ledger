@@ -1,18 +1,15 @@
 package com.insituledger.app.data.local.datastore
 
 import android.content.Context
-import android.content.SharedPreferences
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
+import com.insituledger.app.data.local.security.SecureStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -23,7 +20,8 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 @Singleton
 class UserPreferences @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val secureStore: SecureStore,
 ) {
     companion object {
         val SERVER_URL = stringPreferencesKey("server_url")
@@ -52,28 +50,11 @@ class UserPreferences @Inject constructor(
         val CURRENCY_SYMBOL = stringPreferencesKey("currency_symbol")
         const val DEFAULT_CURRENCY_SYMBOL = "€"
         val ALLOW_CLEARTEXT_HTTP = booleanPreferencesKey("allow_cleartext_http")
-
-        private const val ENCRYPTED_PREFS_FILE = "secure_prefs"
-        private const val KEY_TOKEN = "token"
-        private const val KEY_BACKUP_PASSPHRASE = "backup_passphrase"
     }
 
-    private val encryptedPrefs: SharedPreferences by lazy {
-        val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-        EncryptedSharedPreferences.create(
-            ENCRYPTED_PREFS_FILE,
-            masterKeyAlias,
-            context,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
-
-    private val _tokenFlow = MutableStateFlow(encryptedPrefs.getString(KEY_TOKEN, null))
-    val tokenFlow: Flow<String?> = _tokenFlow
-
-    private val _backupPassphraseSetFlow = MutableStateFlow(encryptedPrefs.contains(KEY_BACKUP_PASSPHRASE))
-    val backupPassphraseSetFlow: Flow<Boolean> = _backupPassphraseSetFlow
+    val tokenFlow: Flow<String?> = secureStore.stringFlow(SecureStore.KEY_TOKEN)
+    val backupPassphraseSetFlow: Flow<Boolean> =
+        secureStore.stringFlow(SecureStore.KEY_BACKUP_PASSPHRASE).map { it != null }
 
     val serverUrlFlow: Flow<String> = context.dataStore.data.map { it[SERVER_URL] ?: "" }
     val userIdFlow: Flow<Long?> = context.dataStore.data.map { it[USER_ID] }
@@ -102,12 +83,7 @@ class UserPreferences @Inject constructor(
     val allowCleartextHttpFlow: Flow<Boolean> = context.dataStore.data.map { it[ALLOW_CLEARTEXT_HTTP] ?: false }
 
     suspend fun saveToken(token: String) {
-        // commit() over apply(): apply() is async to disk and we hand the token
-        // to the AuthInterceptor immediately via _tokenFlow. A crash between the
-        // in-memory update and disk flush would leave a working token nowhere
-        // on disk, forcing a silent re-login on next launch.
-        encryptedPrefs.edit().putString(KEY_TOKEN, token).commit()
-        _tokenFlow.value = token
+        secureStore.putString(SecureStore.KEY_TOKEN, token)
     }
 
     suspend fun saveServerUrl(url: String) {
@@ -209,17 +185,15 @@ class UserPreferences @Inject constructor(
         context.dataStore.edit { it[ALLOW_CLEARTEXT_HTTP] = allowed }
     }
 
-    fun saveBackupPassphrase(passphrase: String?) {
+    suspend fun saveBackupPassphrase(passphrase: String?) {
         if (passphrase.isNullOrEmpty()) {
-            encryptedPrefs.edit().remove(KEY_BACKUP_PASSPHRASE).commit()
-            _backupPassphraseSetFlow.value = false
+            secureStore.remove(SecureStore.KEY_BACKUP_PASSPHRASE)
         } else {
-            encryptedPrefs.edit().putString(KEY_BACKUP_PASSPHRASE, passphrase).commit()
-            _backupPassphraseSetFlow.value = true
+            secureStore.putString(SecureStore.KEY_BACKUP_PASSPHRASE, passphrase)
         }
     }
 
-    fun getBackupPassphrase(): String? = encryptedPrefs.getString(KEY_BACKUP_PASSPHRASE, null)
+    suspend fun getBackupPassphrase(): String? = secureStore.getString(SecureStore.KEY_BACKUP_PASSPHRASE)
 
     @Volatile
     private var _syncModeCache: String = "none"
@@ -277,8 +251,7 @@ class UserPreferences @Inject constructor(
     fun getAllowCleartextHttpImmediate(): Boolean = _allowCleartextHttpCache
 
     suspend fun clearAll() {
-        encryptedPrefs.edit().remove(KEY_TOKEN).commit()
-        _tokenFlow.value = null
+        secureStore.remove(SecureStore.KEY_TOKEN)
         context.dataStore.edit { prefs ->
             val mtlsEnabled = prefs[MTLS_ENABLED]
             val mtlsAlias = prefs[MTLS_ALIAS]
@@ -288,5 +261,5 @@ class UserPreferences @Inject constructor(
         }
     }
 
-    fun getTokenImmediate(): String? = encryptedPrefs.getString(KEY_TOKEN, null)
+    fun getTokenImmediate(): String? = secureStore.getStringBlocking(SecureStore.KEY_TOKEN)
 }

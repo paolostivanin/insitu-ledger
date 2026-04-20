@@ -19,7 +19,6 @@ work = "2.10.0"
 coroutines = "1.9.0"
 gson = "2.11.0"
 biometric = "1.1.0"
-security-crypto = "1.1.0-alpha06"
 documentfile = "1.0.1"
 splashscreen = "1.0.1"
 lib-recur = "0.16.0"
@@ -75,7 +74,6 @@ coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-androi
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 
 biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
-security-crypto = { module = "androidx.security:security-crypto", version.ref = "security-crypto" }
 documentfile = { module = "androidx.documentfile:documentfile", version.ref = "documentfile" }
 core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "splashscreen" }
 

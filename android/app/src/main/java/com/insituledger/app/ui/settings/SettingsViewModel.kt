@@ -234,13 +234,16 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun importData(uri: Uri) {
-        // If file is encrypted but we have no passphrase saved, surface the
-        // dialog state and wait for the user to enter one.
-        if (fileBackupRepository.isEncryptedBackup(uri) && prefs.getBackupPassphrase().isNullOrEmpty()) {
-            _uiState.update { it.copy(pendingImportUri = uri.toString(), pendingImportNeedsPassphrase = true) }
-            return
+        viewModelScope.launch {
+            val savedPassphrase = prefs.getBackupPassphrase()
+            // If file is encrypted but we have no passphrase saved, surface the
+            // dialog state and wait for the user to enter one.
+            if (fileBackupRepository.isEncryptedBackup(uri) && savedPassphrase.isNullOrEmpty()) {
+                _uiState.update { it.copy(pendingImportUri = uri.toString(), pendingImportNeedsPassphrase = true) }
+                return@launch
+            }
+            runImport(uri, savedPassphrase)
         }
-        runImport(uri, prefs.getBackupPassphrase())
     }
 
     fun importWithPassphrase(passphrase: String) {
@@ -268,7 +271,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setBackupPassphrase(passphrase: String?) {
-        prefs.saveBackupPassphrase(passphrase?.ifEmpty { null })
+        viewModelScope.launch {
+            prefs.saveBackupPassphrase(passphrase?.ifEmpty { null })
+        }
     }
 
     fun clearBackupMessage() {

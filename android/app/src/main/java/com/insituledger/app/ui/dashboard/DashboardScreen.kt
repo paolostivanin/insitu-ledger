@@ -11,10 +11,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ReceiptLong
-import androidx.compose.material.icons.filled.TrendingDown
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -168,7 +168,7 @@ fun DashboardScreen(
 								.animateItem()
 						) {
 							EmptyState(
-								icon = Icons.Default.ReceiptLong,
+								icon = Icons.AutoMirrored.Filled.ReceiptLong,
 								title = "No transactions yet",
 								message = "Tap the + button to record your first transaction.",
 								actionLabel = if (!uiState.isReadOnly) "Add Transaction" else null,
@@ -239,7 +239,7 @@ private fun HeroNetWorthCard(
 							horizontalArrangement = Arrangement.spacedBy(4.dp)
 						) {
 							Icon(
-								imageVector = if (monthNet >= 0) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+								imageVector = if (monthNet >= 0) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
 								contentDescription = null,
 								tint = Color.White,
 								modifier = Modifier.size(14.dp)
@@ -275,7 +275,7 @@ private fun FlowSummaryCard(
 	val symbol = LocalCurrencySymbol.current
 	val accent = if (isIncome) semantic.income else semantic.expense
 	val container = if (isIncome) semantic.incomeContainer else semantic.expenseContainer
-	val icon = if (isIncome) Icons.Default.TrendingUp else Icons.Default.TrendingDown
+	val icon = if (isIncome) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown
 	Surface(
 		modifier = modifier,
 		shape = RoundedCornerShape(20.dp),
@@ -382,7 +382,7 @@ private fun TransactionRow(
 				contentAlignment = Alignment.Center
 			) {
 				Icon(
-					imageVector = if (isIncome) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+					imageVector = if (isIncome) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
 					contentDescription = null,
 					tint = accent,
 					modifier = Modifier.size(20.dp)

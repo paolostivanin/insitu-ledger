@@ -93,7 +93,6 @@ dependencies {
     implementation(libs.gson)
 
     implementation(libs.biometric)
-    implementation(libs.security.crypto)
     implementation(libs.documentfile)
     implementation(libs.core.splashscreen)
 
