@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.11.1"
+  version: "1.12.0"
 
 servers:
   - url: /api
@@ -1253,3 +1253,49 @@ paths:
               schema:
                 type: string
                 format: binary
+
+  /admin/restore:
+    post:
+      tags: [Admin]
+      summary: Restore database from a backup file (admin only)
+      description: |
+        Replaces the entire SQLite database with the uploaded backup file.
+        The current database is snapshotted to `data/backups/pre-restore-<timestamp>.db`
+        before the swap. After a successful restore, the server flushes the
+        response and exits so the orchestrator (Docker, systemd, etc.) can
+        restart it cleanly. All existing sessions are invalidated; every user
+        must log in again.
+
+        Validation: the upload must (a) start with the SQLite magic header,
+        (b) pass `PRAGMA integrity_check`, (c) contain the required schema
+        tables, and (d) have at least one admin user.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: SQLite database file (max 200 MB)
+      responses:
+        "200":
+          description: Restore succeeded; server is shutting down for restart
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: restored }
+                  restarting: { type: boolean, example: true }
+                  pre_restore_snapshot:
+                    type: string
+                    description: Filename of the snapshot saved under data/backups/
+        "400":
+          description: Upload missing, not a valid SQLite file, integrity check failed, schema mismatch, or no admin users in backup
+        "401": { description: Unauthenticated }
+        "403": { description: Not an admin }
+        "413": { description: Upload exceeds 200 MB }

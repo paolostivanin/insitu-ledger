@@ -22,7 +22,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 - **Batch operations** — multi-select transactions for bulk delete or category change
 - **CSV import/export** — export filtered transactions; import with category/account name matching
 - **Audit logging** — all admin actions are logged with timestamps, IP addresses, and target users
-- **Database backup** — admin one-click download via `VACUUM INTO`, plus automatic scheduled backups (daily/weekly/monthly with retention) written to `data/backups/`
+- **Database backup & restore** — admin one-click download via `VACUUM INTO`, plus automatic scheduled backups (daily/weekly/monthly with retention) written to `data/backups/`. Admins can also restore from a previously downloaded backup: the upload is validated (SQLite header, integrity check, schema, at least one admin), the current DB is auto-snapshotted to `data/backups/pre-restore-<TIMESTAMP>.db` for one-click rollback, then atomically swapped and the server restarts so the orchestrator (Docker, systemd, OpenRC) brings it back on the restored data
 - **PWA support** — installable as a Progressive Web App with offline caching and service worker
 - **API documentation** — interactive Swagger UI at `/api/docs`
 - **Soft deletes** — all entities support soft deletion with `deleted_at` timestamps
@@ -92,7 +92,8 @@ Full interactive documentation is available at `/api/docs` (Swagger UI).
 ### Admin (admin users only)
 - **Users** — `GET`, `POST`, `PUT {id}`, `DELETE {id}`, `POST {id}/reset-password`, `POST {id}/toggle-admin`, `POST {id}/disable-totp`
 - **Audit logs** — `GET /api/admin/audit-logs`
-- **Backup** — `GET /api/admin/backup`
+- **Backup** — `GET /api/admin/backup`, `GET/PUT /api/admin/backup/settings`
+- **Restore** — `POST /api/admin/restore` (multipart upload; server restarts on success)
 
 ## Getting Started
 
@@ -359,7 +360,7 @@ When the backend starts against an empty database, it creates a single admin use
 A few notes worth surfacing:
 
 - The web UI stores its bearer token in `localStorage`. This is the standard SPA tradeoff; an XSS in any frontend dependency would be able to read it. Mitigations: a strict Content-Security-Policy is set, and dependencies are kept current.
-- The backend writes scheduled backups to `data/backups/` on the same volume as the live database. Off-host copies (PvE backup, restic, rclone, etc.) are the operator's responsibility — that's the actual disaster-recovery story.
+- The backend writes scheduled backups to `data/backups/` on the same volume as the live database. Off-host copies (PvE backup, restic, rclone, etc.) are the operator's responsibility — that's the actual disaster-recovery story. The admin Restore feature replaces the entire database in-place; expect a few seconds of downtime while the process exits and the orchestrator restarts it, and expect every user to be logged out (sessions live in the DB that just got swapped).
 - The Android app encrypts its Room database at rest with SQLCipher; the key is stored in the Android Keystore and is non-exportable. Local manual backups (via SAF) are encrypted with a user-chosen passphrase (PBKDF2 + AES-256-GCM).
 - The Android app intentionally lets the home-screen widget add a transaction without biometric unlock. The widget never displays existing data.
 - The Android app keeps `minSdk = 34` (Android 14). This is a deliberate choice in exchange for relying on modern platform security primitives (Keystore-bound DB encryption, predictive back, edge-to-edge); it does narrow the supported device range.

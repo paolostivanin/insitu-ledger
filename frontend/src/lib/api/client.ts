@@ -454,5 +454,19 @@ export const admin = {
 		a.download = `insitu-backup-${new Date().toISOString().slice(0, 10)}.db`;
 		a.click();
 		URL.revokeObjectURL(a.href);
+	},
+	restore: async (file: File) => {
+		const url = `${BASE}/admin/restore`;
+		const headers: Record<string, string> = {};
+		const token = getToken();
+		if (token) headers['Authorization'] = `Bearer ${token}`;
+		const fd = new FormData();
+		fd.append('file', file);
+		const res = await fetch(url, { method: 'POST', headers, body: fd });
+		if (!res.ok) {
+			const body = await res.text();
+			throw new ApiError(res.status, friendlyError(res.status, body));
+		}
+		return (await res.json()) as { status: string; restarting: boolean; pre_restore_snapshot: string };
 	}
 };

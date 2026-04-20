@@ -42,6 +42,18 @@ func main() {
 		DB:         conn,
 		AuthStore:  auth.NewStore(conn),
 		TrustProxy: os.Getenv("INSITU_TRUST_PROXY") == "true",
+		DataDir:    *dataDir,
+		OnRestoreComplete: func() {
+			// Signal the existing graceful-shutdown handler. The orchestrator
+			// (docker-compose `restart: unless-stopped`, systemd, etc.) restarts
+			// the process and it reopens the freshly restored DB file.
+			p, err := os.FindProcess(os.Getpid())
+			if err != nil {
+				log.Printf("restore: find self: %v", err)
+				return
+			}
+			p.Signal(syscall.SIGTERM)
+		},
 	}
 
 	router := api.NewRouter(server)

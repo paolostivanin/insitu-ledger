@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { admin, type AdminUser, type BackupSettings } from '$lib/api/client';
+	import { admin, clearToken, type AdminUser, type BackupSettings } from '$lib/api/client';
 	import { isAdmin } from '$lib/stores/auth';
+	import { addToast } from '$lib/stores/toast';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let users = $state<AdminUser[]>([]);
@@ -132,6 +133,44 @@
 		error = '';
 		try { await admin.backup(); } catch (e: any) { error = e.message; }
 	}
+
+	// Restore flow
+	let restoreFileInput: HTMLInputElement;
+	let pendingRestoreFile: File | null = null;
+	let restoring = $state(false);
+
+	function pickRestoreFile() {
+		error = '';
+		restoreFileInput?.click();
+	}
+
+	function onRestoreFileChosen(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const f = input.files?.[0];
+		input.value = '';
+		if (!f) return;
+		pendingRestoreFile = f;
+		confirmMessage = `Restore from "${f.name}"? This will REPLACE all data, log out every user, and restart the server.`;
+		confirmAction = runRestore;
+		confirmOpen = true;
+	}
+
+	async function runRestore() {
+		if (!pendingRestoreFile) return;
+		const file = pendingRestoreFile;
+		pendingRestoreFile = null;
+		restoring = true;
+		error = '';
+		try {
+			const res = await admin.restore(file);
+			addToast(`Restore successful (snapshot saved as ${res.pre_restore_snapshot}). Server is restarting…`, 'success', 6000);
+			clearToken();
+			setTimeout(() => goto('/login'), 2500);
+		} catch (e: any) {
+			restoring = false;
+			error = e.message;
+		}
+	}
 </script>
 
 <div class="page">
@@ -139,7 +178,17 @@
 		<h1>User Management</h1>
 		<div class="header-actions">
 			<a href="/admin/audit-logs" class="btn-ghost" style="padding: 0.5rem 1rem; border-radius: var(--radius); border: 1px solid var(--border); text-decoration: none; font-size: 0.875rem;">Audit Logs</a>
-			<button class="btn-ghost" onclick={downloadBackup}>Download Backup</button>
+			<button class="btn-ghost" onclick={downloadBackup} disabled={restoring}>Download Backup</button>
+			<button class="btn-ghost" onclick={pickRestoreFile} disabled={restoring}>
+				{restoring ? 'Restoring…' : 'Restore Backup'}
+			</button>
+			<input
+				bind:this={restoreFileInput}
+				type="file"
+				accept=".db,application/octet-stream"
+				style="display: none"
+				onchange={onRestoreFileChosen}
+			/>
 			<button class="btn-primary" onclick={() => showCreateForm = !showCreateForm}>
 				{showCreateForm ? 'Cancel' : '+ New User'}
 			</button>

@@ -78,8 +78,19 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 }
 
 // BodyLimitMiddleware restricts request body size to maxRequestBodySize.
+//
+// Endpoints that legitimately accept large uploads (DB restore, CSV import)
+// are exempt here and apply their own MaxBytesReader. If we left the global
+// 1 MB cap in place, those handlers would EOF before they could read past it
+// — wrapping a MaxBytesReader with a larger limit doesn't help, the inner
+// reader still hits the smaller cap first.
 func BodyLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/admin/restore", "/api/transactions/import":
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 		}

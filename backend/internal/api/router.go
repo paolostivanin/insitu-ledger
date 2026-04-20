@@ -18,6 +18,13 @@ type Server struct {
 	TOTPRateLimiter  *TOTPRateLimiter
 	APIRateLimiter   *APIRateLimiter
 	TrustProxy       bool
+	DataDir          string
+
+	// OnRestoreComplete is invoked after a successful DB restore, once the
+	// response has been written. Default in main.go sends SIGTERM to trigger
+	// the graceful-shutdown path so the orchestrator restarts the process.
+	// Tests inject a no-op (or counter) instead of killing the test binary.
+	OnRestoreComplete func()
 }
 
 // NewRouter sets up all routes and returns the root handler.
@@ -123,6 +130,7 @@ func NewRouter(s *Server) http.Handler {
 	admin.HandleFunc("GET /api/admin/backup", s.handleAdminBackup)
 	admin.HandleFunc("GET /api/admin/backup/settings", s.handleGetBackupSettings)
 	admin.HandleFunc("PUT /api/admin/backup/settings", s.handleUpdateBackupSettings)
+	admin.HandleFunc("POST /api/admin/restore", s.handleAdminRestore)
 	protected.Handle("/api/admin/", s.AdminMiddleware(admin))
 
 	// Mount protected routes behind generic API rate limit + auth middleware.
