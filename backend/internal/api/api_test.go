@@ -325,6 +325,86 @@ func TestAccountsCRUD(t *testing.T) {
 	}
 }
 
+func TestCreateAccountWithOpeningBalance(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+
+	req := authedRequest("POST", "/api/accounts", `{"name":"Savings","currency":"EUR","balance":150.5}`, token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("create: got %d: %s", w.Code, w.Body.String())
+	}
+
+	req = authedRequest("GET", "/api/accounts", "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var accts []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &accts)
+	if len(accts) != 1 || accts[0]["balance"].(float64) != 150.5 {
+		t.Fatalf("expected opening balance 150.5, got %v", accts)
+	}
+}
+
+func TestCreateAccountWithoutBalanceDefaultsToZero(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+
+	req := authedRequest("POST", "/api/accounts", `{"name":"Wallet"}`, token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("create: got %d: %s", w.Code, w.Body.String())
+	}
+
+	req = authedRequest("GET", "/api/accounts", "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var accts []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &accts)
+	if len(accts) != 1 || accts[0]["balance"].(float64) != 0.0 {
+		t.Fatalf("expected default balance 0, got %v", accts)
+	}
+}
+
+func TestUpdateAccountIgnoresBalance(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+
+	req := authedRequest("POST", "/api/accounts", `{"name":"Savings","balance":100}`, token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var created map[string]any
+	json.Unmarshal(w.Body.Bytes(), &created)
+	id := int(created["id"].(float64))
+
+	body := fmt.Sprintf(`{"name":"Renamed","currency":"EUR","balance":9999}`)
+	req = authedRequest("PUT", fmt.Sprintf("/api/accounts/%d", id), body, token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 204 {
+		t.Fatalf("update: got %d: %s", w.Code, w.Body.String())
+	}
+
+	req = authedRequest("GET", "/api/accounts", "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var accts []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &accts)
+	if accts[0]["balance"].(float64) != 100.0 {
+		t.Fatalf("balance changed via PUT — got %v, want 100", accts[0]["balance"])
+	}
+	if accts[0]["name"].(string) != "Renamed" {
+		t.Fatalf("name not updated — got %v", accts[0]["name"])
+	}
+}
+
 // ===== Category Tests =====
 
 func TestCategoriesCRUD(t *testing.T) {
@@ -360,7 +440,7 @@ func TestCategoriesCRUD(t *testing.T) {
 func createTestAccountAndCategory(t *testing.T, handler http.Handler, token string) (int, int) {
 	t.Helper()
 
-	req := authedRequest("POST", "/api/accounts", `{"name":"Test Account","currency":"EUR","balance":5000}`, token)
+	req := authedRequest("POST", "/api/accounts", `{"name":"Test Account","currency":"EUR"}`, token)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	var acct map[string]any

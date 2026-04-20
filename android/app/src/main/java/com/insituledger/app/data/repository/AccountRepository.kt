@@ -73,12 +73,16 @@ class AccountRepository @Inject constructor(
         return localId
     }
 
-    suspend fun update(id: Long, name: String, currency: String, balance: Double) {
+    suspend fun update(id: Long, name: String, currency: String) {
         val existing = accountDao.getById(id) ?: return
-        accountDao.upsert(existing.copy(name = name, currency = currency, balance = balance))
+        // Balance is intentionally not user-editable after creation: it is
+        // derived from transaction deltas (adjustBalance) and any direct
+        // overwrite would break that invariant. The backend likewise ignores
+        // `balance` on PUT.
+        accountDao.upsert(existing.copy(name = name, currency = currency))
 
         if (isSyncEnabled()) {
-            val input = AccountInput(name, currency, balance)
+            val input = AccountInput(name, currency, balance = null)
             pendingOpDao.insert(PendingOperationEntity(
                 entityType = "account",
                 operation = "UPDATE",

@@ -7,8 +7,9 @@ import (
 )
 
 type accountRequest struct {
-	Name     string `json:"name"`
-	Currency string `json:"currency"`
+	Name     string   `json:"name"`
+	Currency string   `json:"currency"`
+	Balance  *float64 `json:"balance,omitempty"`
 }
 
 func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
@@ -95,10 +96,14 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	if req.Currency == "" {
 		req.Currency = "EUR"
 	}
+	balance := 0.0
+	if req.Balance != nil {
+		balance = *req.Balance
+	}
 
 	result, err := s.DB.Exec(
-		"INSERT INTO accounts (user_id, name, currency, balance) VALUES (?, ?, ?, 0)",
-		targetUserID, req.Name, req.Currency,
+		"INSERT INTO accounts (user_id, name, currency, balance) VALUES (?, ?, ?, ?)",
+		targetUserID, req.Name, req.Currency, balance,
 	)
 	if err != nil {
 		http.Error(w, "failed to create account", http.StatusInternalServerError)

@@ -53,9 +53,21 @@ fun AccountFormScreen(
             OutlinedTextField(value = uiState.currency, onValueChange = viewModel::updateCurrency,
                 label = { Text("Currency") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 
-            OutlinedTextField(value = uiState.balance, onValueChange = viewModel::updateBalance,
-                label = { Text("Balance") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true, modifier = Modifier.fillMaxWidth())
+            if (uiState.id == null) {
+                OutlinedTextField(value = uiState.balance, onValueChange = viewModel::updateBalance,
+                    label = { Text("Opening balance") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    supportingText = { Text("Set once when the account is created.") })
+            } else {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text("Current balance", style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(uiState.balance, style = MaterialTheme.typography.titleMedium)
+                    Text("Calculated from your transactions.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
 
             uiState.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)

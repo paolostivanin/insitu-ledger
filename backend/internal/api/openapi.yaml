@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.10.0"
+  version: "1.11.0"
 
 servers:
   - url: /api
@@ -213,6 +213,10 @@ components:
           default: EUR
         balance:
           type: number
+          description: >-
+            Honored only on POST as the account's opening balance (defaults
+            to 0 when omitted). Ignored on PUT — after creation, balance is
+            derived from transactions.
 
     ScheduledTransaction:
       type: object

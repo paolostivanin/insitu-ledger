@@ -62,7 +62,7 @@ class AccountFormViewModel @Inject constructor(
             _uiState.update { it.copy(isSaving = true) }
             try {
                 if (editId != null) {
-                    accountRepository.update(editId, state.name, state.currency, balance)
+                    accountRepository.update(editId, state.name, state.currency)
                 } else {
                     accountRepository.create(state.name, state.currency, balance)
                 }
