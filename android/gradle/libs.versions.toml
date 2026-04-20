@@ -23,6 +23,7 @@ security-crypto = "1.1.0-alpha06"
 documentfile = "1.0.1"
 splashscreen = "1.0.1"
 lib-recur = "0.16.0"
+sqlcipher = "4.6.1"
 
 junit = "4.13.2"
 mockk = "1.13.13"
@@ -79,6 +80,7 @@ documentfile = { module = "androidx.documentfile:documentfile", version.ref = "d
 core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "splashscreen" }
 
 lib-recur = { module = "org.dmfs:lib-recur", version.ref = "lib-recur" }
+sqlcipher-android = { module = "net.zetetic:sqlcipher-android", version.ref = "sqlcipher" }
 
 junit = { module = "junit:junit", version.ref = "junit" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }

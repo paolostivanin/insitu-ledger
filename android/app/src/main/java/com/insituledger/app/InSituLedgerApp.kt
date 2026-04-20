@@ -16,4 +16,9 @@ class InSituLedgerApp : Application(), Configuration.Provider {
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
             .build()
+
+    override fun onCreate() {
+        System.loadLibrary("sqlcipher")
+        super.onCreate()
+    }
 }

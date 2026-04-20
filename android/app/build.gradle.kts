@@ -14,8 +14,8 @@ android {
         applicationId = "com.insituledger.app"
         minSdk = 34
         targetSdk = 35
-        versionCode = 23
-        versionName = "1.20.0"
+        versionCode = 24
+        versionName = "1.21.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -98,6 +98,8 @@ dependencies {
     implementation(libs.core.splashscreen)
 
     implementation(libs.lib.recur)
+
+    implementation(libs.sqlcipher.android)
 
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
