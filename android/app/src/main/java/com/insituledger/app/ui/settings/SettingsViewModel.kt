@@ -48,7 +48,11 @@ data class SettingsUiState(
     val mtlsAlias: String? = null,
     // Display preferences
     val currencySymbol: String = "€",
-    val allowCleartextHttp: Boolean = false
+    val allowCleartextHttp: Boolean = false,
+    // Backup encryption
+    val backupPassphraseSet: Boolean = false,
+    val pendingImportUri: String? = null,
+    val pendingImportNeedsPassphrase: Boolean = false
 )
 
 @HiltViewModel
@@ -124,6 +128,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             prefs.allowCleartextHttpFlow.collect { allowed ->
                 _uiState.update { it.copy(allowCleartextHttp = allowed) }
+            }
+        }
+
+        viewModelScope.launch {
+            prefs.backupPassphraseSetFlow.collect { set ->
+                _uiState.update { it.copy(backupPassphraseSet = set) }
             }
         }
 
@@ -208,9 +218,11 @@ class SettingsViewModel @Inject constructor(
     fun exportData(uri: Uri) {
         viewModelScope.launch {
             _uiState.update { it.copy(isExporting = true, backupMessage = null) }
-            fileBackupRepository.exportToUri(uri).fold(
+            val passphrase = prefs.getBackupPassphrase()
+            fileBackupRepository.exportToUri(uri, passphrase).fold(
                 onSuccess = { count ->
-                    _uiState.update { it.copy(isExporting = false, backupMessage = "Exported $count items") }
+                    val suffix = if (passphrase.isNullOrEmpty()) "" else " (encrypted)"
+                    _uiState.update { it.copy(isExporting = false, backupMessage = "Exported $count items$suffix") }
                 },
                 onFailure = { e ->
                     _uiState.update { it.copy(isExporting = false, backupMessage = "Export failed: ${e.message}") }
@@ -220,9 +232,29 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun importData(uri: Uri) {
+        // If file is encrypted but we have no passphrase saved, surface the
+        // dialog state and wait for the user to enter one.
+        if (fileBackupRepository.isEncryptedBackup(uri) && prefs.getBackupPassphrase().isNullOrEmpty()) {
+            _uiState.update { it.copy(pendingImportUri = uri.toString(), pendingImportNeedsPassphrase = true) }
+            return
+        }
+        runImport(uri, prefs.getBackupPassphrase())
+    }
+
+    fun importWithPassphrase(passphrase: String) {
+        val uriStr = _uiState.value.pendingImportUri ?: return
+        _uiState.update { it.copy(pendingImportUri = null, pendingImportNeedsPassphrase = false) }
+        runImport(Uri.parse(uriStr), passphrase)
+    }
+
+    fun cancelPendingImport() {
+        _uiState.update { it.copy(pendingImportUri = null, pendingImportNeedsPassphrase = false) }
+    }
+
+    private fun runImport(uri: Uri, passphrase: String?) {
         viewModelScope.launch {
             _uiState.update { it.copy(isImporting = true, backupMessage = null) }
-            fileBackupRepository.importFromUri(uri).fold(
+            fileBackupRepository.importFromUri(uri, passphrase).fold(
                 onSuccess = { count ->
                     _uiState.update { it.copy(isImporting = false, backupMessage = "Imported $count items") }
                 },
@@ -231,6 +263,10 @@ class SettingsViewModel @Inject constructor(
                 }
             )
         }
+    }
+
+    fun setBackupPassphrase(passphrase: String?) {
+        prefs.saveBackupPassphrase(passphrase?.ifEmpty { null })
     }
 
     fun clearBackupMessage() {

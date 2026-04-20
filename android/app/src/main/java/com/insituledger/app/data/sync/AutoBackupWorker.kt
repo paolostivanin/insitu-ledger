@@ -45,40 +45,52 @@ class AutoBackupWorker @AssistedInject constructor(
             return Result.retry()
         }
 
+        val passphrase = prefs.getBackupPassphrase()
+        val plaintext = json.toByteArray(Charsets.UTF_8)
+        val payload = if (!passphrase.isNullOrEmpty()) {
+            com.insituledger.app.data.repository.BackupCrypto.encrypt(plaintext, passphrase.toCharArray())
+        } else {
+            plaintext
+        }
+        // .ilbk extension when encrypted to make it visible in file pickers
+        // that the file isn't readable JSON; .json otherwise for back-compat.
+        val ext = if (passphrase.isNullOrEmpty()) "json" else "ilbk"
+        val mime = if (passphrase.isNullOrEmpty()) "application/json" else "application/octet-stream"
+
         val today = LocalDate.now()
 
         if (prefs.getAutoBackupDailyEnabledImmediate()) {
-            val fileName = "insitu-backup-daily-$today.json"
-            writeBackup(folder, fileName, json)
+            val fileName = "insitu-backup-daily-$today.$ext"
+            writeBackup(folder, fileName, payload, mime)
             cleanupOldBackups(folder, "insitu-backup-daily-", prefs.getAutoBackupDailyRetentionImmediate())
         }
 
         if (prefs.getAutoBackupWeeklyEnabledImmediate() && today.dayOfWeek == DayOfWeek.MONDAY) {
             val weekNumber = today.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-            val fileName = "insitu-backup-weekly-${today.year}-W${weekNumber.toString().padStart(2, '0')}.json"
-            writeBackup(folder, fileName, json)
+            val fileName = "insitu-backup-weekly-${today.year}-W${weekNumber.toString().padStart(2, '0')}.$ext"
+            writeBackup(folder, fileName, payload, mime)
             cleanupOldBackups(folder, "insitu-backup-weekly-", prefs.getAutoBackupWeeklyRetentionImmediate())
         }
 
         if (prefs.getAutoBackupMonthlyEnabledImmediate() && today.dayOfMonth == 1) {
-            val fileName = "insitu-backup-monthly-${today.format(DateTimeFormatter.ofPattern("yyyy-MM"))}.json"
-            writeBackup(folder, fileName, json)
+            val fileName = "insitu-backup-monthly-${today.format(DateTimeFormatter.ofPattern("yyyy-MM"))}.$ext"
+            writeBackup(folder, fileName, payload, mime)
             cleanupOldBackups(folder, "insitu-backup-monthly-", prefs.getAutoBackupMonthlyRetentionImmediate())
         }
 
         return Result.success()
     }
 
-    private fun writeBackup(folder: DocumentFile, fileName: String, json: String) {
+    private fun writeBackup(folder: DocumentFile, fileName: String, payload: ByteArray, mime: String) {
         try {
             folder.findFile(fileName)?.delete()
-            val file = folder.createFile("application/json", fileName)
+            val file = folder.createFile(mime, fileName)
             if (file == null) {
                 Log.e(TAG, "Failed to create file: $fileName")
                 return
             }
             applicationContext.contentResolver.openOutputStream(file.uri)?.use { out ->
-                out.write(json.toByteArray(Charsets.UTF_8))
+                out.write(payload)
             }
             Log.d(TAG, "Wrote backup: $fileName")
         } catch (e: Exception) {
@@ -89,7 +101,10 @@ class AutoBackupWorker @AssistedInject constructor(
     private fun cleanupOldBackups(folder: DocumentFile, prefix: String, retention: Int) {
         try {
             val backups = folder.listFiles()
-                .filter { it.name?.startsWith(prefix) == true && it.name?.endsWith(".json") == true }
+                .filter {
+                    val name = it.name ?: return@filter false
+                    name.startsWith(prefix) && (name.endsWith(".json") || name.endsWith(".ilbk"))
+                }
                 .sortedByDescending { it.name }
 
             if (backups.size > retention) {

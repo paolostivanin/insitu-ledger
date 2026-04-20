@@ -53,6 +53,23 @@ fun SettingsScreen(
         uri?.let { viewModel.importData(it) }
     }
 
+    if (uiState.pendingImportNeedsPassphrase) {
+        ImportPassphraseDialog(
+            onConfirm = { viewModel.importWithPassphrase(it) },
+            onDismiss = { viewModel.cancelPendingImport() }
+        )
+    }
+
+    var showBackupPassphraseDialog by remember { mutableStateOf(false) }
+    if (showBackupPassphraseDialog) {
+        BackupPassphraseDialog(
+            isCurrentlySet = uiState.backupPassphraseSet,
+            onSave = { viewModel.setBackupPassphrase(it); showBackupPassphraseDialog = false },
+            onClear = { viewModel.setBackupPassphrase(null); showBackupPassphraseDialog = false },
+            onDismiss = { showBackupPassphraseDialog = false }
+        )
+    }
+
     // Show snackbar for backup messages
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(uiState.backupMessage) {
@@ -189,10 +206,32 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (uiState.backupPassphraseSet) Icons.Default.Lock else Icons.Default.LockOpen,
+                            contentDescription = null,
+                            tint = if (uiState.backupPassphraseSet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(AppSpacing.xs))
+                        Text(
+                            if (uiState.backupPassphraseSet) "Backups encrypted with passphrase" else "Backups are unencrypted",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (uiState.backupPassphraseSet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { showBackupPassphraseDialog = true }) {
+                            Text(if (uiState.backupPassphraseSet) "Change" else "Set")
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
                     Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                         Button(
-                            onClick = { exportLauncher.launch("insitu-ledger-backup.json") },
+                            onClick = {
+                                val name = if (uiState.backupPassphraseSet) "insitu-ledger-backup.ilbk" else "insitu-ledger-backup.json"
+                                exportLauncher.launch(name)
+                            },
                             enabled = !uiState.isExporting && !uiState.isImporting
                         ) {
                             if (uiState.isExporting) {
@@ -204,7 +243,7 @@ fun SettingsScreen(
                             Text("Export")
                         }
                         OutlinedButton(
-                            onClick = { importLauncher.launch(arrayOf("application/json")) },
+                            onClick = { importLauncher.launch(arrayOf("*/*")) },
                             enabled = !uiState.isExporting && !uiState.isImporting
                         ) {
                             if (uiState.isImporting) {
@@ -489,6 +528,115 @@ private fun BackupTierRow(
             }
         }
     }
+}
+
+@Composable
+private fun ImportPassphraseDialog(
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var passphrase by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Encrypted backup") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                Text(
+                    "This backup is encrypted. Enter the passphrase used when it was created.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                OutlinedTextField(
+                    value = passphrase,
+                    onValueChange = { passphrase = it },
+                    label = { Text("Passphrase") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(passphrase) },
+                enabled = passphrase.isNotEmpty()
+            ) {
+                Text("Import")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun BackupPassphraseDialog(
+    isCurrentlySet: Boolean,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var passphrase by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    val mismatch = passphrase.isNotEmpty() && confirmation.isNotEmpty() && passphrase != confirmation
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isCurrentlySet) "Change backup passphrase" else "Set backup passphrase") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                Text(
+                    "Backups will be encrypted with AES-256 using this passphrase. " +
+                            "If you lose it, your backups cannot be recovered.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = passphrase,
+                    onValueChange = { passphrase = it },
+                    label = { Text("Passphrase") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = confirmation,
+                    onValueChange = { confirmation = it },
+                    label = { Text("Confirm passphrase") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    isError = mismatch
+                )
+                if (mismatch) {
+                    Text(
+                        "Passphrases do not match.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(passphrase) },
+                enabled = passphrase.isNotEmpty() && passphrase == confirmation
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            Row {
+                if (isCurrentlySet) {
+                    TextButton(
+                        onClick = onClear,
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Disable")
+                    }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    )
 }
 
 @Composable

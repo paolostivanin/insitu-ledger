@@ -55,6 +55,7 @@ class UserPreferences @Inject constructor(
 
         private const val ENCRYPTED_PREFS_FILE = "secure_prefs"
         private const val KEY_TOKEN = "token"
+        private const val KEY_BACKUP_PASSPHRASE = "backup_passphrase"
     }
 
     private val encryptedPrefs: SharedPreferences by lazy {
@@ -70,6 +71,9 @@ class UserPreferences @Inject constructor(
 
     private val _tokenFlow = MutableStateFlow(encryptedPrefs.getString(KEY_TOKEN, null))
     val tokenFlow: Flow<String?> = _tokenFlow
+
+    private val _backupPassphraseSetFlow = MutableStateFlow(encryptedPrefs.contains(KEY_BACKUP_PASSPHRASE))
+    val backupPassphraseSetFlow: Flow<Boolean> = _backupPassphraseSetFlow
 
     val serverUrlFlow: Flow<String> = context.dataStore.data.map { it[SERVER_URL] ?: "" }
     val userIdFlow: Flow<Long?> = context.dataStore.data.map { it[USER_ID] }
@@ -204,6 +208,18 @@ class UserPreferences @Inject constructor(
     suspend fun saveAllowCleartextHttp(allowed: Boolean) {
         context.dataStore.edit { it[ALLOW_CLEARTEXT_HTTP] = allowed }
     }
+
+    fun saveBackupPassphrase(passphrase: String?) {
+        if (passphrase.isNullOrEmpty()) {
+            encryptedPrefs.edit().remove(KEY_BACKUP_PASSPHRASE).commit()
+            _backupPassphraseSetFlow.value = false
+        } else {
+            encryptedPrefs.edit().putString(KEY_BACKUP_PASSPHRASE, passphrase).commit()
+            _backupPassphraseSetFlow.value = true
+        }
+    }
+
+    fun getBackupPassphrase(): String? = encryptedPrefs.getString(KEY_BACKUP_PASSPHRASE, null)
 
     @Volatile
     private var _syncModeCache: String = "none"

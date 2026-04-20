@@ -97,10 +97,16 @@ class FileBackupRepository @Inject constructor(
         }
     }
 
-    suspend fun exportToUri(uri: Uri): Result<Int> {
+    suspend fun exportToUri(uri: Uri, passphrase: String? = null): Result<Int> {
         return generateBackupJson().mapCatching { json ->
+            val plaintext = json.toByteArray(Charsets.UTF_8)
+            val payload = if (!passphrase.isNullOrEmpty()) {
+                BackupCrypto.encrypt(plaintext, passphrase.toCharArray())
+            } else {
+                plaintext
+            }
             context.contentResolver.openOutputStream(uri)?.use { out ->
-                out.write(json.toByteArray(Charsets.UTF_8))
+                out.write(payload)
             } ?: throw Exception("Could not open output stream")
             val backup = gson.fromJson(json, BackupData::class.java)
             backup.accounts.size + backup.categories.size + backup.transactions.size + backup.scheduledTransactions.size
@@ -119,11 +125,34 @@ class FileBackupRepository @Inject constructor(
         } catch (_: Exception) {}
     }
 
-    suspend fun importFromUri(uri: Uri): Result<Int> {
+    fun isEncryptedBackup(uri: Uri): Boolean {
         return try {
-            val json = context.contentResolver.openInputStream(uri)?.use { input ->
-                input.bufferedReader().readText()
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val head = ByteArray(8)
+                val n = input.read(head)
+                n >= 4 && BackupCrypto.isEncrypted(head)
+            } ?: false
+        } catch (_: Exception) { false }
+    }
+
+    suspend fun importFromUri(uri: Uri, passphrase: String? = null): Result<Int> {
+        return try {
+            val raw = context.contentResolver.openInputStream(uri)?.use { input ->
+                input.readBytes()
             } ?: return Result.failure(Exception("Could not open input stream"))
+
+            val json = if (BackupCrypto.isEncrypted(raw)) {
+                if (passphrase.isNullOrEmpty()) {
+                    return Result.failure(Exception("This backup is encrypted. Enter the passphrase to import."))
+                }
+                try {
+                    String(BackupCrypto.decrypt(raw, passphrase.toCharArray()), Charsets.UTF_8)
+                } catch (e: Exception) {
+                    return Result.failure(Exception("Wrong passphrase or corrupted backup."))
+                }
+            } else {
+                String(raw, Charsets.UTF_8)
+            }
 
             val backup = try {
                 gson.fromJson(json, BackupData::class.java)
