@@ -318,7 +318,8 @@ class SyncRepository @Inject constructor(
         id = id, accountId = accountId, categoryId = categoryId,
         userId = userId, type = type, amount = amount, currency = currency,
         description = description, note = note, rrule = rrule, nextOccurrence = nextOccurrence,
-        active = active, createdAt = createdAt, updatedAt = updatedAt,
+        active = active, maxOccurrences = maxOccurrences, occurrenceCount = occurrenceCount,
+        createdAt = createdAt, updatedAt = updatedAt,
         deletedAt = deletedAt, syncVersion = syncVersion
     )
 }
