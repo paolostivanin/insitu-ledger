@@ -11,11 +11,10 @@ import com.insituledger.app.data.local.db.dao.AccountDao
 import com.insituledger.app.data.local.db.dao.ScheduledTransactionDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
 import com.insituledger.app.data.local.db.entity.TransactionEntity
+import com.insituledger.app.util.DateTimeUtil
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 @HiltWorker
 class ScheduledTransactionWorker @AssistedInject constructor(
@@ -33,7 +32,7 @@ class ScheduledTransactionWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         val now = LocalDateTime.now()
-        val nowStr = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
+        val nowStr = DateTimeUtil.formatLocalDateTime(now)
 
         val due = scheduledDao.getDue(nowStr)
         if (due.isEmpty()) return Result.success()
@@ -85,12 +84,8 @@ class ScheduledTransactionWorker @AssistedInject constructor(
     }
 
     private fun advanceDate(current: String, rrule: String): String {
-        val hasTime = current.contains("T")
-        val dateTime = if (hasTime) {
-            LocalDateTime.parse(current, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
-        } else {
-            LocalDate.parse(current, DateTimeFormatter.ISO_LOCAL_DATE).atStartOfDay()
-        }
+        val hasTime = current.contains('T') || current.contains(' ')
+        val dateTime = DateTimeUtil.parseFlexibleLocalDateTime(current)
 
         var freq = ""
         var interval = 1
@@ -112,9 +107,9 @@ class ScheduledTransactionWorker @AssistedInject constructor(
         }
 
         return if (hasTime) {
-            next.format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
+            DateTimeUtil.formatLocalDateTime(next)
         } else {
-            next.toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
+            next.toLocalDate().toString()
         }
     }
 }

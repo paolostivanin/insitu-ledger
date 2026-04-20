@@ -21,7 +21,8 @@ class AutoBackupWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
     private val fileBackupRepository: FileBackupRepository,
-    private val prefs: UserPreferences
+    private val prefs: UserPreferences,
+    private val backupManager: BackupManager
 ) : CoroutineWorker(context, params) {
 
     companion object {
@@ -29,6 +30,16 @@ class AutoBackupWorker @AssistedInject constructor(
     }
 
     override suspend fun doWork(): Result {
+        try {
+            return runBackup()
+        } finally {
+            // Always chain the next run, even on failure, so DST drifts can't
+            // accumulate and a transient failure doesn't kill the schedule.
+            backupManager.rescheduleAfterRun()
+        }
+    }
+
+    private suspend fun runBackup(): Result {
         val folderUriStr = prefs.getAutoBackupFolderUriImmediate()
             ?: return Result.success()
 

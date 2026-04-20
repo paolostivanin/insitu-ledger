@@ -21,9 +21,52 @@ class ClientCertificateKeyManager @Inject constructor(
     private val prefs: UserPreferences
 ) : X509ExtendedKeyManager() {
 
+    // KeyChain.getPrivateKey / getCertificateChain do binder IPC into the
+    // system service and block. They run on the OkHttp connection thread
+    // during the TLS handshake, so we cache by alias and only re-fetch
+    // when the alias changes (handled by invalidate()).
+    private data class CachedMaterial(
+        val alias: String,
+        val chain: Array<X509Certificate>?,
+        val privateKey: PrivateKey?
+    )
+
+    @Volatile private var cache: CachedMaterial? = null
+    private val cacheLock = Any()
+
+    fun invalidate() {
+        synchronized(cacheLock) { cache = null }
+    }
+
     private fun activeAlias(): String? {
         if (!prefs.getMtlsEnabledImmediate()) return null
         return prefs.getMtlsAliasImmediate()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun loadFor(alias: String): CachedMaterial {
+        synchronized(cacheLock) {
+            val current = cache
+            if (current != null && current.alias == alias) return current
+
+            val chain = try {
+                KeyChain.getCertificateChain(context, alias)
+            } catch (e: KeyChainException) {
+                Log.w(TAG, "Failed to load certificate chain for alias '$alias'", e); null
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt(); null
+            }
+            val key = try {
+                KeyChain.getPrivateKey(context, alias)
+            } catch (e: KeyChainException) {
+                Log.w(TAG, "Failed to load private key for alias '$alias'", e); null
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt(); null
+            }
+
+            val fresh = CachedMaterial(alias, chain, key)
+            cache = fresh
+            return fresh
+        }
     }
 
     override fun chooseClientAlias(keyTypes: Array<out String>?, issuers: Array<out Principal>?, socket: Socket?): String? =
@@ -34,30 +77,12 @@ class ClientCertificateKeyManager @Inject constructor(
 
     override fun getCertificateChain(alias: String?): Array<X509Certificate>? {
         val key = alias ?: return null
-        return try {
-            KeyChain.getCertificateChain(context, key)
-        } catch (e: KeyChainException) {
-            Log.w(TAG, "Failed to load certificate chain for alias '$key'", e)
-            null
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            Log.w(TAG, "Interrupted loading certificate chain for alias '$key'", e)
-            null
-        }
+        return loadFor(key).chain
     }
 
     override fun getPrivateKey(alias: String?): PrivateKey? {
         val key = alias ?: return null
-        return try {
-            KeyChain.getPrivateKey(context, key)
-        } catch (e: KeyChainException) {
-            Log.w(TAG, "Failed to load private key for alias '$key'", e)
-            null
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            Log.w(TAG, "Interrupted loading private key for alias '$key'", e)
-            null
-        }
+        return loadFor(key).privateKey
     }
 
     override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?): Array<String>? =

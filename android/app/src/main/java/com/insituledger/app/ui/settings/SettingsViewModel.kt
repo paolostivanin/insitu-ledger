@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
+import com.insituledger.app.data.remote.tls.ClientCertificateKeyManager
 import com.insituledger.app.data.repository.AuthRepository
 import com.insituledger.app.data.repository.FileBackupRepository
 import com.insituledger.app.data.sync.BackupManager
@@ -63,7 +64,8 @@ class SettingsViewModel @Inject constructor(
     private val backupManager: BackupManager,
     private val prefs: UserPreferences,
     private val pendingOpDao: PendingOperationDao,
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val clientCertKeyManager: ClientCertificateKeyManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -329,6 +331,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             prefs.saveMtlsEnabled(enabled)
             if (!enabled) prefs.saveMtlsAlias(null)
+            clientCertKeyManager.invalidate()
             okHttpClient.connectionPool.evictAll()
         }
     }
@@ -353,6 +356,7 @@ class SettingsViewModel @Inject constructor(
     fun setMtlsAlias(alias: String?) {
         viewModelScope.launch {
             prefs.saveMtlsAlias(alias)
+            clientCertKeyManager.invalidate()
             okHttpClient.connectionPool.evictAll()
         }
     }
