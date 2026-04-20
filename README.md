@@ -174,22 +174,168 @@ InSitu Ledger fits comfortably in a small unprivileged LXC container on Proxmox 
 
 **Option B — Native binary** (no Docker, smallest footprint):
 
-1. On a workstation, build the binary and SPA:
-   ```
-   cd backend  && CGO_ENABLED=0 go build -o insitu-ledger ./cmd/server
-   cd frontend && npm ci && npm run build
-   ```
-2. Copy `insitu-ledger` and the `frontend/build/` contents into the LXC (e.g. `/opt/insitu-ledger/`).
-3. Create a non-root `insitu` user owning `/var/lib/insitu-ledger/`.
-4. Run via OpenRC (Alpine) or a systemd unit (Debian) with:
-   ```
-   INSITU_DATA_DIR=/var/lib/insitu-ledger
-   INSITU_ADDR=:8080
-   INSITU_TRUST_PROXY=true   # only if behind a trusted reverse proxy
-   ```
-5. Terminate TLS with Caddy/nginx on the PvE host (or in a separate LXC) and point it at the container's IP on port 8080.
+The Go binary serves the SvelteKit SPA from a `static/` directory next to its working directory. Build both on a workstation (avoids installing Node and Go inside the LXC), then ship the artefacts across.
 
-**First boot**: capture the auto-generated admin password from the container logs (`docker logs <container>` for Option A, `journalctl -u insitu-ledger` / `rc-service insitu-ledger status` for Option B). It's printed to stderr exactly once.
+**Step 1 — On your workstation: build binary + SPA**
+
+```bash
+git clone https://github.com/pstivanin/insitu-ledger.git
+cd insitu-ledger
+
+# Build the SPA (output lands in frontend/build/)
+( cd frontend && npm ci && npm run build )
+
+# Build a static Linux/amd64 binary
+( cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags="-s -w" \
+    -o insitu-ledger ./cmd/server )
+
+# Stage the layout the runtime expects (binary + ./static/) and tar it up
+rm -rf /tmp/insitu-stage && mkdir -p /tmp/insitu-stage/static
+cp backend/insitu-ledger /tmp/insitu-stage/
+cp -r frontend/build/. /tmp/insitu-stage/static/
+tar -C /tmp/insitu-stage -czf /tmp/insitu-ledger.tgz .
+
+# Ship it to the LXC (replace 10.0.0.42 with the container's IP)
+scp /tmp/insitu-ledger.tgz root@10.0.0.42:/tmp/
+```
+
+**Step 2a — Inside a Debian 12 LXC**
+
+```bash
+# Minimal runtime deps (the binary is static; only need ca-certs + tzdata)
+apt-get update
+apt-get install -y --no-install-recommends ca-certificates tzdata
+
+# Dedicated unprivileged service user with no shell and no home
+adduser --system --group --no-create-home --shell /usr/sbin/nologin insitu
+
+# Lay out files: binary + SPA in /opt/insitu-ledger, data in /var/lib/insitu-ledger
+install -d -o root   -g root   -m 0755 /opt/insitu-ledger
+install -d -o insitu -g insitu -m 0750 /var/lib/insitu-ledger
+tar -xzf /tmp/insitu-ledger.tgz -C /opt/insitu-ledger
+chmod 0755 /opt/insitu-ledger/insitu-ledger
+
+# Write the systemd unit
+cat >/etc/systemd/system/insitu-ledger.service <<'EOF'
+[Unit]
+Description=InSitu Ledger (self-hosted personal finance tracker)
+Documentation=https://github.com/pstivanin/insitu-ledger
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=insitu
+Group=insitu
+WorkingDirectory=/opt/insitu-ledger
+ExecStart=/opt/insitu-ledger/insitu-ledger
+Restart=on-failure
+RestartSec=5s
+
+Environment=INSITU_ADDR=:8080
+Environment=INSITU_DATA_DIR=/var/lib/insitu-ledger
+# Uncomment only if a trusted reverse proxy fronts this service:
+#Environment=INSITU_TRUST_PROXY=true
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/insitu-ledger
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now insitu-ledger
+
+# Grab the one-shot admin password printed on first boot
+journalctl -u insitu-ledger --no-pager | grep -i "initial admin password"
+```
+
+**Step 2b — Inside an Alpine 3.21 LXC**
+
+```bash
+# Runtime deps (binary is static; tzdata for local-time scheduling)
+apk add --no-cache ca-certificates tzdata
+
+# Dedicated unprivileged service user
+addgroup -S insitu
+adduser -S -D -H -G insitu -s /sbin/nologin insitu
+
+# Lay out files: binary + SPA in /opt/insitu-ledger, data in /var/lib/insitu-ledger
+install -d -o root   -g root   -m 0755 /opt/insitu-ledger
+install -d -o insitu -g insitu -m 0750 /var/lib/insitu-ledger
+tar -xzf /tmp/insitu-ledger.tgz -C /opt/insitu-ledger
+chmod 0755 /opt/insitu-ledger/insitu-ledger
+
+# Write the OpenRC init script
+cat >/etc/init.d/insitu-ledger <<'EOF'
+#!/sbin/openrc-run
+
+name="insitu-ledger"
+description="InSitu Ledger (self-hosted personal finance tracker)"
+directory="/opt/insitu-ledger"
+command="/opt/insitu-ledger/insitu-ledger"
+command_user="insitu:insitu"
+command_background="yes"
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/${RC_SVCNAME}.log"
+error_log="/var/log/${RC_SVCNAME}.log"
+
+export INSITU_ADDR=":8080"
+export INSITU_DATA_DIR="/var/lib/insitu-ledger"
+# export INSITU_TRUST_PROXY="true"   # only if behind a trusted reverse proxy
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    checkpath -f -m 0640 -o insitu:insitu "$output_log"
+}
+EOF
+chmod +x /etc/init.d/insitu-ledger
+
+rc-update add insitu-ledger default
+rc-service insitu-ledger start
+
+# Grab the one-shot admin password printed on first boot
+grep -i "initial admin password" /var/log/insitu-ledger.log
+```
+
+**Step 3 — Terminate TLS upstream**
+
+Point Caddy / nginx (on the PvE host or in a separate LXC) at `http://<lxc-ip>:8080`. Set `INSITU_TRUST_PROXY=true` only after the proxy is in place and stripping inbound `X-Forwarded-For`.
+
+**Upgrades**: rebuild + retar on your workstation, `scp` to `/tmp/`, then:
+
+```bash
+# Wipe old SPA assets so removed files don't linger
+rm -rf /opt/insitu-ledger/static
+tar -xzf /tmp/insitu-ledger.tgz -C /opt/insitu-ledger
+chmod 0755 /opt/insitu-ledger/insitu-ledger
+
+systemctl restart insitu-ledger    # Debian
+# rc-service insitu-ledger restart # Alpine
+```
+
+The SQLite schema migrates automatically on startup; back up `/var/lib/insitu-ledger/` (or take a PvE container snapshot) before upgrading.
 
 ### Configuration
 
