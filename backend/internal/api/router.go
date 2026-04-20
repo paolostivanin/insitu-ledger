@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path"
+	"path/filepath"
 	"time"
 
 	"github.com/pstivanin/insitu-ledger/backend/internal/auth"
@@ -138,9 +141,28 @@ func NewRouter(s *Server) http.Handler {
 	apiRL := APIRateLimitMiddleware(s.APIRateLimiter, s.clientIP)
 	mux.Handle("/api/", apiRL(authMw(protected)))
 
-	// Serve frontend static files
-	mux.Handle("/", http.FileServer(http.Dir("static")))
+	// Serve frontend static files with SPA fallback so client-side routes
+	// (e.g. /login, /transactions) survive a full page load or refresh.
+	mux.Handle("/", spaHandler("static"))
 
 	// Wrap entire mux with logging, body limit, and security headers
 	return LoggingMiddleware(SecurityHeadersMiddleware(BodyLimitMiddleware(mux)))
+}
+
+// spaHandler serves files from dir; for any path that does not resolve to an
+// existing file it falls back to dir/index.html so the SvelteKit SPA can
+// handle the route client-side. /api/* never reaches here because the more
+// specific mux pattern wins under Go 1.22+ routing.
+func spaHandler(dir string) http.Handler {
+	fs := http.FileServer(http.Dir(dir))
+	indexPath := filepath.Join(dir, "index.html")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clean := path.Clean(r.URL.Path)
+		full := filepath.Join(dir, filepath.FromSlash(clean))
+		if info, err := os.Stat(full); err == nil && !info.IsDir() {
+			fs.ServeHTTP(w, r)
+			return
+		}
+		http.ServeFile(w, r, indexPath)
+	})
 }

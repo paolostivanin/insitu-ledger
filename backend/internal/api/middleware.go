@@ -68,7 +68,11 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'")
+		// SvelteKit's adapter-static emits inline <script> tags to bootstrap the SPA
+		// (mount, theme init, service-worker registration) whose hashes change per
+		// build. Allowing 'unsafe-inline' here is the pragmatic trade-off; the SPA
+		// never renders untrusted HTML, so injection surface is limited.
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'")
 		// HSTS: instruct browsers to enforce HTTPS for 1 year. Has no effect
 		// over plain HTTP (the spec ignores it), so safe to always send. The
 		// reverse proxy may also set this; browsers honor the strictest.
