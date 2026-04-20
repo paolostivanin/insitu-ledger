@@ -44,7 +44,7 @@ InSitu Ledger is a **self-hosted** personal-finance app. The threat model assume
 - XSS attempts: a Content-Security-Policy is set; user input is rendered with Svelte's default escaping
 - SQL injection: all queries are parameterized
 - Compromise of the on-disk database leaking active sessions (bearer tokens are stored as SHA-256 hashes, not plaintext)
-- Local data theft on Android: the Room database is encrypted with a Keystore-bound key
+- Local data theft on Android: the Room database is encrypted at rest with SQLCipher (AES-256); the key is wrapped by the Android Keystore. Sync credentials and backup passphrase use the same Keystore-backed encryption
 
 ### What is **not** in scope
 
@@ -52,3 +52,5 @@ InSitu Ledger is a **self-hosted** personal-finance app. The threat model assume
 - Attacks that require the device unlock code (Android: anyone holding an unlocked device can use the home-screen widget to add a transaction; this is intentional for usability)
 - Attacks that require already-compromised browser extensions (the bearer token lives in `localStorage` for the SPA; this is the standard SPA tradeoff and is documented in `README.md`)
 - Multi-tenant operator-vs-user separation; the app assumes a single trusted operator
+- Backend at-rest encryption: the SQLite file is plaintext; operators are expected to host it on encrypted storage (LUKS, dm-crypt, cloud-provider managed encryption)
+- Compromise of an unlocked or rooted Android device: the Keystore-wrapped DB key can be retrieved by code running as the app or as root, so root-level local compromise is out of scope

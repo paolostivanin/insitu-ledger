@@ -6,7 +6,7 @@ InSitu Ledger is **self-hosted software**. We — the developers — never see y
 
 When you run the backend on your own server:
 
-- **All data is stored locally** in a single SQLite file under your configured data directory (default `./data/insitu-ledger.db`).
+- **All data is stored locally** in a single SQLite file under your configured data directory (default `./data/insitu-ledger.db`). The file is plaintext SQLite; encrypting the underlying volume (LUKS, dm-crypt, cloud-provider managed encryption) is the operator's responsibility.
 - **No telemetry, no analytics, no crash reporting** is sent anywhere by the backend or the web UI.
 - **Logs** (HTTP access log + structured application log) are written to stderr. They include request method, path, response status, duration, and the requester IP. They do **not** include passwords, TOTP codes, bearer tokens, or transaction contents.
 - **Audit log** (in the database) records administrative actions (create/delete user, reset password, toggle admin, disable TOTP, backup) and data-access events (export, sync). This log is visible only to admins.
@@ -16,7 +16,7 @@ When you run the backend on your own server:
 
 The Android app is **local-first**:
 
-- On install, all data lives **only on your device**, in a Room SQLite database encrypted at rest with a key bound to the Android Keystore.
+- On install, all data lives **only on your device**, in a Room SQLite database encrypted at rest with SQLCipher (AES-256). The database key is generated on first launch and protected by the Android Keystore (via `EncryptedSharedPreferences`). Sensitive credentials (sync token, mTLS settings, backup passphrase) are also encrypted with Keystore-bound keys.
 - The app starts no network requests until you opt in to "Connect to Server" in Settings.
 - **No analytics, no crash reporting, no advertising IDs** are collected.
 - **Permissions requested**: `INTERNET` and `ACCESS_NETWORK_STATE` (only used when sync is configured).
