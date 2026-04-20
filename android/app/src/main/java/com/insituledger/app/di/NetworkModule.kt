@@ -5,6 +5,7 @@ import com.insituledger.app.BuildConfig
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.remote.api.*
 import com.insituledger.app.data.remote.interceptor.AuthInterceptor
+import com.insituledger.app.data.remote.interceptor.CleartextGuardInterceptor
 import com.insituledger.app.data.remote.tls.ClientCertificateKeyManager
 import dagger.Module
 import dagger.Provides
@@ -32,6 +33,7 @@ object NetworkModule {
     @Singleton
     fun provideOkHttpClient(
         authInterceptor: AuthInterceptor,
+        cleartextGuard: CleartextGuardInterceptor,
         clientCertKeyManager: ClientCertificateKeyManager,
         @ApplicationContext context: Context
     ): OkHttpClient {
@@ -47,6 +49,7 @@ object NetworkModule {
         return OkHttpClient.Builder()
             .cache(cache)
             .sslSocketFactory(sslContext.socketFactory, trustManager)
+            .addInterceptor(cleartextGuard)
             .addInterceptor(authInterceptor)
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = if (BuildConfig.DEBUG) {

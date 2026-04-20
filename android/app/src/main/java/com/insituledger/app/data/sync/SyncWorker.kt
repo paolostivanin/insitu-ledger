@@ -20,6 +20,14 @@ class SyncWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         if (prefs.getSyncModeImmediate() != "webapp") return Result.success()
         val result = syncRepository.sync()
-        return if (result.isSuccess) Result.success() else Result.retry()
+        if (result.isSuccess) return Result.success()
+        // Cap retry attempts. WorkManager's exponential backoff would otherwise
+        // keep this worker around forever on a misconfigured server, draining
+        // battery and clogging the unique-work slot.
+        return if (runAttemptCount < MAX_ATTEMPTS) Result.retry() else Result.failure()
+    }
+
+    companion object {
+        private const val MAX_ATTEMPTS = 5
     }
 }

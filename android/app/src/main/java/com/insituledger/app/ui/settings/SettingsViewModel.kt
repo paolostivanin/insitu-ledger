@@ -47,7 +47,8 @@ data class SettingsUiState(
     val mtlsEnabled: Boolean = false,
     val mtlsAlias: String? = null,
     // Display preferences
-    val currencySymbol: String = "€"
+    val currencySymbol: String = "€",
+    val allowCleartextHttp: Boolean = false
 )
 
 @HiltViewModel
@@ -117,6 +118,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             prefs.currencySymbolFlow.collect { symbol ->
                 _uiState.update { it.copy(currencySymbol = symbol) }
+            }
+        }
+
+        viewModelScope.launch {
+            prefs.allowCleartextHttpFlow.collect { allowed ->
+                _uiState.update { it.copy(allowCleartextHttp = allowed) }
             }
         }
 
@@ -286,6 +293,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             prefs.saveMtlsEnabled(enabled)
             if (!enabled) prefs.saveMtlsAlias(null)
+            okHttpClient.connectionPool.evictAll()
+        }
+    }
+
+    fun setAllowCleartextHttp(enabled: Boolean) {
+        viewModelScope.launch {
+            prefs.saveAllowCleartextHttp(enabled)
             okHttpClient.connectionPool.evictAll()
         }
     }

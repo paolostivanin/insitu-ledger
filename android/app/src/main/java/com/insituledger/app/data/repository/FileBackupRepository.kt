@@ -12,13 +12,18 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 data class BackupData(
-    val version: Int = 1,
+    val version: Int = BACKUP_SCHEMA_VERSION,
     val accounts: List<AccountBackup>,
     val categories: List<CategoryBackup>,
     val transactions: List<TransactionBackup>,
     @SerializedName("scheduled_transactions")
     val scheduledTransactions: List<ScheduledBackup>
 )
+
+// Bump when the backup payload shape changes in a non-additive way.
+// Importer rejects newer versions outright (we don't know the new fields yet)
+// and refuses unknown older versions until we've written a migration.
+const val BACKUP_SCHEMA_VERSION = 1
 
 data class AccountBackup(
     val id: Long, val name: String, val currency: String, val balance: Double,
@@ -128,6 +133,16 @@ class FileBackupRepository @Inject constructor(
 
             if (backup == null) {
                 return Result.failure(Exception("Invalid backup file: empty or malformed JSON"))
+            }
+
+            if (backup.version > BACKUP_SCHEMA_VERSION) {
+                return Result.failure(Exception(
+                    "Backup is from a newer version of the app (v${backup.version}). " +
+                    "Update InSitu Ledger before importing."
+                ))
+            }
+            if (backup.version < 1) {
+                return Result.failure(Exception("Backup version ${backup.version} is not supported."))
             }
 
             // Import categories first (transactions reference them)

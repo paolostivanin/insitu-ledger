@@ -47,6 +47,7 @@ class SyncManager @Inject constructor(
 
         val request = OneTimeWorkRequestBuilder<SyncWorker>()
             .setConstraints(constraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
 
         workManager.get().enqueueUniqueWork(

@@ -341,6 +341,27 @@ fun SettingsScreen(
                 }
             }
 
+            // Allow HTTP (cleartext) — opt-in for LAN self-hosters
+            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
+                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(modifier = Modifier.width(AppSpacing.md))
+                        Text("Allow HTTP (insecure)", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = uiState.allowCleartextHttp,
+                            onCheckedChange = viewModel::setAllowCleartextHttp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(AppSpacing.xs))
+                    Text(
+                        "Required for LAN servers reached over http://. Leave off if your server is on the public internet — HTTPS is enforced by default.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             // Sync section
             AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
                 Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {

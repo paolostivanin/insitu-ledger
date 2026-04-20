@@ -51,6 +51,7 @@ class UserPreferences @Inject constructor(
         val MTLS_ALIAS = stringPreferencesKey("mtls_alias")
         val CURRENCY_SYMBOL = stringPreferencesKey("currency_symbol")
         const val DEFAULT_CURRENCY_SYMBOL = "€"
+        val ALLOW_CLEARTEXT_HTTP = booleanPreferencesKey("allow_cleartext_http")
 
         private const val ENCRYPTED_PREFS_FILE = "secure_prefs"
         private const val KEY_TOKEN = "token"
@@ -94,9 +95,14 @@ class UserPreferences @Inject constructor(
     val mtlsEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[MTLS_ENABLED] ?: false }
     val mtlsAliasFlow: Flow<String?> = context.dataStore.data.map { it[MTLS_ALIAS] }
     val currencySymbolFlow: Flow<String> = context.dataStore.data.map { it[CURRENCY_SYMBOL] ?: DEFAULT_CURRENCY_SYMBOL }
+    val allowCleartextHttpFlow: Flow<Boolean> = context.dataStore.data.map { it[ALLOW_CLEARTEXT_HTTP] ?: false }
 
     suspend fun saveToken(token: String) {
-        encryptedPrefs.edit().putString(KEY_TOKEN, token).apply()
+        // commit() over apply(): apply() is async to disk and we hand the token
+        // to the AuthInterceptor immediately via _tokenFlow. A crash between the
+        // in-memory update and disk flush would leave a working token nowhere
+        // on disk, forcing a silent re-login on next launch.
+        encryptedPrefs.edit().putString(KEY_TOKEN, token).commit()
         _tokenFlow.value = token
     }
 
@@ -195,6 +201,10 @@ class UserPreferences @Inject constructor(
         context.dataStore.edit { it[CURRENCY_SYMBOL] = symbol }
     }
 
+    suspend fun saveAllowCleartextHttp(allowed: Boolean) {
+        context.dataStore.edit { it[ALLOW_CLEARTEXT_HTTP] = allowed }
+    }
+
     @Volatile
     private var _syncModeCache: String = "none"
     @Volatile
@@ -217,6 +227,8 @@ class UserPreferences @Inject constructor(
     private var _mtlsAliasCache: String? = null
     @Volatile
     private var _currencySymbolCache: String = DEFAULT_CURRENCY_SYMBOL
+    @Volatile
+    private var _allowCleartextHttpCache: Boolean = false
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -232,6 +244,7 @@ class UserPreferences @Inject constructor(
         mtlsEnabledFlow.onEach { _mtlsEnabledCache = it }.launchIn(scope)
         mtlsAliasFlow.onEach { _mtlsAliasCache = it }.launchIn(scope)
         currencySymbolFlow.onEach { _currencySymbolCache = it }.launchIn(scope)
+        allowCleartextHttpFlow.onEach { _allowCleartextHttpCache = it }.launchIn(scope)
     }
 
     fun getSyncModeImmediate(): String = _syncModeCache
@@ -245,9 +258,10 @@ class UserPreferences @Inject constructor(
     fun getMtlsEnabledImmediate(): Boolean = _mtlsEnabledCache
     fun getMtlsAliasImmediate(): String? = _mtlsAliasCache
     fun getCurrencySymbolImmediate(): String = _currencySymbolCache
+    fun getAllowCleartextHttpImmediate(): Boolean = _allowCleartextHttpCache
 
     suspend fun clearAll() {
-        encryptedPrefs.edit().remove(KEY_TOKEN).apply()
+        encryptedPrefs.edit().remove(KEY_TOKEN).commit()
         _tokenFlow.value = null
         context.dataStore.edit { prefs ->
             val mtlsEnabled = prefs[MTLS_ENABLED]
