@@ -113,12 +113,28 @@ export interface LoginResponse {
 }
 
 export const auth = {
-	login: (login: string, password: string, totp_code?: string) =>
+	login: (login: string, password: string, totp_code?: string, trust_device?: boolean) =>
 		request<LoginResponse>('/auth/login', {
 			method: 'POST',
-			body: { login, password, totp_code }
+			body: { login, password, totp_code, trust_device }
 		}),
 	logout: () => request<void>('/auth/logout', { method: 'POST' })
+};
+
+// Trusted devices — long-lived per-browser cookies that let a user skip the
+// 2FA prompt on subsequent logins. Managed from the user settings page.
+export interface TrustedDevice {
+	id: number;
+	label: string;
+	created_at: string;
+	last_used_at: string;
+	expires_at: string;
+}
+
+export const trustedDevices = {
+	list: () => request<TrustedDevice[]>('/auth/trusted-devices'),
+	revoke: (id: number) => request<void>(`/auth/trusted-devices/${id}`, { method: 'DELETE' }),
+	revokeAll: () => request<void>('/auth/trusted-devices', { method: 'DELETE' })
 };
 
 // Transactions

@@ -75,6 +75,11 @@ func NewRouter(s *Server) http.Handler {
 	protected.HandleFunc("POST /api/auth/totp/verify", s.handleTOTPVerify)
 	protected.HandleFunc("POST /api/auth/totp/reset", s.handleTOTPReset)
 
+	// Trusted devices (browsers that may skip the 2FA prompt for 30 days)
+	protected.HandleFunc("GET /api/auth/trusted-devices", s.handleListTrustedDevices)
+	protected.HandleFunc("DELETE /api/auth/trusted-devices", s.handleRevokeAllTrustedDevices)
+	protected.HandleFunc("DELETE /api/auth/trusted-devices/{id}", s.handleRevokeTrustedDevice)
+
 	// Transactions
 	protected.HandleFunc("GET /api/transactions/autocomplete", s.handleAutocompleteTransactions)
 	protected.HandleFunc("GET /api/transactions", s.handleListTransactions)

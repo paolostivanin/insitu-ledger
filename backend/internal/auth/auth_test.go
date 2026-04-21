@@ -21,6 +21,15 @@ func setupTestDB(t *testing.T) *sql.DB {
 		expires_at DATETIME NOT NULL,
 		created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 	)`)
+	db.Exec(`CREATE TABLE trusted_devices (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		token_hash TEXT NOT NULL UNIQUE,
+		user_id INTEGER NOT NULL,
+		label TEXT,
+		expires_at DATETIME NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+		last_used_at DATETIME NOT NULL DEFAULT (datetime('now'))
+	)`)
 	return db
 }
 

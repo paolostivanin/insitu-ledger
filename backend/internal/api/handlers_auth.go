@@ -9,15 +9,26 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pquerna/otp/totp"
 	"github.com/pstivanin/insitu-ledger/backend/internal/auth"
 )
 
+// Trusted-device cookie: set on the response after a user logs in with a
+// valid OTP and opts in. On the next login the same browser presents the
+// cookie and the server skips the OTP step (password is still required).
+const (
+	trustedDeviceCookie = "insitu_trusted_device"
+	trustedDeviceTTL    = 30 * 24 * time.Hour
+	trustedDevicePath   = "/api/auth"
+)
+
 type loginRequest struct {
-	Login    string `json:"login"` // username or email
-	Password string `json:"password"`
-	TOTPCode string `json:"totp_code,omitempty"`
+	Login       string `json:"login"` // username or email
+	Password    string `json:"password"`
+	TOTPCode    string `json:"totp_code,omitempty"`
+	TrustDevice bool   `json:"trust_device,omitempty"`
 }
 
 type changePasswordRequest struct {
@@ -90,30 +101,52 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If 2FA is enabled, verify the TOTP code
+	// If 2FA is enabled, either honor a trusted-device cookie or verify the
+	// TOTP code. The cookie path lets a previously-trusted browser skip the
+	// 2FA prompt; password verification (above) is still required.
+	totpUsed := false
 	if totpEnabled && totpSecret != nil {
-		if req.TOTPCode == "" {
-			// Tell the client that 2FA is required
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(authResponse{
-				UserID:       userID,
-				Name:         name,
-				TOTPRequired: true,
-			})
-			return
+		trusted := false
+		if c, err := r.Cookie(trustedDeviceCookie); err == nil && c.Value != "" {
+			ok, _ := s.AuthStore.ValidateTrustedDevice(c.Value, userID)
+			trusted = ok
 		}
-		// Per-user TOTP throttle. 6 digits + ±1 step window are guessable in
-		// hours of unattended brute force, so cap failed attempts.
-		totpKey := strconv.FormatInt(userID, 10)
-		if !s.TOTPRateLimiter.Allow(totpKey) {
-			http.Error(w, "too many 2FA attempts, try again later", http.StatusTooManyRequests)
-			return
+
+		if !trusted {
+			if req.TOTPCode == "" {
+				// Tell the client that 2FA is required
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(authResponse{
+					UserID:       userID,
+					Name:         name,
+					TOTPRequired: true,
+				})
+				return
+			}
+			// Per-user TOTP throttle. 6 digits + ±1 step window are guessable in
+			// hours of unattended brute force, so cap failed attempts.
+			totpKey := strconv.FormatInt(userID, 10)
+			if !s.TOTPRateLimiter.Allow(totpKey) {
+				http.Error(w, "too many 2FA attempts, try again later", http.StatusTooManyRequests)
+				return
+			}
+			if !totp.Validate(req.TOTPCode, *totpSecret) {
+				http.Error(w, "invalid 2FA code", http.StatusUnauthorized)
+				return
+			}
+			s.TOTPRateLimiter.Reset(totpKey)
+			totpUsed = true
 		}
-		if !totp.Validate(req.TOTPCode, *totpSecret) {
-			http.Error(w, "invalid 2FA code", http.StatusUnauthorized)
-			return
+	}
+
+	// User asked to trust this browser, and we just successfully verified an
+	// OTP — issue a long-lived trusted-device cookie. We require totpUsed so
+	// a stolen cookie alone (without an OTP step) cannot mint a fresh one.
+	if req.TrustDevice && totpUsed {
+		deviceToken, err := s.AuthStore.CreateTrustedDevice(userID, deviceLabel(r), trustedDeviceTTL)
+		if err == nil {
+			setTrustedDeviceCookie(w, r, s.TrustProxy, deviceToken)
 		}
-		s.TOTPRateLimiter.Reset(totpKey)
 	}
 
 	token, err := s.AuthStore.CreateToken(userID)
@@ -182,7 +215,11 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Invalidate all existing sessions so stolen/old tokens can't be reused.
+	// Same reasoning applies to trusted-device grants — a password change is
+	// the canonical "kick all browsers" action.
 	s.AuthStore.RevokeAllForUser(userID)
+	s.AuthStore.RevokeAllTrustedDevicesForUser(userID)
+	clearTrustedDeviceCookie(w, r, s.TrustProxy)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -385,6 +422,11 @@ func (s *Server) handleTOTPReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Trusted-device cookies were granted under the *old* OTP secret; resetting
+	// 2FA invalidates that trust assumption.
+	s.AuthStore.RevokeAllTrustedDevicesForUser(userID)
+	clearTrustedDeviceCookie(w, r, s.TrustProxy)
+
 	// Generate new TOTP secret
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "InSitu Ledger",
@@ -418,4 +460,89 @@ func (s *Server) handleTOTPReset(w http.ResponseWriter, r *http.Request) {
 		"qr_code": "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes()),
 		"otpauth": key.URL(),
 	})
+}
+
+// --- Trusted devices ---
+
+func (s *Server) handleListTrustedDevices(w http.ResponseWriter, r *http.Request) {
+	userID := UserIDFromContext(r.Context())
+	devices, err := s.AuthStore.ListTrustedDevices(userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(devices)
+}
+
+func (s *Server) handleRevokeTrustedDevice(w http.ResponseWriter, r *http.Request) {
+	userID := UserIDFromContext(r.Context())
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if err := s.AuthStore.RevokeTrustedDevice(userID, id); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleRevokeAllTrustedDevices(w http.ResponseWriter, r *http.Request) {
+	userID := UserIDFromContext(r.Context())
+	s.AuthStore.RevokeAllTrustedDevicesForUser(userID)
+	clearTrustedDeviceCookie(w, r, s.TrustProxy)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Cookie helpers ---
+
+func setTrustedDeviceCookie(w http.ResponseWriter, r *http.Request, trustProxy bool, value string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     trustedDeviceCookie,
+		Value:    value,
+		Path:     trustedDevicePath,
+		MaxAge:   int(trustedDeviceTTL.Seconds()),
+		HttpOnly: true,
+		Secure:   isSecureRequest(r, trustProxy),
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func clearTrustedDeviceCookie(w http.ResponseWriter, r *http.Request, trustProxy bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     trustedDeviceCookie,
+		Value:    "",
+		Path:     trustedDevicePath,
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   isSecureRequest(r, trustProxy),
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+// isSecureRequest detects whether the request reached us over HTTPS, either
+// directly or via a trusted reverse proxy. Cookies marked Secure are dropped
+// by browsers on plain HTTP, so in dev (loopback HTTP) we omit the flag.
+func isSecureRequest(r *http.Request, trustProxy bool) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if trustProxy && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return true
+	}
+	return false
+}
+
+// deviceLabel returns a short, storage-safe identifier for the requesting
+// browser. We just keep the User-Agent verbatim (truncated) — pretty parsing
+// is a frontend concern.
+func deviceLabel(r *http.Request) string {
+	ua := strings.TrimSpace(r.Header.Get("User-Agent"))
+	const max = 120
+	if len(ua) > max {
+		ua = ua[:max]
+	}
+	return ua
 }

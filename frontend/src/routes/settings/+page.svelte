@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { shared, me, accounts as accountsApi, preferences as prefsApi, type SharedAccess, type UserProfile, type Account, type AccessibleOwner } from '$lib/api/client';
+	import { shared, me, accounts as accountsApi, preferences as prefsApi, trustedDevices as trustedDevicesApi, type SharedAccess, type UserProfile, type Account, type AccessibleOwner, type TrustedDevice } from '$lib/api/client';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { setCurrencySymbol, DEFAULT_CURRENCY_SYMBOL } from '$lib/stores/auth';
 
@@ -52,6 +52,10 @@
 	let totpResetPassword = $state('');
 	let showTotpReset = $state(false);
 
+	// Trusted devices
+	let trustedList = $state<TrustedDevice[]>([]);
+	let trustedError = $state('');
+
 	onMount(async () => {
 		loading = true;
 		const [p, s, a, owners, prefs] = await Promise.all([
@@ -72,8 +76,41 @@
 		accessibleOwners = owners;
 		defaultAccountId = prefs.default_account_id;
 		if (myAccounts.length > 0 && !fAccountId) fAccountId = myAccounts[0].id;
+		if (profile.totp_enabled) await loadTrustedDevices();
 		loading = false;
 	});
+
+	async function loadTrustedDevices() {
+		trustedError = '';
+		try {
+			trustedList = await trustedDevicesApi.list();
+		} catch (e: any) {
+			trustedError = e.message || 'Failed to load trusted devices';
+		}
+	}
+
+	function revokeTrustedDevice(id: number) {
+		confirmMessage = 'Revoke this trusted browser? It will need 2FA to log in again.';
+		confirmAction = async () => {
+			await trustedDevicesApi.revoke(id);
+			await loadTrustedDevices();
+		};
+		confirmOpen = true;
+	}
+
+	function revokeAllTrustedDevices() {
+		confirmMessage = 'Revoke all trusted browsers? Every browser will need 2FA on next login.';
+		confirmAction = async () => {
+			await trustedDevicesApi.revokeAll();
+			await loadTrustedDevices();
+		};
+		confirmOpen = true;
+	}
+
+	function formatDate(s: string): string {
+		const d = new Date(s);
+		return isNaN(d.getTime()) ? s : d.toLocaleString();
+	}
 
 	async function saveDefaultAccount() {
 		defaultError = '';
@@ -188,6 +225,7 @@
 			totpQR = '';
 			totpSecret = '';
 			profile = await me.get();
+			if (profile?.totp_enabled) await loadTrustedDevices();
 		} catch (e: any) {
 			totpError = e.message || 'Invalid code';
 		}
@@ -205,6 +243,7 @@
 			totpSecret = res.secret;
 			totpSetupActive = true;
 			profile = await me.get();
+			trustedList = [];
 		} catch (e: any) {
 			totpError = e.message || 'Incorrect password';
 		}
@@ -342,6 +381,42 @@
 				<button class="btn-primary" onclick={startTOTPSetup}>Set Up 2FA</button>
 			{/if}
 		</div>
+
+		<!-- Trusted Devices -->
+		{#if profile?.totp_enabled}
+			<div class="card section">
+				<div class="section-header">
+					<h2>Trusted Browsers</h2>
+					{#if trustedList.length > 0}
+						<button class="btn-danger" onclick={revokeAllTrustedDevices}>Revoke all</button>
+					{/if}
+				</div>
+				<p class="desc">Browsers that may skip the 2FA prompt for 30 days. Trust is granted by checking "Trust this browser for 30 days" on the 2FA login screen.</p>
+				{#if trustedError}<p class="error-msg">{trustedError}</p>{/if}
+				{#if trustedList.length === 0}
+					<p class="empty-state">No trusted browsers. The next 2FA login can opt in.</p>
+				{:else}
+					<div class="table-wrap">
+						<table>
+							<thead>
+								<tr><th>Browser</th><th>Added</th><th>Last used</th><th>Expires</th><th></th></tr>
+							</thead>
+							<tbody>
+								{#each trustedList as d (d.id)}
+									<tr>
+										<td class="ua">{d.label || 'Unknown'}</td>
+										<td>{formatDate(d.created_at)}</td>
+										<td>{formatDate(d.last_used_at)}</td>
+										<td>{formatDate(d.expires_at)}</td>
+										<td><button class="btn-danger" onclick={() => revokeTrustedDevice(d.id)}>Revoke</button></td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+			</div>
+		{/if}
 
 		<!-- Default Account -->
 		<div class="card section">
@@ -500,5 +575,13 @@
 	}
 	.totp-reset-form {
 		margin-top: 0.75rem;
+	}
+	.ua {
+		font-family: monospace;
+		font-size: 0.8rem;
+		max-width: 24rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 </style>

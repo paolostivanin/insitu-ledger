@@ -320,8 +320,8 @@
 		<h2>Automatic Backup Schedule</h2>
 		{#if backupSettings}
 			<div class="form-row">
-				<div class="form-group">
-					<label>
+				<div class="form-group" style="flex: 0 1 auto; align-self: flex-end">
+					<label class="checkbox-label">
 						<input type="checkbox" bind:checked={bkEnabled} />
 						Enable automatic backups
 					</label>

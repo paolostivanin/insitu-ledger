@@ -6,6 +6,7 @@
 	let login = $state('');
 	let password = $state('');
 	let totpCode = $state('');
+	let trustDevice = $state(false);
 	let error = $state('');
 	let needsTOTP = $state(false);
 	let totpInput: HTMLInputElement | undefined = $state();
@@ -18,7 +19,12 @@
 		e.preventDefault();
 		error = '';
 		try {
-			const res = await auth.login(login, password, needsTOTP ? totpCode : undefined);
+			const res = await auth.login(
+				login,
+				password,
+				needsTOTP ? totpCode : undefined,
+				needsTOTP ? trustDevice : undefined
+			);
 
 			if (res.totp_required) {
 				needsTOTP = true;
@@ -79,6 +85,12 @@
 						placeholder="6-digit code"
 					/>
 					<p class="hint">Enter the code from your authenticator app</p>
+				</div>
+				<div class="form-group">
+					<label class="checkbox-label">
+						<input type="checkbox" bind:checked={trustDevice} />
+						Trust this browser for 30 days
+					</label>
 				</div>
 			{/if}
 			<button class="btn-primary full-width" type="submit">

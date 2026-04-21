@@ -118,6 +118,7 @@ func (s *Store) RevokeAllForUser(userID int64) {
 // cleanup removes all expired tokens.
 func (s *Store) cleanup() {
 	s.db.Exec("DELETE FROM sessions WHERE expires_at < ?", time.Now().UTC().Format(time.RFC3339))
+	s.cleanupTrusted()
 }
 
 // ExtractToken pulls the bearer token from an HTTP request.
