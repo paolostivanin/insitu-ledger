@@ -5,7 +5,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
-	import { sharedOwnerUserId, accountPermission, hasAnyWriteInCurrentContext } from '$lib/stores/shared';
+	import { sharedOwnerUserId } from '$lib/stores/shared';
 
 	let items = $state<ScheduledTransaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -84,9 +84,11 @@
 		loading = false;
 	}
 
-	function canEdit(item: ScheduledTransaction): boolean {
-		return accountPermission(item.account_id) === 'write';
+	function isSharedAcct(accountId: number): boolean {
+		return !!accts.find(a => a.id === accountId)?.is_shared;
 	}
+
+	const hasAnyShared = $derived(accts.some(a => a.is_shared));
 
 	function catName(id: number): string {
 		return cats.find(c => c.id === id)?.name || '—';
@@ -165,12 +167,11 @@
 			next_occurrence: `${fNextDate}T${fNextTime}`,
 			max_occurrences: maxOcc && maxOcc > 0 ? maxOcc : null
 		};
-		const oid = $sharedOwnerUserId || undefined;
 		try {
 			if (editId) {
-				await scheduled.update(editId, data, oid);
+				await scheduled.update(editId, data);
 			} else {
-				await scheduled.create(data, oid);
+				await scheduled.create(data);
 			}
 			showForm = false;
 			resetForm();
@@ -184,7 +185,7 @@
 	function remove(id: number) {
 		confirmMessage = 'Delete this scheduled transaction?';
 		confirmAction = async () => {
-			await scheduled.delete(id, $sharedOwnerUserId || undefined);
+			await scheduled.delete(id);
 			await load();
 		};
 		confirmOpen = true;
@@ -202,11 +203,9 @@
 <div class="page">
 	<div class="page-header">
 		<h1>Scheduled Transactions</h1>
-		{#if $hasAnyWriteInCurrentContext}
-			<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
-				{showForm ? 'Cancel' : '+ New Scheduled'}
-			</button>
-		{/if}
+		<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
+			{showForm ? 'Cancel' : '+ New Scheduled'}
+		</button>
 	</div>
 
 	{#if error}
@@ -245,8 +244,8 @@
 					<div class="form-group">
 						<label for="account">Account</label>
 						<select id="account" bind:value={fAccountId}>
-							{#each accts.filter(a => accountPermission(a.id) === 'write') as a (a.id)}
-								<option value={a.id}>{a.name}</option>
+							{#each accts as a (a.id)}
+								<option value={a.id}>{a.name}{a.is_shared ? ` (shared by ${a.owner_name})` : ''}</option>
 							{/each}
 						</select>
 					</div>
@@ -305,6 +304,7 @@
 						<th>Category</th>
 						<th>Account</th>
 						<th>Name</th>
+						{#if hasAnyShared}<th>Added by</th>{/if}
 						<th>Amount</th>
 						<th>Progress</th>
 						<th>Status</th>
@@ -321,16 +321,17 @@
 							<td>{catName(item.category_id)}</td>
 							<td>{acctName(item.account_id)}</td>
 							<td>{item.description || '—'}</td>
+							{#if hasAnyShared}
+								<td class="added-by">{isSharedAcct(item.account_id) ? (item.created_by_name || '—') : ''}</td>
+							{/if}
 							<td class={item.type === 'income' ? 'amount-income' : 'amount-expense'}>
 								{item.type === 'income' ? '+' : '-'}{fmt(item.amount)} {item.currency}
 							</td>
 							<td>{item.max_occurrences != null ? `${item.occurrence_count}/${item.max_occurrences}` : '∞'}</td>
 							<td>{item.active ? 'Active' : 'Paused'}</td>
 							<td class="actions">
-								{#if canEdit(item)}
-									<button class="btn-ghost" onclick={() => startEdit(item)}>Edit</button>
-									<button class="btn-danger" onclick={() => remove(item.id)}>Del</button>
-								{/if}
+								<button class="btn-ghost" onclick={() => startEdit(item)}>Edit</button>
+								<button class="btn-danger" onclick={() => remove(item.id)}>Del</button>
 							</td>
 						</tr>
 					{/each}
@@ -350,4 +351,8 @@
 		margin-bottom: 1rem;
 	}
 	h2 { font-size: 1rem; margin-bottom: 1rem; }
+	.added-by {
+		color: var(--text-muted);
+		font-size: 0.85rem;
+	}
 </style>

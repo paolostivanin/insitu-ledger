@@ -94,6 +94,12 @@
 		if (!dt.includes('T')) return '';
 		return dt.slice(11, 16);
 	}
+
+	function isSharedAcct(accountId: number): boolean {
+		return !!accts.find(a => a.id === accountId)?.is_shared;
+	}
+
+	const hasAnyShared = $derived(accts.some(a => a.is_shared));
 </script>
 
 <div class="page">
@@ -135,7 +141,11 @@
 					<div class="table-wrap">
 						<table>
 							<thead>
-								<tr><th>Date</th><th>Time</th><th>Name</th><th>Amount</th></tr>
+								<tr>
+									<th>Date</th><th>Time</th><th>Name</th>
+									{#if hasAnyShared}<th>Added by</th>{/if}
+									<th>Amount</th>
+								</tr>
 							</thead>
 							<tbody>
 								{#each recentTxns as txn}
@@ -143,6 +153,9 @@
 										<td>{txn.date.slice(0, 10)}</td>
 										<td>{extractTime(txn.date) || '—'}</td>
 										<td>{txn.description || '—'}</td>
+										{#if hasAnyShared}
+											<td class="added-by">{isSharedAcct(txn.account_id) ? (txn.created_by_name || '—') : ''}</td>
+										{/if}
 										<td class={txn.type === 'income' ? 'amount-income' : 'amount-expense'}>
 											{txn.type === 'income' ? '+' : '-'}{fmt(txn.amount)}
 										</td>
@@ -226,6 +239,10 @@
 	}
 	.cat-amount {
 		font-weight: 600;
+	}
+	.added-by {
+		color: var(--text-muted);
+		font-size: 0.85rem;
 	}
 	@media (max-width: 768px) {
 		.stats-grid {

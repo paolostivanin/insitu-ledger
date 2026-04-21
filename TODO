@@ -1,0 +1,26 @@
+# curl -s -X POST https://insitu.polnas.eu/api/auth/login -H 'Content-Type: application/json' -d '{"login":"lbassan","password":"","totp_code":""}'
+
+INSITU_TOKEN="$TK" python3 scripts/insitu_bootstrap.py --base https://insitu.polnas.eu account
+INSITU_TOKEN="$TK" python3 scripts/insitu_bootstrap.py --base https://insitu.polnas.eu categories
+INSITU_TOKEN="$TK" python3 scripts/insitu_bootstrap.py --base https://insitu.polnas.eu share --grantee-email pstivanin@fastmail.com
+python3 scripts/transform_csv.py --spouse wife --in wife.csv --out wife_for_insitu.csv
+
+# then upload wife_for_insitu.csv via Transactions → Import CSV
+
+
+# ============================================================================
+# Next major version — schema cleanup
+# ============================================================================
+# Drop transactions.user_id and scheduled_transactions.user_id. They are
+# redundant with accounts.user_id (the account owner) and were retained in
+# v1.15.0 only to keep many indexes/queries (idx_transactions_user_date,
+# idx_transactions_user_sync, sync filters) working without a larger refactor.
+# Real attribution lives in created_by_user_id.
+#
+# To do this safely:
+#   1. Migrate every WHERE t.user_id = ? query to filter by account_id IN (...)
+#      (most call sites already do this since v1.15.0 — audit the rest).
+#   2. Update the Android sync layer to stop relying on user_id as a partition
+#      key.
+#   3. Drop the indexes that reference user_id, then drop the column.
+

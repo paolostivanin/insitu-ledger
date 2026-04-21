@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
     amount REAL NOT NULL CHECK (amount > 0),
     currency TEXT NOT NULL DEFAULT 'EUR',
@@ -114,6 +115,7 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
     amount REAL NOT NULL CHECK (amount > 0),
     currency TEXT NOT NULL DEFAULT 'EUR',
@@ -135,7 +137,7 @@ CREATE TABLE IF NOT EXISTS shared_account_access (
     owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     guest_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    permission TEXT NOT NULL CHECK (permission IN ('read', 'write')),
+    permission TEXT NOT NULL DEFAULT 'write' CHECK (permission = 'write'),
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     sync_version INTEGER NOT NULL DEFAULT 0,
     UNIQUE(owner_user_id, guest_user_id, account_id)
@@ -1082,9 +1084,10 @@ func TestSharedAccessListAccessible(t *testing.T) {
 		t.Errorf("expected 0 accessible owners, got %d", len(owners))
 	}
 
-	// Admin creates an account and shares it with guest (read)
+	// Admin creates an account and shares it with guest. Since v1.15.0 every
+	// share is full co-owner write — the request's permission field is ignored.
 	acctID, _ := createTestAccountAndCategory(t, handler, adminToken)
-	body := fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":%d,"permission":"read"}`, acctID)
+	body := fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":%d}`, acctID)
 	req = authedRequest("POST", "/api/shared", body, adminToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -1105,12 +1108,16 @@ func TestSharedAccessListAccessible(t *testing.T) {
 		t.Fatalf("expected 1 shared account, got %d", len(accts))
 	}
 	first := accts[0].(map[string]any)
-	if first["permission"] != "read" {
-		t.Errorf("permission = %v, want read", first["permission"])
+	if first["permission"] != "write" {
+		t.Errorf("permission = %v, want write", first["permission"])
 	}
 }
 
-func TestSharedAccessReadOnly(t *testing.T) {
+// TestSharedAccessCoOwner: post-v1.15.0 every share is full co-owner write.
+// Co-owners can read AND mutate transactions on the shared account (including
+// rows added by the owner); but only the original owner may rename/delete the
+// account or create new accounts in their space.
+func TestSharedAccessCoOwner(t *testing.T) {
 	s, cleanup := setupTestServer(t)
 	defer cleanup()
 	handler := NewRouter(s)
@@ -1126,8 +1133,8 @@ func TestSharedAccessReadOnly(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &created)
 	txnID := int(created["id"].(float64))
 
-	// Share with read permission
-	shareBody := fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":%d,"permission":"read"}`, acctID)
+	// Share the account (permission field is ignored — always 'write').
+	shareBody := fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":%d}`, acctID)
 	req = authedRequest("POST", "/api/shared", shareBody, adminToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -1164,29 +1171,54 @@ func TestSharedAccessReadOnly(t *testing.T) {
 		t.Errorf("guest read categories: got %d", w.Code)
 	}
 
-	// Guest CANNOT create transactions for admin (read-only)
+	// Guest CAN create transactions on the shared account (full co-owner).
 	body = fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"date":"2025-01-02"}`, acctID, catID)
 	req = authedRequest("POST", "/api/transactions?owner_id=1", body, guestToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
-	if w.Code != 403 {
-		t.Errorf("guest create: got %d, want 403", w.Code)
+	if w.Code != 201 {
+		t.Errorf("guest create: got %d, want 201: %s", w.Code, w.Body.String())
 	}
 
-	// Guest CANNOT delete admin's transactions (read-only)
+	// Guest CAN delete admin's transactions (full co-owner — sticky attribution).
 	req = authedRequest("DELETE", fmt.Sprintf("/api/transactions/%d?owner_id=1", txnID), "", guestToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
-	if w.Code != 403 {
-		t.Errorf("guest delete: got %d, want 403", w.Code)
+	if w.Code != 204 {
+		t.Errorf("guest delete: got %d, want 204", w.Code)
 	}
 
-	// Guest CANNOT create accounts for admin (read-only)
+	// Guest CANNOT create new accounts in admin's space (owner-only).
 	req = authedRequest("POST", "/api/accounts?owner_id=1", `{"name":"Hacked"}`, guestToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != 403 {
 		t.Errorf("guest create account: got %d, want 403", w.Code)
+	}
+
+	// Guest CANNOT rename the shared account (owner-only).
+	req = authedRequest("PUT", fmt.Sprintf("/api/accounts/%d", acctID), `{"name":"Renamed","currency":"EUR"}`, guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Errorf("guest rename shared account: got %d, want 403", w.Code)
+	}
+
+	// Guest CANNOT delete the shared account (owner-only).
+	req = authedRequest("DELETE", fmt.Sprintf("/api/accounts/%d", acctID), "", guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Errorf("guest delete shared account: got %d, want 403", w.Code)
+	}
+
+	// Guest CANNOT re-share an account they don't own.
+	reshareBody := fmt.Sprintf(`{"guest_email":"admin@test.com","account_id":%d}`, acctID)
+	req = authedRequest("POST", "/api/shared", reshareBody, guestToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Errorf("guest re-share: got %d, want 403", w.Code)
 	}
 }
 

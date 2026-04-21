@@ -16,7 +16,7 @@ import com.insituledger.app.data.local.db.entity.*
         ScheduledTransactionEntity::class,
         PendingOperationEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 @androidx.room.TypeConverters(Converters::class)
@@ -63,6 +63,21 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE transactions ADD COLUMN note TEXT")
                 db.execSQL("ALTER TABLE scheduled_transactions ADD COLUMN note TEXT")
+            }
+        }
+
+        // v1.24.0 (server v1.15.0) — add per-row attribution + cached owner
+        // metadata for shared accounts. created_by_user_id is the actual creator
+        // (kept sticky on edit); owner_name and is_shared are cached on accounts
+        // to power the "Shared by [name]" badge offline.
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN created_by_user_id INTEGER")
+                db.execSQL("ALTER TABLE scheduled_transactions ADD COLUMN created_by_user_id INTEGER")
+                db.execSQL("UPDATE transactions SET created_by_user_id = user_id WHERE created_by_user_id IS NULL")
+                db.execSQL("UPDATE scheduled_transactions SET created_by_user_id = user_id WHERE created_by_user_id IS NULL")
+                db.execSQL("ALTER TABLE accounts ADD COLUMN owner_name TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE accounts ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

@@ -87,15 +87,13 @@ fun CategoriesScreen(
             )
         },
         floatingActionButton = {
-            if (!uiState.isReadOnly) {
-                BrandFab(
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onAddClick()
-                    },
-                    contentDescription = "Add Category"
-                )
-            }
+            BrandFab(
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onAddClick()
+                },
+                contentDescription = "Add Category"
+            )
         }
     ) { padding ->
         when {
@@ -104,8 +102,8 @@ fun CategoriesScreen(
                 icon = Icons.Default.Category,
                 title = "No categories yet",
                 message = "Create categories to organize your transactions.",
-                actionLabel = if (!uiState.isReadOnly) "Add category" else null,
-                onAction = if (!uiState.isReadOnly) onAddClick else null,
+                actionLabel = "Add category",
+                onAction = onAddClick,
                 modifier = Modifier.padding(padding)
             )
             else -> {
@@ -145,7 +143,6 @@ fun CategoriesScreen(
                             item(key = "expense_${node.category.id}") {
                                 CategoryParentRow(
                                     category = node.category,
-                                    isReadOnly = uiState.isReadOnly,
                                     onEdit = onEditClick,
                                     onDelete = onDelete,
                                     modifier = Modifier.animateItem()
@@ -154,7 +151,6 @@ fun CategoriesScreen(
                             items(node.children, key = { "expense_child_${it.id}" }) { child ->
                                 CategoryChildRow(
                                     child = child,
-                                    isReadOnly = uiState.isReadOnly,
                                     onEdit = onEditClick,
                                     onDelete = onDelete,
                                     modifier = Modifier.animateItem()
@@ -173,7 +169,6 @@ fun CategoriesScreen(
                             item(key = "income_${node.category.id}") {
                                 CategoryParentRow(
                                     category = node.category,
-                                    isReadOnly = uiState.isReadOnly,
                                     onEdit = onEditClick,
                                     onDelete = onDelete,
                                     modifier = Modifier.animateItem()
@@ -182,7 +177,6 @@ fun CategoriesScreen(
                             items(node.children, key = { "income_child_${it.id}" }) { child ->
                                 CategoryChildRow(
                                     child = child,
-                                    isReadOnly = uiState.isReadOnly,
                                     onEdit = onEditClick,
                                     onDelete = onDelete,
                                     modifier = Modifier.animateItem()
@@ -230,7 +224,6 @@ private fun FilterChipItem(label: String, selected: Boolean, onClick: () -> Unit
 @Composable
 private fun CategoryParentRow(
     category: Category,
-    isReadOnly: Boolean,
     onEdit: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     modifier: Modifier = Modifier
@@ -266,12 +259,10 @@ private fun CategoryParentRow(
                         fontWeight = FontWeight.SemiBold
                     )
                 }
-                if (!isReadOnly) {
-                    OverflowMenu(
-                        onEdit = { onEdit(category.id) },
-                        onDelete = { onDelete(category.id) }
-                    )
-                }
+                OverflowMenu(
+                    onEdit = { onEdit(category.id) },
+                    onDelete = { onDelete(category.id) }
+                )
             }
         }
     }
@@ -280,7 +271,6 @@ private fun CategoryParentRow(
 @Composable
 private fun CategoryChildRow(
     child: Category,
-    isReadOnly: Boolean,
     onEdit: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     modifier: Modifier = Modifier
@@ -317,13 +307,11 @@ private fun CategoryChildRow(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
-                if (!isReadOnly) {
-                    OverflowMenu(
-                        onEdit = { onEdit(child.id) },
-                        onDelete = { onDelete(child.id) },
-                        compact = true
-                    )
-                }
+                OverflowMenu(
+                    onEdit = { onEdit(child.id) },
+                    onDelete = { onDelete(child.id) },
+                    compact = true
+                )
             }
         }
     }

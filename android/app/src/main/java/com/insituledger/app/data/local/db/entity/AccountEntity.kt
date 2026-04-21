@@ -19,5 +19,9 @@ data class AccountEntity(
     @ColumnInfo(name = "updated_at") val updatedAt: String = "",
     @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,
     @ColumnInfo(name = "sync_version") val syncVersion: Long = 0,
-    @ColumnInfo(name = "is_local_only") val isLocalOnly: Boolean = false
+    @ColumnInfo(name = "is_local_only") val isLocalOnly: Boolean = false,
+    // Cached owner display name + shared flag (since v1.24.0). Powers the
+    // "Shared by [name]" badge offline. Empty/false for local-only accounts.
+    @ColumnInfo(name = "owner_name") val ownerName: String = "",
+    @ColumnInfo(name = "is_shared") val isShared: Boolean = false
 )

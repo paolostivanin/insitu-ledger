@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.14.0"
+  version: "1.15.0"
 
 servers:
   - url: /api
@@ -92,6 +92,10 @@ components:
           type: integer
         user_id:
           type: integer
+          description: >-
+            Legacy: mirrors the account owner's user_id (NOT the creator).
+            Use `created_by_user_id` for actual attribution. Will be removed
+            in a future major version.
         type:
           type: string
           enum: [income, expense]
@@ -118,6 +122,19 @@ components:
           format: date-time
         sync_version:
           type: integer
+        created_by_user_id:
+          type: integer
+          nullable: true
+          description: >-
+            ID of the authenticated user who created this transaction. May
+            differ from `user_id` (account owner) on shared accounts. Set on
+            create and never modified by subsequent edits.
+        created_by_name:
+          type: string
+          nullable: true
+          description: >-
+            Display name of the creator, denormalized for the "Added by [name]"
+            UI on shared accounts. Mirrors `users.name` at fetch time.
 
     TransactionInput:
       type: object
@@ -205,6 +222,7 @@ components:
           type: integer
         user_id:
           type: integer
+          description: The account owner's user ID.
         name:
           type: string
         currency:
@@ -219,6 +237,20 @@ components:
           format: date-time
         sync_version:
           type: integer
+        owner_user_id:
+          type: integer
+          description: Same as `user_id`; explicit for clarity in the shared-accounts UI.
+        owner_name:
+          type: string
+          description: >-
+            Display name of the account owner. Used for the
+            "Shared by [name]" badge when `is_shared` is true and the auth
+            user is not the owner.
+        is_shared:
+          type: boolean
+          description: >-
+            True when at least one other user has co-owner access to this
+            account. Drives the attribution column visibility in the UI.
 
     AccountInput:
       type: object
@@ -247,6 +279,9 @@ components:
           type: integer
         user_id:
           type: integer
+          description: >-
+            Legacy: mirrors the account owner. Use `created_by_user_id`
+            for actual attribution.
         type:
           type: string
           enum: [income, expense]
@@ -277,6 +312,14 @@ components:
           format: date-time
         sync_version:
           type: integer
+        created_by_user_id:
+          type: integer
+          nullable: true
+          description: ID of the authenticated user who created this schedule.
+        created_by_name:
+          type: string
+          nullable: true
+          description: Display name of the creator (denormalized for the UI).
 
     ScheduledInput:
       type: object
@@ -308,7 +351,10 @@ components:
 
     SharedAccess:
       type: object
-      description: A single grant: one guest can read or write one specific account.
+      description: >-
+        A single grant: one guest is a co-owner of one specific account.
+        Since v1.15.0 every share is full write — `permission` is always
+        "write" and is kept on the schema only for backwards compatibility.
       properties:
         id:
           type: integer
@@ -322,7 +368,9 @@ components:
           type: string
         permission:
           type: string
-          enum: [read, write]
+          enum: [write]
+          deprecated: true
+          description: Always "write" since v1.15.0. Kept for backwards compatibility.
         guest_name:
           type: string
         guest_email:
@@ -349,7 +397,9 @@ components:
                 type: string
               permission:
                 type: string
-                enum: [read, write]
+                enum: [write]
+                deprecated: true
+                description: Always "write" since v1.15.0.
 
     CategoryReport:
       type: object
@@ -616,7 +666,11 @@ paths:
       parameters:
         - name: owner_id
           in: query
-          description: View another owner's data (requires a share). Defaults to self.
+          description: >-
+            Optional filter (since v1.15.0). When omitted, returns the
+            aggregate of own + shared-accessible accounts. When set, scopes
+            results to a single owner's space (auth user must own it or have
+            a share). Pre-v1.15.0 this defaulted to self.
           schema:
             type: integer
         - name: account_id
@@ -1172,14 +1226,18 @@ paths:
                   $ref: "#/components/schemas/SharedAccess"
     post:
       tags: [Shared]
-      summary: Grant a guest read or write access to one account
+      summary: Grant a guest co-owner (write) access to one account
+      description: >-
+        Since v1.15.0 every share is full write. The `permission` field is
+        accepted for backwards compatibility but ignored — the server always
+        stores 'write'.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [guest_email, account_id, permission]
+              required: [guest_email, account_id]
               properties:
                 guest_email:
                   type: string
@@ -1188,7 +1246,9 @@ paths:
                   description: An account owned by the auth user.
                 permission:
                   type: string
-                  enum: [read, write]
+                  enum: [write]
+                  deprecated: true
+                  description: Ignored. Always treated as "write" since v1.15.0.
       responses:
         "201":
           description: Created

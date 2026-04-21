@@ -51,6 +51,8 @@ func Open(dataDir string) (*sql.DB, error) {
 		"ALTER TABLE scheduled_transactions ADD COLUMN note TEXT",
 		"ALTER TABLE users ADD COLUMN currency_symbol TEXT NOT NULL DEFAULT '€'",
 		"ALTER TABLE users ADD COLUMN default_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
+		"ALTER TABLE transactions ADD COLUMN created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+		"ALTER TABLE scheduled_transactions ADD COLUMN created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
 	}
 	for _, m := range migrations {
 		if _, err := conn.Exec(m); err != nil {
@@ -65,6 +67,11 @@ func Open(dataDir string) (*sql.DB, error) {
 	if err := migrateLegacySharedAccess(conn); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("legacy shared_access migration: %w", err)
+	}
+
+	if err := migrateSharedAccessAttribution(conn); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("shared access attribution migration: %w", err)
 	}
 
 	seedDefaultAdmin(conn)
@@ -104,6 +111,45 @@ func migrateLegacySharedAccess(conn *sql.DB) error {
 
 	if _, err := tx.Exec("DROP TABLE shared_access"); err != nil {
 		return fmt.Errorf("drop legacy table: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateSharedAccessAttribution backfills created_by_user_id on existing
+// transactions and scheduled_transactions (set = user_id, the legacy "owner"
+// value, which is the most accurate guess for pre-attribution rows). It also
+// coerces any legacy permission='read' rows to 'write' since v1.15.0 dropped
+// the read-only sharing tier. Idempotent via WHERE-clause guards.
+func migrateSharedAccessAttribution(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		"UPDATE transactions SET created_by_user_id = user_id WHERE created_by_user_id IS NULL",
+	); err != nil {
+		return fmt.Errorf("backfill transactions.created_by_user_id: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		"UPDATE scheduled_transactions SET created_by_user_id = user_id WHERE created_by_user_id IS NULL",
+	); err != nil {
+		return fmt.Errorf("backfill scheduled_transactions.created_by_user_id: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		"UPDATE shared_account_access SET permission = 'write' WHERE permission = 'read'",
+	); err != nil {
+		return fmt.Errorf("coerce read shares to write: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		"CREATE INDEX IF NOT EXISTS idx_transactions_created_by ON transactions(created_by_user_id)",
+	); err != nil {
+		return fmt.Errorf("create created_by index: %w", err)
 	}
 
 	return tx.Commit()

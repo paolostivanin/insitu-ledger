@@ -2,10 +2,13 @@ package com.insituledger.app.ui.transactions
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.insituledger.app.data.local.datastore.UserPreferences
+import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.CategoryRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.data.sync.SyncManager
+import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.Transaction
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -20,6 +23,7 @@ private const val STOP_TIMEOUT_MS = 5_000L
 data class TransactionsUiState(
     val transactions: List<Transaction> = emptyList(),
     val categories: List<Category> = emptyList(),
+    val accounts: List<Account> = emptyList(),
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val filterFrom: String? = null,
@@ -27,11 +31,11 @@ data class TransactionsUiState(
     val filterCategoryId: Long? = null,
     val sortBy: String = "date",
     val sortDir: String = "desc",
-    val isReadOnly: Boolean = false,
     val searchQuery: String = "",
     val isSearchActive: Boolean = false,
     val selectedIds: Set<Long> = emptySet(),
-    val isSelectionMode: Boolean = false
+    val isSelectionMode: Boolean = false,
+    val currentUserId: Long? = null
 )
 
 data class FilterAndSort(
@@ -48,8 +52,10 @@ data class FilterAndSort(
 class TransactionsViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
+    private val accountRepository: AccountRepository,
     private val syncManager: SyncManager,
-    private val sharedAccessState: SharedAccessState
+    private val sharedAccessState: SharedAccessState,
+    prefs: UserPreferences
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TransactionsUiState())
@@ -58,19 +64,6 @@ class TransactionsViewModel @Inject constructor(
     private val _filterAndSort = MutableStateFlow(FilterAndSort())
     private val _searchInput = MutableStateFlow("")
 
-    // Categories flow: stops upstream collection when UI is in background
-    private val categoriesFlow: StateFlow<Pair<List<Category>, Boolean>> = sharedAccessState.selectedOwner
-        .flatMapLatest { owner ->
-            if (owner != null) {
-                // Read-only at screen level when no shared account is writable.
-                val anyWrite = owner.accounts.any { it.permission == "write" }
-                flowOf(categoryRepository.listFromServer(owner.ownerId) to !anyWrite)
-            } else {
-                categoryRepository.getAll().map { cats -> cats to false }
-            }
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList<Category>() to false)
-
     init {
         viewModelScope.launch {
             _searchInput.debounce(300).collectLatest { query ->
@@ -78,40 +71,44 @@ class TransactionsViewModel @Inject constructor(
             }
         }
 
-        // Sync categories into uiState
         viewModelScope.launch {
-            categoriesFlow.collect { (cats, readOnly) ->
-                _uiState.update { it.copy(categories = cats, isReadOnly = readOnly) }
-            }
+            combine(
+                categoryRepository.getAll(),
+                accountRepository.getAll(),
+                prefs.userIdFlow
+            ) { cats, accounts, currentUserId ->
+                _uiState.update {
+                    it.copy(categories = cats, accounts = accounts, currentUserId = currentUserId)
+                }
+            }.collect()
         }
 
-        // Load transactions reactively based on filters, sort, search, and shared owner
+        // Load transactions reactively based on filters, sort, search, and owner filter
         viewModelScope.launch {
             combine(
                 _filterAndSort,
-                sharedAccessState.selectedOwner
-            ) { fs, owner -> Pair(fs, owner) }
-                .collectLatest { (fs, owner) ->
+                sharedAccessState.ownerFilter,
+                accountRepository.getAll()
+            ) { fs, filter, accounts -> Triple(fs, filter, accounts) }
+                .flatMapLatest { (fs, filter, accounts) ->
+                    val accountIds: Set<Long>? = filter?.let { f ->
+                        accounts.filter { it.userId == f }.map { it.id }.toSet()
+                    }
                     _uiState.update { it.copy(isLoading = true) }
-                    if (fs.searchQuery.isNotBlank() && owner == null) {
-                        transactionRepository.search(fs.searchQuery).collect { txns ->
-                            _uiState.update { it.copy(transactions = txns, isLoading = false) }
-                        }
-                    } else if (owner != null) {
-                        val txns = transactionRepository.listFromServer(
-                            ownerId = owner.ownerId,
-                            from = fs.from, to = fs.to, categoryId = fs.categoryId,
-                            sortBy = fs.sortBy, sortDir = fs.sortDir
-                        )
-                        _uiState.update { it.copy(transactions = txns, isLoading = false) }
+                    val txnFlow = if (fs.searchQuery.isNotBlank()) {
+                        transactionRepository.search(fs.searchQuery)
                     } else {
                         transactionRepository.getSorted(
                             from = fs.from, to = fs.to, categoryId = fs.categoryId,
                             sortBy = fs.sortBy, sortDir = fs.sortDir
-                        ).collect { txns ->
-                            _uiState.update { it.copy(transactions = txns, isLoading = false) }
-                        }
+                        )
                     }
+                    txnFlow.map { txns ->
+                        if (accountIds == null) txns else txns.filter { it.accountId in accountIds }
+                    }
+                }
+                .collect { txns ->
+                    _uiState.update { it.copy(transactions = txns, isLoading = false) }
                 }
         }
     }
@@ -133,19 +130,8 @@ class TransactionsViewModel @Inject constructor(
     fun refresh() {
         viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true) }
-            val owner = sharedAccessState.selectedOwner.value
-            if (owner != null) {
-                val fs = _filterAndSort.value
-                val txns = transactionRepository.listFromServer(
-                    ownerId = owner.ownerId,
-                    from = fs.from, to = fs.to, categoryId = fs.categoryId,
-                    sortBy = fs.sortBy, sortDir = fs.sortDir
-                )
-                _uiState.update { it.copy(transactions = txns, isRefreshing = false) }
-            } else {
-                syncManager.syncNow()
-                _uiState.update { it.copy(isRefreshing = false) }
-            }
+            syncManager.syncNow()
+            _uiState.update { it.copy(isRefreshing = false) }
         }
     }
 
@@ -183,18 +169,14 @@ class TransactionsViewModel @Inject constructor(
 
     fun deleteSelected() {
         viewModelScope.launch {
-            val byId = _uiState.value.transactions.associateBy { it.id }
             _uiState.value.selectedIds.forEach { id ->
-                val txn = byId[id] ?: return@forEach
-                if (sharedAccessState.canWrite(txn.accountId)) transactionRepository.delete(id)
+                transactionRepository.delete(id)
             }
             clearSelection()
         }
     }
 
     fun delete(id: Long) {
-        val txn = _uiState.value.transactions.find { it.id == id } ?: return
-        if (!sharedAccessState.canWrite(txn.accountId)) return
         viewModelScope.launch { transactionRepository.delete(id) }
     }
 }

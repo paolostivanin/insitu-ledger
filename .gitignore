@@ -47,3 +47,9 @@ coverage/
 # Claude
 .claude/
 CLAUDE.md
+
+# Personal CSV import artifacts (husband.csv / wife.csv import flow)
+husband.csv
+wife.csv
+husband_for_insitu.csv
+wife_for_insitu.csv

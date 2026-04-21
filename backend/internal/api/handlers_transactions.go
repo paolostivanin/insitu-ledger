@@ -22,15 +22,9 @@ type createTransactionRequest struct {
 func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
+	accIDs, err := scopedAccountIDs(r, userID, s.DB)
 	if err != nil {
 		writeAuthError(w, err)
-		return
-	}
-
-	accIDs, err := scopedAccountIDs(r, userID, targetUserID, s.DB)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -67,21 +61,25 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 	}
 
 	accInClause := sqlInPlaceholders(len(accIDs))
+	// LEFT JOIN users cu projects the creator's display name for the
+	// "Added by" UI affordance on shared accounts. account_id IN (...) is
+	// the source of truth for authorization; no t.user_id filter is needed.
+	selectCols := `t.id, t.account_id, t.category_id, t.user_id, t.type, t.amount, t.currency,
+		           t.description, t.note, t.date, t.created_at, t.updated_at, t.sync_version,
+		           t.created_by_user_id, cu.name`
+	joinCreator := ` LEFT JOIN users cu ON t.created_by_user_id = cu.id`
 	var query string
 	if needsCategoryJoin {
-		query = `SELECT t.id, t.account_id, t.category_id, t.user_id, t.type, t.amount, t.currency,
-		           t.description, t.note, t.date, t.created_at, t.updated_at, t.sync_version
-		           FROM transactions t
+		query = `SELECT ` + selectCols + ` FROM transactions t` + joinCreator + `
 		           JOIN categories c ON t.category_id = c.id
-		           WHERE t.user_id = ? AND t.deleted_at IS NULL
+		           WHERE t.deleted_at IS NULL
 		             AND t.account_id IN (` + accInClause + `)`
 	} else {
-		query = `SELECT t.id, t.account_id, t.category_id, t.user_id, t.type, t.amount, t.currency,
-		           t.description, t.note, t.date, t.created_at, t.updated_at, t.sync_version
-		           FROM transactions t WHERE t.user_id = ? AND t.deleted_at IS NULL
+		query = `SELECT ` + selectCols + ` FROM transactions t` + joinCreator + `
+		           WHERE t.deleted_at IS NULL
 		             AND t.account_id IN (` + accInClause + `)`
 	}
-	args := append([]any{targetUserID}, idsToArgs(accIDs)...)
+	args := idsToArgs(accIDs)
 
 	if from != "" {
 		query += " AND t.date >= ?"
@@ -111,10 +109,12 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 		var id, accountID, categoryID, uid, syncVersion int64
 		var typ, currency, date, createdAt, updatedAt string
 		var amount float64
-		var description, note *string
+		var description, note, createdByName *string
+		var createdByUserID *int64
 
 		if err := rows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
-			&description, &note, &date, &createdAt, &updatedAt, &syncVersion); err != nil {
+			&description, &note, &date, &createdAt, &updatedAt, &syncVersion,
+			&createdByUserID, &createdByName); err != nil {
 			http.Error(w, "scan error", http.StatusInternalServerError)
 			return
 		}
@@ -123,6 +123,8 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
 			"description": description, "note": note, "date": date,
 			"created_at": createdAt, "updated_at": updatedAt, "sync_version": syncVersion,
+			"created_by_user_id": createdByUserID,
+			"created_by_name":    createdByName,
 		})
 	}
 
@@ -152,13 +154,9 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "account_id is required", http.StatusBadRequest)
 		return
 	}
-	targetUserID, permission, err := checkAccountAccess(userID, req.AccountID, s.DB)
+	targetUserID, err := checkAccountAccess(userID, req.AccountID, s.DB)
 	if err != nil {
 		writeAuthError(w, err)
-		return
-	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
 		return
 	}
 
@@ -202,9 +200,9 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 	}
 	if isFuture {
 		result, err := s.DB.Exec(
-			`INSERT INTO scheduled_transactions (account_id, category_id, user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			req.AccountID, req.CategoryID, targetUserID, req.Type, req.Amount, req.Currency, req.Description, req.Note, "FREQ=DAILY", req.Date, 1,
+			`INSERT INTO scheduled_transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, "FREQ=DAILY", req.Date, 1,
 		)
 		if err != nil {
 			http.Error(w, "failed to create scheduled transaction", http.StatusInternalServerError)
@@ -230,9 +228,9 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 	defer tx.Rollback()
 
 	result, err := tx.Exec(
-		`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, note, date)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.AccountID, req.CategoryID, targetUserID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.Date,
+		`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.Date,
 	)
 	if err != nil {
 		http.Error(w, "failed to create transaction", http.StatusInternalServerError)
@@ -317,15 +315,15 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Caller must have write access to BOTH the old account and (if changing) the new account.
-	if _, perm, err := checkAccountAccess(userID, oldAccountID, tx); err != nil || perm != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+	// Caller must have access to BOTH the old account and (if changing) the new account.
+	if _, err := checkAccountAccess(userID, oldAccountID, tx); err != nil {
+		http.Error(w, errForbidden, http.StatusForbidden)
 		return
 	}
 	if req.AccountID != 0 && req.AccountID != oldAccountID {
-		newOwner, perm, err := checkAccountAccess(userID, req.AccountID, tx)
-		if err != nil || perm != "write" {
-			http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		newOwner, err := checkAccountAccess(userID, req.AccountID, tx)
+		if err != nil {
+			http.Error(w, errForbidden, http.StatusForbidden)
 			return
 		}
 		if newOwner != targetUserID {
@@ -376,12 +374,6 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
-	if err != nil {
-		writeAuthError(w, err)
-		return
-	}
-
 	q := r.URL.Query().Get("q")
 	if q == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -389,16 +381,16 @@ func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	accIDs, err := listAccessibleAccountIDs(userID, targetUserID, s.DB)
+	accIDs, err := scopedAccountIDs(r, userID, s.DB)
 	if err != nil {
-		http.Error(w, "query error", http.StatusInternalServerError)
+		writeAuthError(w, err)
 		return
 	}
 
-	args := append([]any{targetUserID, q + "%"}, idsToArgs(accIDs)...)
+	args := append([]any{q + "%"}, idsToArgs(accIDs)...)
 	rows, err := s.DB.Query(
 		`SELECT description, category_id FROM transactions
-		 WHERE user_id = ? AND deleted_at IS NULL AND description IS NOT NULL
+		 WHERE deleted_at IS NULL AND description IS NOT NULL
 		   AND description LIKE ? COLLATE NOCASE
 		   AND account_id IN (`+sqlInPlaceholders(len(accIDs))+`)
 		 GROUP BY description COLLATE NOCASE
@@ -466,8 +458,8 @@ func (s *Server) handleDeleteTransaction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if _, perm, err := checkAccountAccess(userID, accountID, tx); err != nil || perm != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+	if _, err := checkAccountAccess(userID, accountID, tx); err != nil {
+		http.Error(w, errForbidden, http.StatusForbidden)
 		return
 	}
 

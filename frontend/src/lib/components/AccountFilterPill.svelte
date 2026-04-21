@@ -14,7 +14,7 @@
 	<select class="account-filter" value={$currentAccountId?.toString() ?? ''} onchange={onChange}>
 		<option value="">All accounts</option>
 		{#each accounts as a (a.id)}
-			<option value={a.id.toString()}>{a.name}</option>
+			<option value={a.id.toString()}>{a.name}{a.is_shared ? ` (${a.owner_name})` : ''}</option>
 		{/each}
 	</select>
 {/if}

@@ -2,9 +2,9 @@
 	import { onMount } from 'svelte';
 	import { accounts, type Account } from '$lib/api/client';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import { currencySymbol } from '$lib/stores/auth';
+	import { currencySymbol, userId } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
-	import { sharedOwnerUserId, accountPermission } from '$lib/stores/shared';
+	import { sharedOwnerUserId, accountIsOwn } from '$lib/stores/shared';
 
 	let accts = $state<Account[]>([]);
 	let loading = $state(true);
@@ -38,16 +38,14 @@
 		await load();
 	});
 
-	const isOwn = $derived($sharedOwnerUserId === null);
-
 	async function load() {
 		loading = true;
 		accts = await accounts.list($sharedOwnerUserId || undefined);
 		loading = false;
 	}
 
-	function canMutate(a: Account): boolean {
-		return isOwn || accountPermission(a.id) === 'write';
+	function isOwned(a: Account): boolean {
+		return accountIsOwn(a, $userId || null);
 	}
 
 	function resetForm() {
@@ -67,10 +65,9 @@
 		e.preventDefault();
 		error = '';
 		submitting = true;
-		const oid = $sharedOwnerUserId || undefined;
 		try {
 			if (editId) {
-				await accounts.update(editId, { name: fName, currency: fCurrency }, oid);
+				await accounts.update(editId, { name: fName, currency: fCurrency });
 			} else {
 				await accounts.create({ name: fName, currency: fCurrency });
 			}
@@ -86,7 +83,7 @@
 	function remove(id: number) {
 		confirmMessage = 'Delete this account?';
 		confirmAction = async () => {
-			await accounts.delete(id, $sharedOwnerUserId || undefined);
+			await accounts.delete(id);
 			await load();
 		};
 		confirmOpen = true;
@@ -104,11 +101,9 @@
 <div class="page">
 	<div class="page-header">
 		<h1>Accounts</h1>
-		{#if isOwn}
-			<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
-				{showForm ? 'Cancel' : '+ New Account'}
-			</button>
-		{/if}
+		<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
+			{showForm ? 'Cancel' : '+ New Account'}
+		</button>
 	</div>
 
 	{#if error}
@@ -160,14 +155,17 @@
 		<div class="acct-grid">
 			{#each accts as acct (acct.id)}
 				<div class="card acct-card">
-					<div class="acct-name">{acct.name}</div>
+					<div class="acct-name">
+						{acct.name}
+						{#if !isOwned(acct)}
+							<span class="shared-badge" title="Co-owned account">Shared by {acct.owner_name}</span>
+						{/if}
+					</div>
 					<div class="acct-balance">{fmt(acct.balance)} <span class="acct-currency">{acct.currency}</span></div>
-					{#if canMutate(acct)}
+					{#if isOwned(acct)}
 						<div class="actions" style="margin-top: 0.75rem">
 							<button class="btn-ghost" onclick={() => startEdit(acct)}>Edit</button>
-							{#if isOwn}
-								<button class="btn-danger" onclick={() => remove(acct.id)}>Delete</button>
-							{/if}
+							<button class="btn-danger" onclick={() => remove(acct.id)}>Delete</button>
 						</div>
 					{/if}
 				</div>
@@ -198,6 +196,19 @@
 	.acct-name {
 		font-weight: 600;
 		font-size: 1.1rem;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+	.shared-badge {
+		font-size: 0.7rem;
+		font-weight: 500;
+		color: var(--text-muted);
+		background: var(--bg-hover);
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		padding: 0.1rem 0.55rem;
 	}
 	.acct-balance {
 		font-size: 1.5rem;

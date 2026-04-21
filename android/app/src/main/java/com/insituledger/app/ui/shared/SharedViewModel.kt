@@ -19,7 +19,6 @@ data class SharedUiState(
     val isConnected: Boolean = false,
     val email: String = "",
     val selectedAccountId: Long? = null,
-    val permission: String = "read",
     val isSaving: Boolean = false,
     val error: String? = null
 )
@@ -70,7 +69,6 @@ class SharedViewModel @Inject constructor(
 
     fun updateEmail(email: String) { _uiState.update { it.copy(email = email) } }
     fun updateAccount(accountId: Long) { _uiState.update { it.copy(selectedAccountId = accountId) } }
-    fun updatePermission(permission: String) { _uiState.update { it.copy(permission = permission) } }
 
     fun add() {
         val state = _uiState.value
@@ -85,7 +83,7 @@ class SharedViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, error = null) }
-            sharedRepository.createSharedAccess(state.email.trim(), accountId, state.permission)
+            sharedRepository.createSharedAccess(state.email.trim(), accountId)
                 .onSuccess {
                     _uiState.update { it.copy(email = "", isSaving = false) }
                     load()

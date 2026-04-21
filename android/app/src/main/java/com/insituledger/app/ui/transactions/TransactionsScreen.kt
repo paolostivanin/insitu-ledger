@@ -121,7 +121,7 @@ fun TransactionsScreen(
             }
         },
         floatingActionButton = {
-            if (!uiState.isReadOnly && !uiState.isSelectionMode) {
+            if (!uiState.isSelectionMode) {
                 BrandFab(onClick = onAddClick)
             }
         }
@@ -161,16 +161,19 @@ fun TransactionsScreen(
                         icon = Icons.AutoMirrored.Filled.ReceiptLong,
                         title = "No transactions yet",
                         message = "Tap + to record your first transaction.",
-                        actionLabel = if (!uiState.isReadOnly) "Add transaction" else null,
-                        onAction = if (!uiState.isReadOnly) onAddClick else null
+                        actionLabel = "Add transaction",
+                        onAction = onAddClick
                     )
                     else -> {
                         val categoryMap = remember(uiState.categories) {
                             uiState.categories.associateBy { it.id }
                         }
+                        val accountMap = remember(uiState.accounts) {
+                            uiState.accounts.associateBy { it.id }
+                        }
+                        val currentUserId = uiState.currentUserId
                         val isSelectionMode = uiState.isSelectionMode
                         val selectedIds = uiState.selectedIds
-                        val isReadOnly = uiState.isReadOnly
                         if (uiState.sortBy == "date") {
                             val grouped = remember(uiState.transactions) {
                                 uiState.transactions.groupBy { it.date.take(10) }
@@ -193,9 +196,10 @@ fun TransactionsScreen(
                                             SwipeableTransactionRow(
                                                 txn = txn,
                                                 categoryMap = categoryMap,
+                                                accountMap = accountMap,
+                                                currentUserId = currentUserId,
                                                 isSelectionMode = isSelectionMode,
                                                 isSelected = selectedIds.contains(txn.id),
-                                                isReadOnly = isReadOnly,
                                                 onClick = {
                                                     if (isSelectionMode) viewModel.toggleSelect(txn.id)
                                                     else onTransactionClick(txn.id)
@@ -225,9 +229,10 @@ fun TransactionsScreen(
                                         SwipeableTransactionRow(
                                             txn = txn,
                                             categoryMap = categoryMap,
+                                            accountMap = accountMap,
+                                            currentUserId = currentUserId,
                                             isSelectionMode = isSelectionMode,
                                             isSelected = selectedIds.contains(txn.id),
-                                            isReadOnly = isReadOnly,
                                             onClick = {
                                                 if (isSelectionMode) viewModel.toggleSelect(txn.id)
                                                 else onTransactionClick(txn.id)
@@ -337,19 +342,22 @@ private fun DayHeader(date: String, txns: List<Transaction>) {
 private fun SwipeableTransactionRow(
     txn: Transaction,
     categoryMap: Map<Long, Category>,
+    accountMap: Map<Long, com.insituledger.app.domain.model.Account>,
+    currentUserId: Long?,
     isSelectionMode: Boolean,
     isSelected: Boolean,
-    isReadOnly: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onSwipeDelete: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    if (isReadOnly || isSelectionMode) {
+    if (isSelectionMode) {
         TransactionRowSurface(
             txn = txn,
             categoryMap = categoryMap,
-            isSelectionMode = isSelectionMode,
+            accountMap = accountMap,
+            currentUserId = currentUserId,
+            isSelectionMode = true,
             isSelected = isSelected,
             modifier = Modifier.combinedClickable(
                 onClick = onClick,
@@ -405,7 +413,9 @@ private fun SwipeableTransactionRow(
             TransactionRowSurface(
                 txn = txn,
                 categoryMap = categoryMap,
-                isSelectionMode = isSelectionMode,
+                accountMap = accountMap,
+                currentUserId = currentUserId,
+                isSelectionMode = false,
                 isSelected = isSelected,
                 modifier = Modifier.combinedClickable(
                     onClick = onClick,
@@ -423,6 +433,8 @@ private fun SwipeableTransactionRow(
 private fun TransactionRowSurface(
     txn: Transaction,
     categoryMap: Map<Long, Category>,
+    accountMap: Map<Long, com.insituledger.app.domain.model.Account>,
+    currentUserId: Long?,
     isSelectionMode: Boolean,
     isSelected: Boolean,
     modifier: Modifier = Modifier
@@ -432,6 +444,10 @@ private fun TransactionRowSurface(
     val accent = if (isIncome) semantic.income else semantic.expense
     val container = if (isIncome) semantic.incomeContainer else semantic.expenseContainer
     val rowBg = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow
+    val account = accountMap[txn.accountId]
+    val attribution = if (account?.isShared == true && txn.createdByUserId != null && txn.createdByUserId != currentUserId) {
+        txn.createdByName?.takeIf { it.isNotBlank() }?.let { "Added by $it" }
+    } else null
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -477,7 +493,7 @@ private fun TransactionRowSurface(
                 )
                 val category = categoryMap[txn.categoryId]
                 val time = if (txn.date.contains("T")) txn.date.substringAfter("T").take(5) else null
-                val secondary = listOfNotNull(time, category?.name).joinToString("  ·  ")
+                val secondary = listOfNotNull(time, category?.name, attribution).joinToString("  ·  ")
                 if (secondary.isNotEmpty()) {
                     Text(
                         text = secondary,

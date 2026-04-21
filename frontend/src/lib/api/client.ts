@@ -142,6 +142,8 @@ export interface Transaction {
 	id: number;
 	account_id: number;
 	category_id: number;
+	// user_id mirrors the account owner (legacy); use created_by_user_id for
+	// actual attribution. Will be dropped in a future major version.
 	user_id: number;
 	type: 'income' | 'expense';
 	amount: number;
@@ -152,6 +154,10 @@ export interface Transaction {
 	created_at: string;
 	updated_at: string;
 	sync_version: number;
+	// Authenticated creator (since v1.15.0). May differ from user_id on shared
+	// accounts. Set on create, sticky across edits.
+	created_by_user_id: number | null;
+	created_by_name: string | null;
 }
 
 export interface TransactionInput {
@@ -171,14 +177,16 @@ export interface AutocompleteSuggestion {
 }
 
 export const transactions = {
+	// owner_id is an optional list/autocomplete filter (since v1.15.0); mutations
+	// derive auth from the path or the authenticated user.
 	list: (params?: { from?: string; to?: string; category_id?: string; account_id?: string; limit?: string; offset?: string; sort_by?: string; sort_dir?: string; owner_id?: string }) =>
 		request<Transaction[]>('/transactions', { params }),
-	create: (data: TransactionInput, owner_id?: string) =>
-		request<{ id: number }>('/transactions', { method: 'POST', body: data, params: owner_id ? { owner_id } : undefined }),
-	update: (id: number, data: TransactionInput, owner_id?: string) =>
-		request<void>(`/transactions/${id}`, { method: 'PUT', body: data, params: owner_id ? { owner_id } : undefined }),
-	delete: (id: number, owner_id?: string) =>
-		request<void>(`/transactions/${id}`, { method: 'DELETE', params: owner_id ? { owner_id } : undefined }),
+	create: (data: TransactionInput) =>
+		request<{ id: number }>('/transactions', { method: 'POST', body: data }),
+	update: (id: number, data: TransactionInput) =>
+		request<void>(`/transactions/${id}`, { method: 'PUT', body: data }),
+	delete: (id: number) =>
+		request<void>(`/transactions/${id}`, { method: 'DELETE' }),
 	autocomplete: (q: string, owner_id?: string) =>
 		request<AutocompleteSuggestion[]>('/transactions/autocomplete', { params: owner_id ? { q, owner_id } : { q } })
 };
@@ -207,13 +215,15 @@ export interface CategoryInput {
 }
 
 export const categories = {
+	// owner_id is an optional list filter (since v1.15.0); mutations derive
+	// auth from the authenticated user.
 	list: (owner_id?: string) => request<Category[]>('/categories', { params: owner_id ? { owner_id } : undefined }),
-	create: (data: CategoryInput, owner_id?: string) =>
-		request<{ id: number }>('/categories', { method: 'POST', body: data, params: owner_id ? { owner_id } : undefined }),
-	update: (id: number, data: CategoryInput, owner_id?: string) =>
-		request<void>(`/categories/${id}`, { method: 'PUT', body: data, params: owner_id ? { owner_id } : undefined }),
-	delete: (id: number, owner_id?: string) =>
-		request<void>(`/categories/${id}`, { method: 'DELETE', params: owner_id ? { owner_id } : undefined })
+	create: (data: CategoryInput) =>
+		request<{ id: number }>('/categories', { method: 'POST', body: data }),
+	update: (id: number, data: CategoryInput) =>
+		request<void>(`/categories/${id}`, { method: 'PUT', body: data }),
+	delete: (id: number) =>
+		request<void>(`/categories/${id}`, { method: 'DELETE' })
 };
 
 // Accounts
@@ -226,6 +236,12 @@ export interface Account {
 	created_at: string;
 	updated_at: string;
 	sync_version: number;
+	// Since v1.15.0: the account owner's id and display name (mirrors user_id;
+	// owner_name is denormalized for the "Shared by [name]" UI badge). is_shared
+	// is true when at least one other user has co-owner access.
+	owner_user_id: number;
+	owner_name: string;
+	is_shared: boolean;
 }
 
 export interface AccountInput {
@@ -234,13 +250,15 @@ export interface AccountInput {
 }
 
 export const accounts = {
+	// owner_id is an optional list filter (since v1.15.0); mutations derive
+	// auth from the path or the authenticated user.
 	list: (owner_id?: string) => request<Account[]>('/accounts', { params: owner_id ? { owner_id } : undefined }),
-	create: (data: AccountInput, owner_id?: string) =>
-		request<{ id: number }>('/accounts', { method: 'POST', body: data, params: owner_id ? { owner_id } : undefined }),
-	update: (id: number, data: AccountInput, owner_id?: string) =>
-		request<void>(`/accounts/${id}`, { method: 'PUT', body: data, params: owner_id ? { owner_id } : undefined }),
-	delete: (id: number, owner_id?: string) =>
-		request<void>(`/accounts/${id}`, { method: 'DELETE', params: owner_id ? { owner_id } : undefined })
+	create: (data: AccountInput) =>
+		request<{ id: number }>('/accounts', { method: 'POST', body: data }),
+	update: (id: number, data: AccountInput) =>
+		request<void>(`/accounts/${id}`, { method: 'PUT', body: data }),
+	delete: (id: number) =>
+		request<void>(`/accounts/${id}`, { method: 'DELETE' })
 };
 
 // Scheduled transactions
@@ -248,6 +266,8 @@ export interface ScheduledTransaction {
 	id: number;
 	account_id: number;
 	category_id: number;
+	// user_id mirrors the account owner (legacy); use created_by_user_id for
+	// actual attribution.
 	user_id: number;
 	type: 'income' | 'expense';
 	amount: number;
@@ -262,6 +282,8 @@ export interface ScheduledTransaction {
 	created_at: string;
 	updated_at: string;
 	sync_version: number;
+	created_by_user_id: number | null;
+	created_by_name: string | null;
 }
 
 export interface ScheduledInput {
@@ -278,14 +300,16 @@ export interface ScheduledInput {
 }
 
 export const scheduled = {
+	// owner_id is an optional list filter (since v1.15.0); mutations derive
+	// auth from the path or the authenticated user.
 	list: (params?: { owner_id?: string; account_id?: string }) =>
 		request<ScheduledTransaction[]>('/scheduled', { params }),
-	create: (data: ScheduledInput, owner_id?: string) =>
-		request<{ id: number }>('/scheduled', { method: 'POST', body: data, params: owner_id ? { owner_id } : undefined }),
-	update: (id: number, data: ScheduledInput, owner_id?: string) =>
-		request<void>(`/scheduled/${id}`, { method: 'PUT', body: data, params: owner_id ? { owner_id } : undefined }),
-	delete: (id: number, owner_id?: string) =>
-		request<void>(`/scheduled/${id}`, { method: 'DELETE', params: owner_id ? { owner_id } : undefined })
+	create: (data: ScheduledInput) =>
+		request<{ id: number }>('/scheduled', { method: 'POST', body: data }),
+	update: (id: number, data: ScheduledInput) =>
+		request<void>(`/scheduled/${id}`, { method: 'PUT', body: data }),
+	delete: (id: number) =>
+		request<void>(`/scheduled/${id}`, { method: 'DELETE' })
 };
 
 // Reports
@@ -348,10 +372,12 @@ export interface AccessibleOwner {
 export const shared = {
 	list: () => request<SharedAccess[]>('/shared'),
 	accessible: () => request<AccessibleOwner[]>('/shared/accessible'),
-	create: (guest_email: string, account_id: number, permission: string) =>
+	// Since v1.15.0 every share is full co-owner write; the permission field
+	// is not sent.
+	create: (guest_email: string, account_id: number) =>
 		request<{ id: number }>('/shared', {
 			method: 'POST',
-			body: { guest_email, account_id, permission }
+			body: { guest_email, account_id }
 		}),
 	delete: (id: number) => request<void>(`/shared/${id}`, { method: 'DELETE' })
 };
@@ -402,12 +428,12 @@ export interface AdminUser {
 	created_at: string;
 }
 
-// Batch operations
+// Batch operations — auth derived per-id from each transaction's account.
 export const batch = {
-	deleteTransactions: (ids: number[], owner_id?: string) =>
-		request<void>('/transactions/batch-delete', { method: 'POST', body: { ids }, params: owner_id ? { owner_id } : undefined }),
-	updateCategory: (ids: number[], category_id: number, owner_id?: string) =>
-		request<void>('/transactions/batch-update-category', { method: 'POST', body: { ids, category_id }, params: owner_id ? { owner_id } : undefined })
+	deleteTransactions: (ids: number[]) =>
+		request<void>('/transactions/batch-delete', { method: 'POST', body: { ids } }),
+	updateCategory: (ids: number[], category_id: number) =>
+		request<void>('/transactions/batch-update-category', { method: 'POST', body: { ids, category_id } })
 };
 
 // CSV import/export
@@ -432,9 +458,8 @@ export const csv = {
 		a.click();
 		URL.revokeObjectURL(a.href);
 	},
-	importTransactions: async (file: File, owner_id?: string) => {
-		let url = `${BASE}/transactions/import`;
-		if (owner_id) url += `?owner_id=${encodeURIComponent(owner_id)}`;
+	importTransactions: async (file: File) => {
+		const url = `${BASE}/transactions/import`;
 		const headers: Record<string, string> = {};
 		const token = getToken();
 		if (token) headers['Authorization'] = `Bearer ${token}`;

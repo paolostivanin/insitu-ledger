@@ -5,7 +5,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import AccountFilterPill from '$lib/components/AccountFilterPill.svelte';
 	import { addToast } from '$lib/stores/toast';
-	import { sharedOwnerUserId, accountPermission, hasAnyWriteInCurrentContext } from '$lib/stores/shared';
+	import { sharedOwnerUserId } from '$lib/stores/shared';
 	import { currentAccountId } from '$lib/stores/accountFilter';
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
@@ -197,9 +197,11 @@
 		loadingMore = false;
 	}
 
-	function canEdit(txn: Transaction): boolean {
-		return accountPermission(txn.account_id) === 'write';
+	function isSharedAcct(accountId: number): boolean {
+		return !!accts.find(a => a.id === accountId)?.is_shared;
 	}
+
+	const hasAnyShared = $derived(accts.some(a => a.is_shared));
 
 	function toggleSort(column: string) {
 		if (sortBy === column) {
@@ -288,11 +290,10 @@
 			note: fNote || undefined,
 			date: `${fDate}T${fTime}`
 		};
-		const oid = $sharedOwnerUserId || undefined;
 		try {
 			localStorage.setItem('lastUsedAccountId', fAccountId.toString());
 			if (editId) {
-				await transactions.update(editId, data, oid);
+				await transactions.update(editId, data);
 			} else {
 				const isFuture = new Date(`${fDate}T${fTime}`) > new Date();
 				if (isFuture) {
@@ -307,10 +308,10 @@
 						rrule: 'FREQ=DAILY',
 						next_occurrence: `${fDate}T${fTime}`,
 						max_occurrences: 1
-					}, oid);
+					});
 					addToast('Future-dated transaction scheduled — it will be created automatically on ' + fDate);
 				} else {
-					await transactions.create(data, oid);
+					await transactions.create(data);
 				}
 			}
 			showForm = false;
@@ -325,7 +326,7 @@
 	function remove(id: number) {
 		confirmMessage = 'Delete this transaction?';
 		confirmAction = async () => {
-			await transactions.delete(id, $sharedOwnerUserId || undefined);
+			await transactions.delete(id);
 			await load();
 		};
 		confirmOpen = true;
@@ -360,7 +361,7 @@
 		confirmAction = async () => {
 			error = '';
 			try {
-				await batch.deleteTransactions([...selectedIds], $sharedOwnerUserId || undefined);
+				await batch.deleteTransactions([...selectedIds]);
 				await load();
 			} catch (e: any) {
 				error = e.message;
@@ -373,7 +374,7 @@
 		if (!batchCategoryId) return;
 		error = '';
 		try {
-			await batch.updateCategory([...selectedIds], batchCategoryId, $sharedOwnerUserId || undefined);
+			await batch.updateCategory([...selectedIds], batchCategoryId);
 			showBatchCategoryPicker = false;
 			await load();
 		} catch (e: any) {
@@ -402,7 +403,7 @@
 		if (!file) return;
 		error = '';
 		try {
-			const result = await csv.importTransactions(file, $sharedOwnerUserId || undefined);
+			const result = await csv.importTransactions(file);
 			addToast(`Successfully imported ${result.imported} transaction(s).`);
 			await load();
 		} catch (e: any) {
@@ -418,13 +419,11 @@
 		<div class="header-actions">
 			<AccountFilterPill accounts={accts} />
 			<button class="btn-ghost" onclick={exportCsv}>Export CSV</button>
-			{#if $hasAnyWriteInCurrentContext}
-				<button class="btn-ghost" onclick={() => importInput?.click()}>Import CSV</button>
-				<input type="file" accept=".csv" bind:this={importInput} onchange={importCsv} style="display:none" />
-				<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
-					{showForm ? 'Cancel' : '+ New Transaction'}
-				</button>
-			{/if}
+			<button class="btn-ghost" onclick={() => importInput?.click()}>Import CSV</button>
+			<input type="file" accept=".csv" bind:this={importInput} onchange={importCsv} style="display:none" />
+			<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
+				{showForm ? 'Cancel' : '+ New Transaction'}
+			</button>
 		</div>
 	</div>
 
@@ -475,8 +474,8 @@
 					<div class="form-group">
 						<label for="account">Account</label>
 						<select id="account" bind:value={fAccountId} onchange={() => localStorage.setItem('lastUsedAccountId', fAccountId.toString())}>
-							{#each accts.filter(a => accountPermission(a.id) === 'write') as a (a.id)}
-								<option value={a.id}>{a.name}{$sharedOwnerUserId ? ' (shared)' : ''}</option>
+							{#each accts as a (a.id)}
+								<option value={a.id}>{a.name}{a.is_shared ? ` (shared by ${a.owner_name})` : ''}</option>
 							{/each}
 						</select>
 					</div>
@@ -577,7 +576,9 @@
 				<thead>
 					<tr>
 						<th class="check-col"></th>
-						<th>Date</th><th>Time</th><th>Type</th><th>Category</th><th>Account</th><th>Name</th><th>Amount</th><th></th>
+						<th>Date</th><th>Time</th><th>Type</th><th>Category</th><th>Account</th><th>Name</th>
+						{#if hasAnyShared}<th>Added by</th>{/if}
+						<th>Amount</th><th></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -590,6 +591,7 @@
 							<td><div class="skeleton" style="width:80px"></div></td>
 							<td><div class="skeleton" style="width:70px"></div></td>
 							<td><div class="skeleton" style="width:120px"></div></td>
+							{#if hasAnyShared}<td><div class="skeleton" style="width:60px"></div></td>{/if}
 							<td><div class="skeleton" style="width:80px"></div></td>
 							<td></td>
 						</tr>
@@ -613,6 +615,7 @@
 						<th class="sortable" onclick={() => toggleSort('category')}>Category{sortIndicator('category')}</th>
 						<th>Account</th>
 						<th class="sortable" onclick={() => toggleSort('description')}>Name{sortIndicator('description')}</th>
+						{#if hasAnyShared}<th>Added by</th>{/if}
 						<th class="sortable" onclick={() => toggleSort('amount')}>Amount{sortIndicator('amount')}</th>
 						<th></th>
 					</tr>
@@ -629,14 +632,15 @@
 							<td>{catName(txn.category_id)}</td>
 							<td>{acctName(txn.account_id)}</td>
 							<td>{txn.description || '—'}</td>
+							{#if hasAnyShared}
+								<td class="added-by">{isSharedAcct(txn.account_id) ? (txn.created_by_name || '—') : ''}</td>
+							{/if}
 							<td class={txn.type === 'income' ? 'amount-income' : 'amount-expense'}>
 								{txn.type === 'income' ? '+' : '-'}{fmt(txn.amount)} {txn.currency}
 							</td>
 							<td class="actions">
-								{#if canEdit(txn)}
-									<button class="btn-ghost" onclick={() => startEdit(txn)}>Edit</button>
-									<button class="btn-danger" onclick={() => remove(txn.id)}>Del</button>
-								{/if}
+								<button class="btn-ghost" onclick={() => startEdit(txn)}>Edit</button>
+								<button class="btn-danger" onclick={() => remove(txn.id)}>Del</button>
 							</td>
 						</tr>
 					{/each}
@@ -676,6 +680,10 @@
 		margin-bottom: 1rem;
 	}
 	.time-cell {
+		color: var(--text-muted);
+		font-size: 0.85rem;
+	}
+	.added-by {
 		color: var(--text-muted);
 		font-size: 0.85rem;
 	}

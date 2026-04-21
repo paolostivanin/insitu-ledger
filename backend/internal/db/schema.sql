@@ -81,7 +81,13 @@ CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+    -- LEGACY: user_id mirrors accounts.user_id (the account owner), NOT the
+    -- creator. Kept because many indexes/queries (idx_transactions_user_date,
+    -- idx_transactions_user_sync, sync filters) depend on it. Use
+    -- created_by_user_id for actual attribution. Drop in a future major
+    -- version after migrating those queries to filter by account_id.
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
     amount REAL NOT NULL CHECK (amount > 0),
     currency TEXT NOT NULL DEFAULT 'EUR',
@@ -98,7 +104,9 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+    -- LEGACY: see note on transactions.user_id above. Same semantics here.
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
     amount REAL NOT NULL CHECK (amount > 0),
     currency TEXT NOT NULL DEFAULT 'EUR',
@@ -120,7 +128,10 @@ CREATE TABLE IF NOT EXISTS shared_account_access (
     owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     guest_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    permission TEXT NOT NULL CHECK (permission IN ('read', 'write')),
+    -- Sharing always grants full co-owner write access. The 'read' option was
+    -- removed in v1.15.0; existing rows are migrated to 'write'. Column is
+    -- kept (not dropped) so old clients/sync payloads continue to validate.
+    permission TEXT NOT NULL DEFAULT 'write' CHECK (permission = 'write'),
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     sync_version INTEGER NOT NULL DEFAULT 0,
     UNIQUE(owner_user_id, guest_user_id, account_id)
@@ -138,6 +149,7 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_active ON scheduled_transactions(active
 CREATE INDEX IF NOT EXISTS idx_shared_account_access_guest ON shared_account_access(guest_user_id);
 CREATE INDEX IF NOT EXISTS idx_shared_account_access_account ON shared_account_access(account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_description ON transactions(description COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_transactions_created_by ON transactions(created_by_user_id);
 
 -- Sync version indexes (for efficient sync queries)
 CREATE INDEX IF NOT EXISTS idx_transactions_sync ON transactions(sync_version);

@@ -43,9 +43,7 @@ fun ScheduledScreen(
     Scaffold(
         topBar = { TopAppBar(title = { Text("Scheduled") }) },
         floatingActionButton = {
-            if (!uiState.isReadOnly) {
-                BrandFab(onClick = onAddClick, contentDescription = "Add Scheduled")
-            }
+            BrandFab(onClick = onAddClick, contentDescription = "Add Scheduled")
         }
     ) { padding ->
         when {
@@ -54,8 +52,8 @@ fun ScheduledScreen(
                 icon = Icons.Default.EventRepeat,
                 title = "No scheduled transactions",
                 message = "Set up recurring transactions for rent, salary, subscriptions and more.",
-                actionLabel = if (!uiState.isReadOnly) "Add scheduled" else null,
-                onAction = if (!uiState.isReadOnly) onAddClick else null,
+                actionLabel = "Add scheduled",
+                onAction = onAddClick,
                 modifier = Modifier.padding(padding)
             )
             else -> {
@@ -72,8 +70,8 @@ fun ScheduledScreen(
                     items(uiState.items, key = { it.id }) { item ->
                         ScheduledRow(
                             item = item,
-                            onEdit = if (uiState.isReadOnly) null else {{ onEditClick(item.id) }},
-                            onDelete = if (uiState.isReadOnly) null else {{ viewModel.delete(item.id) }},
+                            onEdit = { onEditClick(item.id) },
+                            onDelete = { viewModel.delete(item.id) },
                             modifier = Modifier.animateItem()
                         )
                     }
@@ -86,8 +84,8 @@ fun ScheduledScreen(
 @Composable
 private fun ScheduledRow(
     item: ScheduledTransaction,
-    onEdit: (() -> Unit)?,
-    onDelete: (() -> Unit)?,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val semantic = LocalSemanticColors.current
@@ -169,18 +167,12 @@ private fun ScheduledRow(
             }
             Column(horizontalAlignment = Alignment.End) {
                 AmountText(amount = item.amount, type = item.type)
-                if (onEdit != null || onDelete != null) {
-                    Row {
-                        if (onEdit != null) {
-                            IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        if (onDelete != null) {
-                            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
-                            }
-                        }
+                Row {
+                    IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                     }
                 }
             }

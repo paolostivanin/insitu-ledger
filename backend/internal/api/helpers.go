@@ -119,12 +119,65 @@ func resolveTargetOwner(r *http.Request, authUserID int64, db dbQuerier) (int64,
 	return ownerID, false, nil
 }
 
+// listAllAccessibleAccountIDs returns every account the auth user can access:
+// their own non-deleted accounts UNION every account shared with them. Used by
+// list/report/sync endpoints in aggregate mode (no owner_id filter).
+func listAllAccessibleAccountIDs(authUserID int64, db dbQuerier) ([]int64, error) {
+	rows, err := db.Query(
+		`SELECT id FROM accounts WHERE user_id = ? AND deleted_at IS NULL
+		 UNION
+		 SELECT a.id FROM accounts a
+		 JOIN shared_account_access s ON s.account_id = a.id
+		 WHERE s.guest_user_id = ? AND a.deleted_at IS NULL`,
+		authUserID, authUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// listAccessibleOwnerIDs returns the owner user IDs whose owner-scoped resources
+// (categories) the auth user should see in aggregate mode: their own ID plus
+// the owners of every shared account. Used by handleListCategories and the
+// sync endpoint to compose owner-keyed UNION queries.
+func listAccessibleOwnerIDs(authUserID int64, db dbQuerier) ([]int64, error) {
+	rows, err := db.Query(
+		`SELECT DISTINCT owner_user_id FROM shared_account_access WHERE guest_user_id = ?`,
+		authUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []int64{authUserID}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // listAccessibleAccountIDs returns the account IDs (non-deleted) in
 // targetOwnerID's space that authUserID can read. If authUserID == targetOwnerID
 // it returns all of the owner's accounts. Otherwise it returns only the
 // accounts shared with the auth user.
 //
 // Returns an empty slice (not nil, not an error) when there's no access.
+// Used by handlers in filter-mode (when ?owner_id is specified). For
+// aggregate-mode (default) reads, use listAllAccessibleAccountIDs instead.
 func listAccessibleAccountIDs(authUserID, targetOwnerID int64, db dbQuerier) ([]int64, error) {
 	var (
 		rows *sql.Rows
@@ -160,34 +213,52 @@ func listAccessibleAccountIDs(authUserID, targetOwnerID int64, db dbQuerier) ([]
 	return ids, rows.Err()
 }
 
-// checkAccountAccess looks up the account and returns its owner user_id plus
-// the auth user's permission ("read" or "write"). If the auth user owns the
-// account they always get "write". Otherwise returns the share permission, or
-// 403 if no share exists. Returns 404-style "account not found" if the
-// account doesn't exist or is soft-deleted (mapped to 403 by handlers to
-// avoid leaking IDs).
-func checkAccountAccess(authUserID, accountID int64, db dbQuerier) (int64, string, error) {
+// checkAccountAccess looks up the account and returns its owner user_id when
+// the auth user can access it (own or shared). Returns errForbidden otherwise
+// (also used for "not found" / soft-deleted to avoid leaking IDs). Since
+// v1.15.0 dropped read-only sharing, any accessible account is fully writable;
+// callers no longer need a separate permission check.
+func checkAccountAccess(authUserID, accountID int64, db dbQuerier) (int64, error) {
 	var ownerID int64
 	err := db.QueryRow(
 		`SELECT user_id FROM accounts WHERE id = ? AND deleted_at IS NULL`,
 		accountID,
 	).Scan(&ownerID)
 	if err != nil {
-		return 0, "", fmt.Errorf(errForbidden)
+		return 0, fmt.Errorf(errForbidden)
 	}
 	if ownerID == authUserID {
-		return ownerID, "write", nil
+		return ownerID, nil
 	}
-	var permission string
+	var hasShare int
 	err = db.QueryRow(
-		`SELECT permission FROM shared_account_access
+		`SELECT 1 FROM shared_account_access
 		 WHERE owner_user_id = ? AND guest_user_id = ? AND account_id = ?`,
 		ownerID, authUserID, accountID,
-	).Scan(&permission)
+	).Scan(&hasShare)
 	if err != nil {
-		return 0, "", fmt.Errorf(errForbidden)
+		return 0, fmt.Errorf(errForbidden)
 	}
-	return ownerID, permission, nil
+	return ownerID, nil
+}
+
+// requireOwner returns nil iff authUserID is the account's owner (i.e. the
+// account's user_id field). Used for owner-only operations: rename, delete,
+// change currency, share/revoke. Co-owners (write-shared users) cannot perform
+// these.
+func requireOwner(authUserID, accountID int64, db dbQuerier) error {
+	var ownerID int64
+	err := db.QueryRow(
+		`SELECT user_id FROM accounts WHERE id = ? AND deleted_at IS NULL`,
+		accountID,
+	).Scan(&ownerID)
+	if err != nil {
+		return fmt.Errorf(errForbidden)
+	}
+	if ownerID != authUserID {
+		return fmt.Errorf(errForbidden)
+	}
+	return nil
 }
 
 // writeAuthError writes the standard HTTP response for an auth error from any
@@ -225,54 +296,37 @@ func idsToArgs(ids []int64) []any {
 	return out
 }
 
-// listWritableAccountIDs returns account IDs in targetOwnerID's space that
-// the auth user can write to. If isOwn (auth user == owner) returns all the
-// owner's non-deleted accounts. Otherwise returns only accounts shared with
-// permission='write'.
-func listWritableAccountIDs(authUserID, targetOwnerID int64, db dbQuerier) ([]int64, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if authUserID == targetOwnerID {
-		rows, err = db.Query(
-			`SELECT id FROM accounts WHERE user_id = ? AND deleted_at IS NULL`,
-			targetOwnerID,
-		)
-	} else {
-		rows, err = db.Query(
-			`SELECT a.id FROM accounts a
-			 JOIN shared_account_access s ON s.account_id = a.id
-			 WHERE a.user_id = ? AND a.deleted_at IS NULL
-			   AND s.owner_user_id = ? AND s.guest_user_id = ?
-			   AND s.permission = 'write'`,
-			targetOwnerID, targetOwnerID, authUserID,
-		)
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	ids := []int64{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+// scopedAccountIDs returns the set of account IDs the auth user can read,
+// optionally narrowed by request query params:
+//   - When ?owner_id is absent (aggregate mode): returns own + every shared account.
+//   - When ?owner_id is present and accessible: returns only accounts in that
+//     owner's space accessible to auth user.
+//   - When ?account_id is also set: narrows the result to that single ID, but
+//     returns an empty slice if the account isn't accessible.
+//
+// This consolidates the read-side authorization for list/report/sync endpoints.
+// listWritableAccountIDs was removed in v1.15.0 since access == write now.
+func scopedAccountIDs(r *http.Request, authUserID int64, db dbQuerier) ([]int64, error) {
+	ownerStr := r.URL.Query().Get("owner_id")
+	var accIDs []int64
+	if ownerStr == "" {
+		ids, err := listAllAccessibleAccountIDs(authUserID, db)
+		if err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		accIDs = ids
+	} else {
+		targetOwnerID, _, err := resolveTargetOwner(r, authUserID, db)
+		if err != nil {
+			return nil, err
+		}
+		ids, err := listAccessibleAccountIDs(authUserID, targetOwnerID, db)
+		if err != nil {
+			return nil, err
+		}
+		accIDs = ids
 	}
-	return ids, rows.Err()
-}
 
-// scopedAccountIDs returns the set of account IDs the auth user can read in
-// targetOwner's space, optionally narrowed by the request's account_id query
-// param. If account_id is set but doesn't intersect the accessible set, the
-// returned slice is empty (queries using it will yield zero rows).
-func scopedAccountIDs(r *http.Request, authUserID, targetOwnerID int64, db dbQuerier) ([]int64, error) {
-	accIDs, err := listAccessibleAccountIDs(authUserID, targetOwnerID, db)
-	if err != nil {
-		return nil, err
-	}
 	want := r.URL.Query().Get("account_id")
 	if want == "" {
 		return accIDs, nil

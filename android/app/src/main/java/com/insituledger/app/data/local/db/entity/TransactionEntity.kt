@@ -20,6 +20,8 @@ data class TransactionEntity(
     @PrimaryKey val id: Long,
     @ColumnInfo(name = "account_id") val accountId: Long,
     @ColumnInfo(name = "category_id") val categoryId: Long,
+    // Legacy: mirrors the account owner (kept for index/sync compat). Use
+    // createdByUserId for actual attribution.
     @ColumnInfo(name = "user_id") val userId: Long,
     val type: String,
     val amount: Double,
@@ -31,5 +33,8 @@ data class TransactionEntity(
     @ColumnInfo(name = "updated_at") val updatedAt: String = "",
     @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,
     @ColumnInfo(name = "sync_version") val syncVersion: Long = 0,
-    @ColumnInfo(name = "is_local_only") val isLocalOnly: Boolean = false
+    @ColumnInfo(name = "is_local_only") val isLocalOnly: Boolean = false,
+    // Authenticated creator; differs from userId when a co-owner adds an
+    // entry to a shared account. Sticky across edits.
+    @ColumnInfo(name = "created_by_user_id") val createdByUserId: Long? = null
 )

@@ -17,16 +17,39 @@ type categoryRequest struct {
 func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, isOwn, err := resolveTargetOwner(r, userID, s.DB)
-	if err != nil {
-		writeAuthError(w, err)
-		return
+	// Aggregate mode (no owner_id) returns categories from every accessible
+	// owner so a guest can render Alice's transactions with Alice's category
+	// names. Filter mode (owner_id present) returns just that owner's set.
+	var (
+		uids          []int64
+		readOnlyByUID = map[int64]bool{}
+	)
+	ownerStr := r.URL.Query().Get("owner_id")
+	if ownerStr == "" {
+		ownerIDs, err := listAccessibleOwnerIDs(userID, s.DB)
+		if err != nil {
+			http.Error(w, "query error", http.StatusInternalServerError)
+			return
+		}
+		uids = ownerIDs
+		for _, uid := range uids {
+			readOnlyByUID[uid] = uid != userID
+		}
+	} else {
+		targetUserID, isOwn, err := resolveTargetOwner(r, userID, s.DB)
+		if err != nil {
+			writeAuthError(w, err)
+			return
+		}
+		uids = []int64{targetUserID}
+		readOnlyByUID[targetUserID] = !isOwn
 	}
 
 	rows, err := s.DB.Query(
 		`SELECT id, user_id, parent_id, name, type, icon, color, created_at, updated_at, sync_version
-		 FROM categories WHERE user_id = ? AND deleted_at IS NULL ORDER BY name`,
-		targetUserID,
+		 FROM categories WHERE deleted_at IS NULL AND user_id IN (`+sqlInPlaceholders(len(uids))+`)
+		 ORDER BY name`,
+		idsToArgs(uids)...,
 	)
 	if err != nil {
 		http.Error(w, "query error", http.StatusInternalServerError)
@@ -48,7 +71,7 @@ func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 		cats = append(cats, map[string]any{
 			"id": id, "user_id": uid, "parent_id": parentID, "name": name, "type": typ,
 			"icon": icon, "color": color, "created_at": createdAt, "updated_at": updatedAt,
-			"sync_version": syncVersion, "read_only": !isOwn,
+			"sync_version": syncVersion, "read_only": readOnlyByUID[uid],
 		})
 	}
 

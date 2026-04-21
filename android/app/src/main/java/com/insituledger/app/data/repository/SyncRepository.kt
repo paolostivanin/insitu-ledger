@@ -298,7 +298,9 @@ class SyncRepository @Inject constructor(
     private fun AccountDto.toEntity() = AccountEntity(
         id = id, userId = userId, name = name, currency = currency,
         balance = balance, createdAt = createdAt, updatedAt = updatedAt,
-        deletedAt = deletedAt, syncVersion = syncVersion
+        deletedAt = deletedAt, syncVersion = syncVersion,
+        ownerName = ownerName ?: "",
+        isShared = isShared
     )
 
     private fun CategoryDto.toEntity() = CategoryEntity(
@@ -311,7 +313,8 @@ class SyncRepository @Inject constructor(
         id = id, accountId = accountId, categoryId = categoryId,
         userId = userId, type = type, amount = amount, currency = currency,
         description = description, note = note, date = date, createdAt = createdAt,
-        updatedAt = updatedAt, deletedAt = deletedAt, syncVersion = syncVersion
+        updatedAt = updatedAt, deletedAt = deletedAt, syncVersion = syncVersion,
+        createdByUserId = createdByUserId
     )
 
     private fun ScheduledTransactionDto.toEntity() = ScheduledTransactionEntity(
@@ -320,6 +323,7 @@ class SyncRepository @Inject constructor(
         description = description, note = note, rrule = rrule, nextOccurrence = nextOccurrence,
         active = active, maxOccurrences = maxOccurrences, occurrenceCount = occurrenceCount,
         createdAt = createdAt, updatedAt = updatedAt,
-        deletedAt = deletedAt, syncVersion = syncVersion
+        deletedAt = deletedAt, syncVersion = syncVersion,
+        createdByUserId = createdByUserId
     )
 }

@@ -16,6 +16,7 @@ import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.data.sync.SyncManager
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -94,7 +95,7 @@ class TransactionRepository @Inject constructor(
     }
 
     suspend fun listFromServer(
-        ownerId: Long,
+        ownerId: Long? = null,
         from: String? = null,
         to: String? = null,
         categoryId: Long? = null,
@@ -112,7 +113,8 @@ class TransactionRepository @Inject constructor(
             Transaction(
                 id = dto.id, accountId = dto.accountId, categoryId = dto.categoryId,
                 userId = dto.userId, type = dto.type, amount = dto.amount,
-                currency = dto.currency, description = dto.description, note = dto.note, date = dto.date
+                currency = dto.currency, description = dto.description, note = dto.note, date = dto.date,
+                createdByUserId = dto.createdByUserId, createdByName = dto.createdByName
             )
         } ?: emptyList()
     }
@@ -132,6 +134,10 @@ class TransactionRepository @Inject constructor(
         require(amount > 0) { "Amount must be positive" }
         require(type == "income" || type == "expense") { "Type must be 'income' or 'expense'" }
 
+        // Stamp authenticated creator so the "Added by [me]" badge shows
+        // immediately for offline-created entries on shared accounts. The next
+        // sync round-trip refreshes from the server-side creator value anyway.
+        val currentUserId = prefs.userIdFlow.first()
         val localId = database.withTransaction {
             val minId = transactionDao.getMinId() ?: 0
             val id = if (minId >= 0) -1 else minId - 1
@@ -146,7 +152,8 @@ class TransactionRepository @Inject constructor(
                 description = description,
                 note = note,
                 date = date,
-                isLocalOnly = true
+                isLocalOnly = true,
+                createdByUserId = currentUserId
             )
             transactionDao.upsert(entity)
             val delta = if (type == "income") amount else -amount
@@ -236,6 +243,7 @@ class TransactionRepository @Inject constructor(
         id = id, accountId = accountId, categoryId = categoryId,
         userId = userId, type = type, amount = amount,
         currency = currency, description = description, note = note, date = date,
-        isLocalOnly = isLocalOnly
+        isLocalOnly = isLocalOnly,
+        createdByUserId = createdByUserId
     )
 }

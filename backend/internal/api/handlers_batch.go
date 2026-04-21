@@ -80,14 +80,14 @@ func (s *Server) handleBatchDeleteTransactions(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Verify the caller has write access to every affected account.
+	// Verify the caller has access to every affected account.
 	checked := map[int64]bool{}
 	for _, t := range found {
 		if checked[t.accountID] {
 			continue
 		}
-		if _, perm, err := checkAccountAccess(userID, t.accountID, tx); err != nil || perm != "write" {
-			http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		if _, err := checkAccountAccess(userID, t.accountID, tx); err != nil {
+			http.Error(w, errForbidden, http.StatusForbidden)
 			return
 		}
 		checked[t.accountID] = true
@@ -181,13 +181,13 @@ func (s *Server) handleBatchUpdateCategory(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Validate every transaction is in a write-accessible account, and collect owners.
+	// Validate every transaction is in an accessible account, and collect owners.
 	owners := map[int64]bool{}
 	checked := map[int64]bool{}
 	for _, t := range found {
 		if !checked[t.accountID] {
-			if _, perm, err := checkAccountAccess(userID, t.accountID, tx); err != nil || perm != "write" {
-				http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+			if _, err := checkAccountAccess(userID, t.accountID, tx); err != nil {
+				http.Error(w, errForbidden, http.StatusForbidden)
 				return
 			}
 			checked[t.accountID] = true

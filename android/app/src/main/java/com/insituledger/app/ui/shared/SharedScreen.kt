@@ -34,7 +34,7 @@ fun SharedScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Shared Access") },
+                title = { Text("Co-owners") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -67,7 +67,7 @@ fun SharedScreen(
                 )
                 Spacer(modifier = Modifier.height(AppSpacing.sm))
                 Text(
-                    "Shared access lets you give other users read or write access to your data. This requires connecting to an InSitu Ledger server in Settings.",
+                    "Co-owning an account lets another user fully read and write transactions on it. This requires connecting to an InSitu Ledger server in Settings.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -87,7 +87,7 @@ fun SharedScreen(
                         modifier = Modifier.padding(AppSpacing.cardPadding),
                         verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
                     ) {
-                        Text("Share with someone", style = MaterialTheme.typography.titleSmall)
+                        Text("Add a co-owner", style = MaterialTheme.typography.titleSmall)
 
                         OutlinedTextField(
                             value = uiState.email,
@@ -103,26 +103,6 @@ fun SharedScreen(
                             onSelect = viewModel::updateAccount
                         )
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.lg)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(
-                                    selected = uiState.permission == "read",
-                                    onClick = { viewModel.updatePermission("read") }
-                                )
-                                Text("Read")
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(
-                                    selected = uiState.permission == "write",
-                                    onClick = { viewModel.updatePermission("write") }
-                                )
-                                Text("Write")
-                            }
-                        }
-
                         uiState.error?.let {
                             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         }
@@ -133,7 +113,7 @@ fun SharedScreen(
                             enabled = !uiState.isSaving && uiState.email.isNotBlank() && uiState.selectedAccountId != null
                         ) {
                             if (uiState.isSaving) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary)
-                            else Text("Add")
+                            else Text("Add co-owner")
                         }
                     }
                 }
@@ -141,7 +121,7 @@ fun SharedScreen(
 
             if (uiState.accesses.isNotEmpty()) {
                 item {
-                    Text("Current access", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = AppSpacing.xs))
+                    Text("Current co-owners", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = AppSpacing.xs))
                 }
                 items(uiState.accesses, key = { it.id }) { access ->
                     Card(modifier = Modifier.fillMaxWidth()) {
@@ -153,7 +133,7 @@ fun SharedScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(access.guestName, style = MaterialTheme.typography.bodyMedium)
                                 Text(
-                                    "${access.accountName} · ${access.guestEmail} · ${access.permission}",
+                                    "${access.accountName} · ${access.guestEmail}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

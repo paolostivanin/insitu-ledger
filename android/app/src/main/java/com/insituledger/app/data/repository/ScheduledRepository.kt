@@ -11,6 +11,7 @@ import com.insituledger.app.domain.model.ScheduledTransaction
 import com.insituledger.app.data.sync.SyncManager
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,7 +31,7 @@ class ScheduledRepository @Inject constructor(
         list.map { it.toDomain() }
     }
 
-    suspend fun listFromServer(ownerId: Long): List<ScheduledTransaction> {
+    suspend fun listFromServer(ownerId: Long? = null): List<ScheduledTransaction> {
         val response = scheduledApi.list(ownerId = ownerId)
         if (!response.isSuccessful) return emptyList()
         return response.body()?.filter { it.deletedAt == null }?.map { dto ->
@@ -39,7 +40,8 @@ class ScheduledRepository @Inject constructor(
                 userId = dto.userId, type = dto.type, amount = dto.amount,
                 currency = dto.currency, description = dto.description, note = dto.note,
                 rrule = dto.rrule, nextOccurrence = dto.nextOccurrence, active = dto.active,
-                maxOccurrences = dto.maxOccurrences, occurrenceCount = dto.occurrenceCount
+                maxOccurrences = dto.maxOccurrences, occurrenceCount = dto.occurrenceCount,
+                createdByUserId = dto.createdByUserId, createdByName = dto.createdByName
             )
         } ?: emptyList()
     }
@@ -51,6 +53,7 @@ class ScheduledRepository @Inject constructor(
         amount: Double, currency: String, description: String?, note: String?,
         rrule: String, nextOccurrence: String, maxOccurrences: Int? = null
     ): Long {
+        val currentUserId = prefs.userIdFlow.first()
         val minId = scheduledDao.getMinId() ?: 0
         val localId = if (minId >= 0) -1 else minId - 1
         val entity = ScheduledTransactionEntity(
@@ -66,7 +69,8 @@ class ScheduledRepository @Inject constructor(
             rrule = rrule,
             nextOccurrence = nextOccurrence,
             maxOccurrences = maxOccurrences,
-            isLocalOnly = true
+            isLocalOnly = true,
+            createdByUserId = currentUserId
         )
         scheduledDao.upsert(entity)
 
@@ -129,6 +133,7 @@ class ScheduledRepository @Inject constructor(
         currency = currency, description = description, note = note,
         rrule = rrule, nextOccurrence = nextOccurrence,
         active = active, maxOccurrences = maxOccurrences,
-        occurrenceCount = occurrenceCount, isLocalOnly = isLocalOnly
+        occurrenceCount = occurrenceCount, isLocalOnly = isLocalOnly,
+        createdByUserId = createdByUserId
     )
 }

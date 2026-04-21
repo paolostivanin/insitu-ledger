@@ -22,7 +22,6 @@
 
 	let fEmail = $state('');
 	let fAccountId = $state(0);
-	let fPermission = $state('read');
 
 	// Password change
 	let pwCurrent = $state('');
@@ -150,9 +149,8 @@
 			return;
 		}
 		try {
-			await shared.create(fEmail, fAccountId, fPermission);
+			await shared.create(fEmail, fAccountId);
 			fEmail = '';
-			fPermission = 'read';
 			fAccountId = myAccounts[0]?.id ?? 0;
 			showShareForm = false;
 			await loadShared();
@@ -451,15 +449,15 @@
 			</div>
 		</div>
 
-		<!-- Shared Access -->
+		<!-- Co-owners -->
 		<div class="card section">
 			<div class="section-header">
-				<h2>Shared Access</h2>
+				<h2>Co-owners</h2>
 				<button class="btn-primary" onclick={() => showShareForm = !showShareForm} disabled={myAccounts.length === 0}>
-					{showShareForm ? 'Cancel' : '+ Share'}
+					{showShareForm ? 'Cancel' : '+ Add co-owner'}
 				</button>
 			</div>
-			<p class="desc">Share a single account with another user. Each share grants access only to that account; categories are always read-only for guests.</p>
+			<p class="desc">Grant another user full co-owner access to one of your accounts. Co-owners can read, add, edit, and delete transactions; only you can rename, delete, or re-share the account.</p>
 
 			{#if error}<p class="error-msg">{error}</p>{/if}
 
@@ -478,15 +476,8 @@
 								{/each}
 							</select>
 						</div>
-						<div class="form-group">
-							<label for="s-perm">Permission</label>
-							<select id="s-perm" bind:value={fPermission}>
-								<option value="read">Read only</option>
-								<option value="write">Read & Write</option>
-							</select>
-						</div>
 						<div class="form-group" style="display: flex; align-items: flex-end">
-							<button class="btn-primary" type="submit">Share</button>
+							<button class="btn-primary" type="submit">Add co-owner</button>
 						</div>
 					</div>
 				</form>
@@ -498,7 +489,7 @@
 				<div class="table-wrap">
 					<table>
 						<thead>
-							<tr><th>Guest</th><th>Email</th><th>Account</th><th>Permission</th><th></th></tr>
+							<tr><th>Co-owner</th><th>Email</th><th>Account</th><th></th></tr>
 						</thead>
 						<tbody>
 							{#each sharedList as s (s.id)}
@@ -506,7 +497,6 @@
 									<td>{s.guest_name}</td>
 									<td>{s.guest_email}</td>
 									<td>{s.account_name}</td>
-									<td><span class="badge">{s.permission}</span></td>
 									<td><button class="btn-danger" onclick={() => removeShare(s.id)}>Revoke</button></td>
 								</tr>
 							{/each}

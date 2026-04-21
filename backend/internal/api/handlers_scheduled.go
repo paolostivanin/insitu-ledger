@@ -22,26 +22,23 @@ type scheduledRequest struct {
 func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
+	accIDs, err := scopedAccountIDs(r, userID, s.DB)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
 
-	accIDs, err := listAccessibleAccountIDs(userID, targetUserID, s.DB)
-	if err != nil {
-		http.Error(w, "query error", http.StatusInternalServerError)
-		return
-	}
-
-	args := append([]any{targetUserID}, idsToArgs(accIDs)...)
 	rows, err := s.DB.Query(
-		`SELECT id, account_id, category_id, user_id, type, amount, currency,
-		        description, note, rrule, next_occurrence, active, max_occurrences, occurrence_count,
-		        created_at, updated_at, sync_version
-		 FROM scheduled_transactions WHERE user_id = ? AND deleted_at IS NULL
-		   AND account_id IN (`+sqlInPlaceholders(len(accIDs))+`) ORDER BY next_occurrence`,
-		args...,
+		`SELECT s.id, s.account_id, s.category_id, s.user_id, s.type, s.amount, s.currency,
+		        s.description, s.note, s.rrule, s.next_occurrence, s.active,
+		        s.max_occurrences, s.occurrence_count,
+		        s.created_at, s.updated_at, s.sync_version,
+		        s.created_by_user_id, cu.name
+		 FROM scheduled_transactions s
+		 LEFT JOIN users cu ON s.created_by_user_id = cu.id
+		 WHERE s.deleted_at IS NULL
+		   AND s.account_id IN (`+sqlInPlaceholders(len(accIDs))+`) ORDER BY s.next_occurrence`,
+		idsToArgs(accIDs)...,
 	)
 	if err != nil {
 		http.Error(w, "query error", http.StatusInternalServerError)
@@ -55,12 +52,12 @@ func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 		var active int
 		var typ, currency, rrule, nextOcc, createdAt, updatedAt string
 		var amount float64
-		var description, note *string
-		var maxOccurrences *int64
+		var description, note, createdByName *string
+		var maxOccurrences, createdByUserID *int64
 
 		if err := rows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
 			&description, &note, &rrule, &nextOcc, &active, &maxOccurrences, &occurrenceCount,
-			&createdAt, &updatedAt, &syncVersion); err != nil {
+			&createdAt, &updatedAt, &syncVersion, &createdByUserID, &createdByName); err != nil {
 			http.Error(w, "scan error", http.StatusInternalServerError)
 			return
 		}
@@ -70,7 +67,9 @@ func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 			"description": description, "note": note, "rrule": rrule, "next_occurrence": nextOcc,
 			"active": active == 1, "max_occurrences": maxOccurrences, "occurrence_count": occurrenceCount,
 			"created_at": createdAt, "updated_at": updatedAt,
-			"sync_version": syncVersion,
+			"sync_version":       syncVersion,
+			"created_by_user_id": createdByUserID,
+			"created_by_name":    createdByName,
 		})
 	}
 
@@ -100,13 +99,9 @@ func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "account_id is required", http.StatusBadRequest)
 		return
 	}
-	targetUserID, permission, err := checkAccountAccess(userID, req.AccountID, s.DB)
+	targetUserID, err := checkAccountAccess(userID, req.AccountID, s.DB)
 	if err != nil {
 		writeAuthError(w, err)
-		return
-	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
 		return
 	}
 
@@ -132,9 +127,9 @@ func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.DB.Exec(
-		`INSERT INTO scheduled_transactions (account_id, category_id, user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.AccountID, req.CategoryID, targetUserID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences,
+		`INSERT INTO scheduled_transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences,
 	)
 	if err != nil {
 		http.Error(w, "failed to create scheduled transaction", http.StatusInternalServerError)
@@ -171,14 +166,14 @@ func (s *Server) handleUpdateScheduled(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "scheduled transaction not found", http.StatusNotFound)
 		return
 	}
-	if _, perm, err := checkAccountAccess(userID, oldAccountID, s.DB); err != nil || perm != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+	if _, err := checkAccountAccess(userID, oldAccountID, s.DB); err != nil {
+		http.Error(w, errForbidden, http.StatusForbidden)
 		return
 	}
 	if req.AccountID != 0 && req.AccountID != oldAccountID {
-		newOwner, perm, err := checkAccountAccess(userID, req.AccountID, s.DB)
-		if err != nil || perm != "write" {
-			http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		newOwner, err := checkAccountAccess(userID, req.AccountID, s.DB)
+		if err != nil {
+			http.Error(w, errForbidden, http.StatusForbidden)
 			return
 		}
 		if newOwner != targetUserID {
@@ -235,8 +230,8 @@ func (s *Server) handleDeleteScheduled(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "scheduled transaction not found", http.StatusNotFound)
 		return
 	}
-	if _, perm, err := checkAccountAccess(userID, accountID, s.DB); err != nil || perm != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+	if _, err := checkAccountAccess(userID, accountID, s.DB); err != nil {
+		http.Error(w, errForbidden, http.StatusForbidden)
 		return
 	}
 

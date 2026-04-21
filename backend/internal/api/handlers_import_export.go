@@ -14,29 +14,27 @@ import (
 func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
+	accIDs, err := scopedAccountIDs(r, userID, s.DB)
 	if err != nil {
 		writeAuthError(w, err)
-		return
-	}
-
-	accIDs, err := scopedAccountIDs(r, userID, targetUserID, s.DB)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
 
+	// "added_by" projects the creator's display name unconditionally — solo
+	// accounts get the same column populated, which is simpler than per-row
+	// branching and keeps the CSV schema stable across share/un-share.
 	query := `SELECT t.date, t.type, t.amount, t.currency, t.description, COALESCE(t.note, ''),
-		COALESCE(c.name, ''), COALESCE(a.name, '')
+		COALESCE(c.name, ''), COALESCE(a.name, ''), COALESCE(cu.name, '')
 		FROM transactions t
 		LEFT JOIN categories c ON c.id = t.category_id
 		LEFT JOIN accounts a ON a.id = t.account_id
-		WHERE t.user_id = ? AND t.deleted_at IS NULL
+		LEFT JOIN users cu ON cu.id = t.created_by_user_id
+		WHERE t.deleted_at IS NULL
 		  AND t.account_id IN (` + sqlInPlaceholders(len(accIDs)) + `)`
-	args := append([]any{targetUserID}, idsToArgs(accIDs)...)
+	args := idsToArgs(accIDs)
 
 	if from != "" {
 		query += " AND SUBSTR(t.date, 1, 10) >= ?"
@@ -59,18 +57,18 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Disposition", "attachment; filename=transactions.csv")
 
 	cw := csv.NewWriter(w)
-	cw.Write([]string{"date", "type", "amount", "currency", "description", "note", "category_name", "account_name"})
+	cw.Write([]string{"date", "type", "amount", "currency", "description", "note", "category_name", "account_name", "added_by"})
 
 	for rows.Next() {
-		var date, typ, currency, description, note, catName, acctName string
+		var date, typ, currency, description, note, catName, acctName, addedBy string
 		var amount float64
-		if err := rows.Scan(&date, &typ, &amount, &currency, &description, &note, &catName, &acctName); err != nil {
+		if err := rows.Scan(&date, &typ, &amount, &currency, &description, &note, &catName, &acctName, &addedBy); err != nil {
 			log.Printf("export scan error: %v", err)
 			continue
 		}
 		cw.Write([]string{
 			truncDate(date), typ, strconv.FormatFloat(amount, 'f', 2, 64),
-			currency, description, note, catName, acctName,
+			currency, description, note, catName, acctName, addedBy,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -79,15 +77,10 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 	cw.Flush()
 	rows.Close()
 
-	// Data-access audit: bulk export of one user's transactions is sensitive
-	// even when performed by the owner. Record who, when, on whose data.
-	// Logged after rows.Close() so the audit INSERT doesn't contend with the
-	// open SELECT for a SQLite connection.
-	details := "self"
-	if targetUserID != userID {
-		details = fmt.Sprintf("on_behalf_of=%d", targetUserID)
-	}
-	writeAuditLog(s.DB, userID, "export_transactions", int64Ptr(targetUserID), details, s.clientIP(r))
+	// Data-access audit: bulk export across all accessible accounts is sensitive
+	// regardless of ownership. Logged after rows.Close() so the audit INSERT
+	// doesn't contend with the open SELECT for a SQLite connection.
+	writeAuditLog(s.DB, userID, "export_transactions", int64Ptr(userID), "self", s.clientIP(r))
 }
 
 const maxImportSize = 10 << 20 // 10 MB
@@ -123,11 +116,23 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		http.Error(w, "empty or invalid CSV", http.StatusBadRequest)
 		return
 	}
-	// Support both legacy (7-col, no note) and current (8-col, with note) headers.
+	// Three accepted shapes:
+	//   - 7 cols (oldest): date, type, amount, currency, description, category_name, account_name
+	//   - 8 cols (v1.4+): + note column at position 6
+	//   - 9 cols (v1.15+): + added_by column at the end (ignored on import — importer is always stamped as the creator)
+	headerNewest := []string{"date", "type", "amount", "currency", "description", "note", "category_name", "account_name", "added_by"}
 	headerNew := []string{"date", "type", "amount", "currency", "description", "note", "category_name", "account_name"}
 	headerOld := []string{"date", "type", "amount", "currency", "description", "category_name", "account_name"}
 	hasNoteCol := false
 	switch len(header) {
+	case len(headerNewest):
+		hasNoteCol = true
+		for i, h := range headerNewest {
+			if strings.TrimSpace(strings.ToLower(header[i])) != h {
+				http.Error(w, fmt.Sprintf("column %d: expected '%s', got '%s'", i+1, h, header[i]), http.StatusBadRequest)
+				return
+			}
+		}
 	case len(headerNew):
 		hasNoteCol = true
 		for i, h := range headerNew {
@@ -144,7 +149,7 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 			}
 		}
 	default:
-		http.Error(w, fmt.Sprintf("expected 7 or 8 columns, got %d", len(header)), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("expected 7, 8, or 9 columns, got %d", len(header)), http.StatusBadRequest)
 		return
 	}
 
@@ -172,14 +177,15 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Only accounts the auth user has write access to are valid import targets.
-	writableAccIDs, err := listWritableAccountIDs(userID, targetUserID, s.DB)
+	// Only accounts the auth user can access in the target owner's space are
+	// valid import destinations. (Post v1.15.0, access == write.)
+	writableAccIDs, err := listAccessibleAccountIDs(userID, targetUserID, s.DB)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if len(writableAccIDs) == 0 {
-		http.Error(w, "forbidden: no writable accounts", http.StatusForbidden)
+		http.Error(w, "forbidden: no accessible accounts", http.StatusForbidden)
 		return
 	}
 	acctRows, err := s.DB.Query(
@@ -231,10 +237,7 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		expectedCols := 7
-		if hasNoteCol {
-			expectedCols = 8
-		}
+		expectedCols := len(header)
 		if len(record) != expectedCols {
 			http.Error(w, fmt.Sprintf("row %d: expected %d columns, got %d", rowNum, expectedCols, len(record)), http.StatusBadRequest)
 			return
@@ -302,9 +305,9 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		}
 
 		if _, err := tx.Exec(
-			`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, note, date)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			acctID, catID, targetUserID, typ, amount, currency, desc, notePtr, date,
+			`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			acctID, catID, targetUserID, userID, typ, amount, currency, desc, notePtr, date,
 		); err != nil {
 			http.Error(w, fmt.Sprintf("row %d: insert error: %v", rowNum, err), http.StatusInternalServerError)
 			return

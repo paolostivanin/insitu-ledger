@@ -9,6 +9,7 @@ data class ScheduledTransactionEntity(
     @PrimaryKey val id: Long,
     @ColumnInfo(name = "account_id") val accountId: Long,
     @ColumnInfo(name = "category_id") val categoryId: Long,
+    // Legacy: mirrors the account owner. Use createdByUserId for attribution.
     @ColumnInfo(name = "user_id") val userId: Long,
     val type: String,
     val amount: Double,
@@ -24,5 +25,6 @@ data class ScheduledTransactionEntity(
     @ColumnInfo(name = "updated_at") val updatedAt: String = "",
     @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,
     @ColumnInfo(name = "sync_version") val syncVersion: Long = 0,
-    @ColumnInfo(name = "is_local_only") val isLocalOnly: Boolean = false
+    @ColumnInfo(name = "is_local_only") val isLocalOnly: Boolean = false,
+    @ColumnInfo(name = "created_by_user_id") val createdByUserId: Long? = null
 )

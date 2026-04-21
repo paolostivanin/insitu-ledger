@@ -10,7 +10,6 @@
 	let editId = $state<number | null>(null);
 	let error = $state('');
 	let submitting = $state(false);
-	let readOnly = $state(false);
 
 	// Confirm dialog
 	let confirmOpen = $state(false);
@@ -42,11 +41,9 @@
 
 	async function load() {
 		loading = true;
+		// In aggregate mode the list mixes own + co-owners' categories; each
+		// row carries its own read_only flag (true for foreign categories).
 		cats = await categories.list($sharedOwnerUserId || undefined);
-		// All categories from a single list response carry the same read_only
-		// flag (set true on the server when viewing another owner). Use the
-		// first row's flag, defaulting to false for an empty list.
-		readOnly = cats.length > 0 ? !!cats[0].read_only : $sharedOwnerUserId !== null;
 		loading = false;
 	}
 
@@ -124,16 +121,10 @@
 <div class="page">
 	<div class="page-header">
 		<h1>Categories</h1>
-		{#if !readOnly}
-			<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
-				{showForm ? 'Cancel' : '+ New Category'}
-			</button>
-		{/if}
+		<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
+			{showForm ? 'Cancel' : '+ New Category'}
+		</button>
 	</div>
-
-	{#if readOnly}
-		<p class="text-muted" style="margin-bottom: 1rem">Read-only: viewing another user's categories.</p>
-	{/if}
 
 	{#if error}
 		<p class="error-msg">{error}</p>
@@ -193,7 +184,7 @@
 						<span class="cat-icon">{cat.icon || ''}</span>
 						<span class="cat-name">{cat.name}</span>
 						<span class="badge {cat.type === 'income' ? 'badge-income' : 'badge-expense'}">{cat.type}</span>
-						{#if !readOnly}
+						{#if !cat.read_only}
 							<div class="actions">
 								<button class="btn-ghost" onclick={() => startEdit(cat)}>Edit</button>
 								<button class="btn-danger" onclick={() => remove(cat.id)}>Del</button>
@@ -206,7 +197,7 @@
 								<div class="sub-row">
 									<span class="cat-dot small" style="background: {sub.color || cat.color || '#6366f1'}"></span>
 									<span>{sub.icon || ''} {sub.name}</span>
-									{#if !readOnly}
+									{#if !sub.read_only}
 										<div class="actions">
 											<button class="btn-ghost" onclick={() => startEdit(sub)}>Edit</button>
 											<button class="btn-danger" onclick={() => remove(sub.id)}>Del</button>

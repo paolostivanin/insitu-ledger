@@ -15,24 +15,26 @@ type accountRequest struct {
 func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
+	accIDs, err := scopedAccountIDs(r, userID, s.DB)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
 
-	accIDs, err := listAccessibleAccountIDs(userID, targetUserID, s.DB)
-	if err != nil {
-		http.Error(w, "query error", http.StatusInternalServerError)
-		return
-	}
+	// Aggregate own + shared. is_shared is true when the account has any
+	// shared_account_access row (regardless of who is the guest); owner_name
+	// is the account owner's display name. Frontend uses these for the
+	// "Shared by [name]" badge and to gate owner-only UI controls.
+	query := `SELECT a.id, a.user_id, a.name, a.currency, a.balance,
+		         a.created_at, a.updated_at, a.sync_version,
+		         u.name AS owner_name,
+		         EXISTS(SELECT 1 FROM shared_account_access s WHERE s.account_id = a.id) AS is_shared
+		 FROM accounts a
+		 JOIN users u ON u.id = a.user_id
+		 WHERE a.deleted_at IS NULL
+		   AND a.id IN (` + sqlInPlaceholders(len(accIDs)) + `) ORDER BY a.name`
 
-	query := `SELECT id, user_id, name, currency, balance, created_at, updated_at, sync_version
-		 FROM accounts WHERE user_id = ? AND deleted_at IS NULL
-		   AND id IN (` + sqlInPlaceholders(len(accIDs)) + `) ORDER BY name`
-	args := append([]any{targetUserID}, idsToArgs(accIDs)...)
-
-	rows, err := s.DB.Query(query, args...)
+	rows, err := s.DB.Query(query, idsToArgs(accIDs)...)
 	if err != nil {
 		http.Error(w, "query error", http.StatusInternalServerError)
 		return
@@ -42,17 +44,21 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	var accts []map[string]any
 	for rows.Next() {
 		var id, uid, syncVersion int64
-		var name, currency, createdAt, updatedAt string
+		var name, currency, createdAt, updatedAt, ownerName string
 		var balance float64
+		var isShared int
 
-		if err := rows.Scan(&id, &uid, &name, &currency, &balance, &createdAt, &updatedAt, &syncVersion); err != nil {
+		if err := rows.Scan(&id, &uid, &name, &currency, &balance, &createdAt, &updatedAt, &syncVersion, &ownerName, &isShared); err != nil {
 			http.Error(w, "scan error", http.StatusInternalServerError)
 			return
 		}
 		accts = append(accts, map[string]any{
 			"id": id, "user_id": uid, "name": name, "currency": currency,
 			"balance": balance, "created_at": createdAt, "updated_at": updatedAt,
-			"sync_version": syncVersion,
+			"sync_version":  syncVersion,
+			"owner_user_id": uid,
+			"owner_name":    ownerName,
+			"is_shared":     isShared == 1,
 		})
 	}
 
@@ -128,13 +134,8 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ownerID, permission, err := checkAccountAccess(userID, id, s.DB)
-	if err != nil {
+	if err := requireOwner(userID, id, s.DB); err != nil {
 		writeAuthError(w, err)
-		return
-	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
 		return
 	}
 
@@ -146,7 +147,7 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 
 	_, err = s.DB.Exec(
 		"UPDATE accounts SET name=?, currency=? WHERE id=? AND user_id=?",
-		req.Name, req.Currency, id, ownerID,
+		req.Name, req.Currency, id, userID,
 	)
 	if err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
@@ -165,17 +166,12 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ownerID, permission, err := checkAccountAccess(userID, id, s.DB)
-	if err != nil {
+	if err := requireOwner(userID, id, s.DB); err != nil {
 		writeAuthError(w, err)
 		return
 	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
-		return
-	}
 
-	result, err := s.DB.Exec("UPDATE accounts SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, ownerID)
+	result, err := s.DB.Exec("UPDATE accounts SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, userID)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

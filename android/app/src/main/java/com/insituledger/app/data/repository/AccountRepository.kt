@@ -37,11 +37,15 @@ class AccountRepository @Inject constructor(
 
     suspend fun getCached(): List<Account> = _cached.value ?: getAll().first()
 
-    suspend fun listFromServer(ownerId: Long): List<Account> {
+    suspend fun listFromServer(ownerId: Long? = null): List<Account> {
         val response = accountApi.list(ownerId = ownerId)
         if (!response.isSuccessful) return emptyList()
         return response.body()?.filter { it.deletedAt == null }?.map { dto ->
-            Account(id = dto.id, userId = dto.userId, name = dto.name, currency = dto.currency, balance = dto.balance)
+            Account(
+                id = dto.id, userId = dto.userId, name = dto.name,
+                currency = dto.currency, balance = dto.balance,
+                ownerName = dto.ownerName ?: "", isShared = dto.isShared
+            )
         } ?: emptyList()
     }
 
@@ -112,6 +116,7 @@ class AccountRepository @Inject constructor(
     private fun AccountEntity.toDomain() = Account(
         id = id, userId = userId, name = name,
         currency = currency, balance = balance,
-        isLocalOnly = isLocalOnly
+        isLocalOnly = isLocalOnly,
+        ownerName = ownerName, isShared = isShared
     )
 }

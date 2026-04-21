@@ -9,7 +9,9 @@ data class Account(
     val name: String,
     val currency: String,
     val balance: Double,
-    val isLocalOnly: Boolean = false
+    val isLocalOnly: Boolean = false,
+    val ownerName: String = "",
+    val isShared: Boolean = false
 )
 
 @Immutable
@@ -36,7 +38,9 @@ data class Transaction(
     val description: String?,
     val note: String?,
     val date: String,
-    val isLocalOnly: Boolean = false
+    val isLocalOnly: Boolean = false,
+    val createdByUserId: Long? = null,
+    val createdByName: String? = null
 )
 
 @Immutable
@@ -55,7 +59,9 @@ data class ScheduledTransaction(
     val active: Boolean,
     val maxOccurrences: Int? = null,
     val occurrenceCount: Int = 0,
-    val isLocalOnly: Boolean = false
+    val isLocalOnly: Boolean = false,
+    val createdByUserId: Long? = null,
+    val createdByName: String? = null
 )
 
 @Immutable

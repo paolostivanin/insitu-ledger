@@ -180,7 +180,7 @@ func TestSharedAccessValidation(t *testing.T) {
 	aID := int(a["id"].(float64))
 
 	// Sharing with yourself: 400.
-	body := fmt.Sprintf(`{"guest_email":"admin@test.com","account_id":%d,"permission":"read"}`, aID)
+	body := fmt.Sprintf(`{"guest_email":"admin@test.com","account_id":%d}`, aID)
 	req = authedRequest("POST", "/api/shared", body, adminToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -188,17 +188,19 @@ func TestSharedAccessValidation(t *testing.T) {
 		t.Errorf("share with self: got %d, want 400", w.Code)
 	}
 
-	// Sharing an unknown account: 404.
-	body = fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":99999,"permission":"read"}`)
+	// Sharing an unknown account: 403. requireOwner returns forbidden for both
+	// "account doesn't exist" and "account isn't yours" — intentional, so we
+	// don't leak account-ID existence to non-owners.
+	body = `{"guest_email":"guest@test.com","account_id":99999}`
 	req = authedRequest("POST", "/api/shared", body, adminToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
-	if w.Code != 404 {
-		t.Errorf("share unknown account: got %d, want 404", w.Code)
+	if w.Code != 403 {
+		t.Errorf("share unknown account: got %d, want 403", w.Code)
 	}
 
 	// Sharing an unknown email: 404.
-	body = fmt.Sprintf(`{"guest_email":"nobody@test.com","account_id":%d,"permission":"read"}`, aID)
+	body = fmt.Sprintf(`{"guest_email":"nobody@test.com","account_id":%d}`, aID)
 	req = authedRequest("POST", "/api/shared", body, adminToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -206,17 +208,9 @@ func TestSharedAccessValidation(t *testing.T) {
 		t.Errorf("share unknown email: got %d, want 404", w.Code)
 	}
 
-	// Bad permission value: 400.
-	body = fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":%d,"permission":"admin"}`, aID)
-	req = authedRequest("POST", "/api/shared", body, adminToken)
-	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	if w.Code != 400 {
-		t.Errorf("bad permission: got %d, want 400", w.Code)
-	}
-
-	// First valid share: 201.
-	body = fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":%d,"permission":"read"}`, aID)
+	// First valid share: 201. (permission field is now ignored — every share is
+	// full co-owner write.)
+	body = fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":%d}`, aID)
 	req = authedRequest("POST", "/api/shared", body, adminToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)

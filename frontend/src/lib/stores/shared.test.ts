@@ -41,12 +41,12 @@ describe('shared store', () => {
 	});
 
 	describe('accountPermission', () => {
-		it("returns 'write' when viewing My Data (no owner selected)", async () => {
+		it("returns 'write' when no filter is set (aggregate view)", async () => {
 			const { accountPermission } = await loadStore();
 			expect(accountPermission(123)).toBe('write');
 		});
 
-		it('returns the per-account grant for the selected owner', async () => {
+		it("returns 'write' for accounts in the filtered owner's grants, null otherwise", async () => {
 			const { accountPermission, accessibleOwners, setSharedOwner } = await loadStore();
 			accessibleOwners.set([
 				{
@@ -54,44 +54,56 @@ describe('shared store', () => {
 					name: 'Alice',
 					email: 'a@x',
 					accounts: [
-						{ account_id: 100, account_name: 'Wallet', permission: 'read' },
+						{ account_id: 100, account_name: 'Wallet', permission: 'write' },
 						{ account_id: 101, account_name: 'Joint', permission: 'write' }
 					]
 				}
 			]);
 			setSharedOwner('7');
-			expect(accountPermission(100)).toBe('read');
+			expect(accountPermission(100)).toBe('write');
 			expect(accountPermission(101)).toBe('write');
-			expect(accountPermission(999)).toBeNull(); // not shared
+			expect(accountPermission(999)).toBeNull(); // not in this owner's grants
 		});
 	});
 
 	describe('hasAnyWriteInCurrentContext', () => {
-		it('is true when viewing My Data', async () => {
-			const { hasAnyWriteInCurrentContext } = await loadStore();
+		it('is always true since v1.15.0 (every share is co-owner write)', async () => {
+			const { hasAnyWriteInCurrentContext, setSharedOwner } = await loadStore();
+			expect(get(hasAnyWriteInCurrentContext)).toBe(true);
+			setSharedOwner('7');
 			expect(get(hasAnyWriteInCurrentContext)).toBe(true);
 		});
+	});
 
-		it('reflects whether any of the selected owner accounts is writable', async () => {
-			const { hasAnyWriteInCurrentContext, accessibleOwners, setSharedOwner } = await loadStore();
-			accessibleOwners.set([
-				{
-					owner_user_id: 7,
-					name: 'Alice',
-					email: 'a@x',
-					accounts: [{ account_id: 100, account_name: 'Wallet', permission: 'read' }]
-				},
-				{
-					owner_user_id: 8,
-					name: 'Bob',
-					email: 'b@x',
-					accounts: [{ account_id: 200, account_name: 'Cash', permission: 'write' }]
-				}
-			]);
-			setSharedOwner('7');
-			expect(get(hasAnyWriteInCurrentContext)).toBe(false);
-			setSharedOwner('8');
-			expect(get(hasAnyWriteInCurrentContext)).toBe(true);
+	describe('accountIsOwn', () => {
+		it('returns true when the account owner matches the current user', async () => {
+			const { accountIsOwn } = await loadStore();
+			const acct = {
+				id: 1, user_id: 5, owner_user_id: 5, owner_name: 'Me',
+				name: 'Wallet', currency: 'EUR', balance: 0,
+				created_at: '', updated_at: '', sync_version: 1, is_shared: false
+			};
+			expect(accountIsOwn(acct, 5)).toBe(true);
+		});
+
+		it('returns false when viewing a co-owned account', async () => {
+			const { accountIsOwn } = await loadStore();
+			const acct = {
+				id: 1, user_id: 99, owner_user_id: 99, owner_name: 'Alice',
+				name: 'Joint', currency: 'EUR', balance: 0,
+				created_at: '', updated_at: '', sync_version: 1, is_shared: true
+			};
+			expect(accountIsOwn(acct, 5)).toBe(false);
+		});
+
+		it('returns false when current user id is unknown', async () => {
+			const { accountIsOwn } = await loadStore();
+			const acct = {
+				id: 1, user_id: 5, owner_user_id: 5, owner_name: 'Me',
+				name: 'Wallet', currency: 'EUR', balance: 0,
+				created_at: '', updated_at: '', sync_version: 1, is_shared: false
+			};
+			expect(accountIsOwn(acct, null)).toBe(false);
 		});
 	});
 });

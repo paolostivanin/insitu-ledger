@@ -21,7 +21,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -82,11 +81,11 @@ class SharedOwnerViewModel @Inject constructor(
     private val prefs: UserPreferences
 ) : ViewModel() {
     val accessibleOwners = sharedAccessState.accessibleOwners
-    val selectedOwner = sharedAccessState.selectedOwner
+    val ownerFilter = sharedAccessState.ownerFilter
     val syncMode = prefs.syncModeFlow
 
     // Apply the server-side default account exactly once per process so that
-    // manual owner switches during the session are not overridden.
+    // an explicit user filter change isn't overridden.
     private var defaultApplied = false
 
     init {
@@ -96,21 +95,19 @@ class SharedOwnerViewModel @Inject constructor(
                 if (mode == "webapp" && token != null) {
                     try {
                         val owners = sharedRepository.loadAccessibleOwners()
-                        val savedId = prefs.sharedOwnerIdFlow.first()
-                        if (savedId != null) {
-                            val owner = owners.find { it.ownerUserId == savedId }
-                            if (owner != null) sharedAccessState.selectOwner(owner)
+                        val savedFilter = prefs.sharedOwnerIdFlow.first()
+                        if (savedFilter != null && owners.any { it.ownerUserId == savedFilter }) {
+                            sharedAccessState.setOwnerFilter(savedFilter)
                         }
                         if (!defaultApplied) {
                             defaultApplied = true
-                            applyServerDefaultAccount(owners)
+                            applyServerDefaultAccount()
                         }
                     } catch (_: Exception) {
                         // Network error — ignore, will retry on next emission
                     }
                 } else {
-                    sharedAccessState.updateAccessibleOwners(emptyList())
-                    sharedAccessState.clearOwner()
+                    sharedAccessState.clear()
                     prefs.saveSharedOwnerId(null)
                     defaultApplied = false
                 }
@@ -118,31 +115,17 @@ class SharedOwnerViewModel @Inject constructor(
         }
     }
 
-    private suspend fun applyServerDefaultAccount(owners: List<AccessibleOwnerDto>) {
+    private suspend fun applyServerDefaultAccount() {
         val defaultId = preferencesRepository.loadFromServer().getOrNull() ?: return
-        // Find the owner that owns this account; null = own data.
-        val matchingOwner = owners.firstOrNull { o -> o.accounts.any { it.accountId == defaultId } }
-        if (matchingOwner != null) {
-            sharedAccessState.selectOwner(matchingOwner)
-            prefs.saveSharedOwnerId(matchingOwner.ownerUserId)
-        } else {
-            // Account is in the user's own space (or no longer accessible — backend
-            // returns null in the latter case so we wouldn't reach here).
-            sharedAccessState.clearOwner()
-            prefs.saveSharedOwnerId(null)
-        }
-        // Pin the per-form last-used account so the txn form lands on it.
+        // Pin the per-form last-used account so the txn form lands on it. The
+        // dashboard/transactions screens always aggregate, so no owner filter
+        // needs to be set for the default account to be discoverable.
         prefs.saveLastUsedAccountId(defaultId)
     }
 
-    fun selectOwner(owner: AccessibleOwnerDto) {
-        sharedAccessState.selectOwner(owner)
-        viewModelScope.launch { prefs.saveSharedOwnerId(owner.ownerUserId) }
-    }
-
-    fun clearOwner() {
-        sharedAccessState.clearOwner()
-        viewModelScope.launch { prefs.saveSharedOwnerId(null) }
+    fun setOwnerFilter(ownerId: Long?) {
+        sharedAccessState.setOwnerFilter(ownerId)
+        viewModelScope.launch { prefs.saveSharedOwnerId(ownerId) }
     }
 }
 
@@ -162,7 +145,7 @@ fun AppNavigation(
 
     val sharedOwnerViewModel: SharedOwnerViewModel = hiltViewModel()
     val accessibleOwners by sharedOwnerViewModel.accessibleOwners.collectAsStateWithLifecycle()
-    val selectedOwner by sharedOwnerViewModel.selectedOwner.collectAsStateWithLifecycle()
+    val ownerFilter by sharedOwnerViewModel.ownerFilter.collectAsStateWithLifecycle()
     val syncMode by sharedOwnerViewModel.syncMode.collectAsStateWithLifecycle(initialValue = "none")
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -183,15 +166,12 @@ fun AppNavigation(
         bottomBar = {
             if (showBottomBar) {
                 Column {
-                    // Owner switcher banner when connected to webapp and owners are available
+                    // Owner filter dropdown when connected to webapp and there are co-owners
                     if (syncMode == "webapp" && accessibleOwners.isNotEmpty()) {
                         OwnerSwitcher(
                             owners = accessibleOwners,
-                            selectedOwnerId = selectedOwner?.ownerId,
-                            onSelect = { owner ->
-                                if (owner != null) sharedOwnerViewModel.selectOwner(owner)
-                                else sharedOwnerViewModel.clearOwner()
-                            }
+                            selectedOwnerId = ownerFilter,
+                            onSelect = { ownerId -> sharedOwnerViewModel.setOwnerFilter(ownerId) }
                         )
                     }
                     BottomNavBar(
@@ -211,24 +191,6 @@ fun AppNavigation(
         }
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding)) {
-            // Show shared data banner at the top when viewing another user's data
-            if (selectedOwner != null) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.tertiaryContainer
-                ) {
-                    Text(
-                        text = run {
-                            val n = selectedOwner!!.accounts.size
-                            "Viewing ${selectedOwner!!.name}'s data ($n account${if (n == 1) "" else "s"})"
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        modifier = Modifier.padding(horizontal = AppSpacing.lg, vertical = 6.dp)
-                    )
-                }
-            }
-
             NavHost(
                 navController = navController,
                 startDestination = if (launchedFromWidget) Screen.TransactionForm.route else Screen.Dashboard.route,
@@ -402,14 +364,14 @@ private fun BottomNavBar(
 private fun OwnerSwitcher(
     owners: List<AccessibleOwnerDto>,
     selectedOwnerId: Long?,
-    onSelect: (AccessibleOwnerDto?) -> Unit
+    onSelect: (Long?) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     val currentLabel = if (selectedOwnerId == null) {
-        "My Data"
+        "All accounts"
     } else {
         val owner = owners.find { it.ownerUserId == selectedOwnerId }
-        owner?.let { "${it.name} (${it.accounts.size})" } ?: "My Data"
+        owner?.let { "${it.name} (${it.accounts.size})" } ?: "All accounts"
     }
 
     Surface(
@@ -421,7 +383,7 @@ private fun OwnerSwitcher(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
         ) {
-            Text("Viewing:", style = MaterialTheme.typography.labelSmall)
+            Text("Filter:", style = MaterialTheme.typography.labelSmall)
             ExposedDropdownMenuBox(
                 expanded = expanded,
                 onExpandedChange = { expanded = it }
@@ -434,13 +396,13 @@ private fun OwnerSwitcher(
                 )
                 ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     DropdownMenuItem(
-                        text = { Text("My Data") },
+                        text = { Text("All accounts") },
                         onClick = { onSelect(null); expanded = false }
                     )
                     owners.forEach { owner ->
                         DropdownMenuItem(
                             text = { Text("${owner.name} (${owner.accounts.size} account${if (owner.accounts.size == 1) "" else "s"})") },
-                            onClick = { onSelect(owner); expanded = false }
+                            onClick = { onSelect(owner.ownerUserId); expanded = false }
                         )
                     }
                 }

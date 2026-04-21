@@ -55,6 +55,7 @@ data class TransactionDto(
     val id: Long,
     @SerializedName("account_id") val accountId: Long,
     @SerializedName("category_id") val categoryId: Long,
+    // Legacy: account owner. Use createdByUserId for actual attribution.
     @SerializedName("user_id") val userId: Long,
     val type: String,
     val amount: Double,
@@ -65,7 +66,9 @@ data class TransactionDto(
     @SerializedName("created_at") val createdAt: String,
     @SerializedName("updated_at") val updatedAt: String,
     @SerializedName("deleted_at") val deletedAt: String?,
-    @SerializedName("sync_version") val syncVersion: Long
+    @SerializedName("sync_version") val syncVersion: Long,
+    @SerializedName("created_by_user_id") val createdByUserId: Long? = null,
+    @SerializedName("created_by_name") val createdByName: String? = null
 )
 
 data class TransactionInput(
@@ -110,7 +113,10 @@ data class AccountDto(
     @SerializedName("created_at") val createdAt: String,
     @SerializedName("updated_at") val updatedAt: String,
     @SerializedName("deleted_at") val deletedAt: String?,
-    @SerializedName("sync_version") val syncVersion: Long
+    @SerializedName("sync_version") val syncVersion: Long,
+    @SerializedName("owner_user_id") val ownerUserId: Long? = null,
+    @SerializedName("owner_name") val ownerName: String? = null,
+    @SerializedName("is_shared") val isShared: Boolean = false
 )
 
 data class AccountInput(
@@ -123,6 +129,7 @@ data class ScheduledTransactionDto(
     val id: Long,
     @SerializedName("account_id") val accountId: Long,
     @SerializedName("category_id") val categoryId: Long,
+    // Legacy: account owner. Use createdByUserId for actual attribution.
     @SerializedName("user_id") val userId: Long,
     val type: String,
     val amount: Double,
@@ -137,7 +144,9 @@ data class ScheduledTransactionDto(
     @SerializedName("created_at") val createdAt: String,
     @SerializedName("updated_at") val updatedAt: String,
     @SerializedName("deleted_at") val deletedAt: String?,
-    @SerializedName("sync_version") val syncVersion: Long
+    @SerializedName("sync_version") val syncVersion: Long,
+    @SerializedName("created_by_user_id") val createdByUserId: Long? = null,
+    @SerializedName("created_by_name") val createdByName: String? = null
 )
 
 data class ScheduledInput(
@@ -192,10 +201,11 @@ data class SharedAccessDto(
     @SerializedName("guest_email") val guestEmail: String
 )
 
+// Since v1.15.0 every share is full co-owner write; the permission field is
+// no longer sent. Server hardcodes 'write' regardless of payload.
 data class SharedAccessInput(
     @SerializedName("guest_email") val guestEmail: String,
-    @SerializedName("account_id") val accountId: Long,
-    val permission: String
+    @SerializedName("account_id") val accountId: Long
 )
 
 data class UserPreferencesDto(

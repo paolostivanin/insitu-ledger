@@ -11,7 +11,9 @@ import (
 type sharedAccessRequest struct {
 	GuestEmail string `json:"guest_email"`
 	AccountID  int64  `json:"account_id"`
-	Permission string `json:"permission"` // "read" or "write"
+	// Permission is accepted for backwards compatibility but ignored — v1.15.0
+	// dropped read-only sharing, every share is now full co-owner write.
+	Permission string `json:"permission"`
 }
 
 // handleListSharedAccess returns the per-account shares the authenticated user
@@ -58,8 +60,9 @@ func (s *Server) handleListSharedAccess(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(items)
 }
 
-// handleCreateSharedAccess grants a guest read or write access to a single
-// account owned by the authenticated user.
+// handleCreateSharedAccess grants a guest co-owner (write) access to a single
+// account owned by the authenticated user. Since v1.15.0 every share is full
+// write — the request's `permission` field is ignored.
 func (s *Server) handleCreateSharedAccess(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 	var req sharedAccessRequest
@@ -68,10 +71,6 @@ func (s *Server) handleCreateSharedAccess(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if req.Permission != "read" && req.Permission != "write" {
-		http.Error(w, "permission must be 'read' or 'write'", http.StatusBadRequest)
-		return
-	}
 	if req.AccountID == 0 {
 		http.Error(w, "account_id is required", http.StatusBadRequest)
 		return
@@ -82,16 +81,8 @@ func (s *Server) handleCreateSharedAccess(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Account must belong to the authenticated user.
-	var accountOwner int64
-	if err := s.DB.QueryRow(
-		"SELECT user_id FROM accounts WHERE id = ? AND deleted_at IS NULL", req.AccountID,
-	).Scan(&accountOwner); err != nil {
-		http.Error(w, "account not found", http.StatusNotFound)
-		return
-	}
-	if accountOwner != userID {
-		http.Error(w, "forbidden: not the account owner", http.StatusForbidden)
+	if err := requireOwner(userID, req.AccountID, s.DB); err != nil {
+		writeAuthError(w, err)
 		return
 	}
 
@@ -109,8 +100,8 @@ func (s *Server) handleCreateSharedAccess(w http.ResponseWriter, r *http.Request
 
 	result, err := s.DB.Exec(
 		`INSERT INTO shared_account_access (owner_user_id, guest_user_id, account_id, permission)
-		 VALUES (?, ?, ?, ?)`,
-		userID, guestID, req.AccountID, req.Permission,
+		 VALUES (?, ?, ?, 'write')`,
+		userID, guestID, req.AccountID,
 	)
 	if err != nil {
 		http.Error(w, "already shared with this user for this account", http.StatusConflict)

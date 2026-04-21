@@ -1,9 +1,5 @@
 package com.insituledger.app.ui.dashboard
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -67,18 +63,12 @@ fun DashboardScreen(
 			)
 		},
 		floatingActionButton = {
-			AnimatedVisibility(
-				visible = !uiState.isReadOnly,
-				enter = scaleIn() + fadeIn(),
-				exit = fadeOut()
-			) {
-				BrandFab(
-					onClick = {
-						haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-						onAddClick()
-					}
-				)
-			}
+			BrandFab(
+				onClick = {
+					haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+					onAddClick()
+				}
+			)
 		}
 	) { padding ->
 		if (uiState.isLoading) {
@@ -172,15 +162,22 @@ fun DashboardScreen(
 								icon = Icons.AutoMirrored.Filled.ReceiptLong,
 								title = "No transactions yet",
 								message = "Tap the + button to record your first transaction.",
-								actionLabel = if (!uiState.isReadOnly) "Add Transaction" else null,
-								onAction = if (!uiState.isReadOnly) onAddClick else null
+								actionLabel = "Add Transaction",
+								onAction = onAddClick
 							)
 						}
 					}
 				} else {
+					val accountMap = data.accounts.associateBy { it.id }
+					val currentUserId = uiState.currentUserId
 					items(data.recentTransactions, key = { "txn_${it.id}" }) { txn ->
+						val account = accountMap[txn.accountId]
+						val attribution = if (account?.isShared == true && txn.createdByUserId != null && txn.createdByUserId != currentUserId) {
+							txn.createdByName?.takeIf { it.isNotBlank() }?.let { "Added by $it" }
+						} else null
 						TransactionRow(
 							txn = txn,
+							attribution = attribution,
 							onClick = { onTransactionClick(txn.id) },
 							modifier = Modifier.animateItem()
 						)
@@ -367,6 +364,7 @@ private fun AccountRow(
 @Composable
 private fun TransactionRow(
 	txn: Transaction,
+	attribution: String?,
 	onClick: () -> Unit,
 	modifier: Modifier = Modifier
 ) {
@@ -409,8 +407,9 @@ private fun TransactionRow(
 					color = MaterialTheme.colorScheme.onSurface,
 					maxLines = 1
 				)
+				val secondary = listOfNotNull(formatDateLabel(txn.date), attribution).joinToString("  ·  ")
 				Text(
-					text = formatDateLabel(txn.date),
+					text = secondary,
 					style = MaterialTheme.typography.bodySmall,
 					color = MaterialTheme.colorScheme.onSurfaceVariant
 				)

@@ -7,7 +7,6 @@ import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.CategoryRepository
 import com.insituledger.app.data.repository.ScheduledRepository
-import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.domain.model.Account
@@ -64,7 +63,6 @@ class TransactionFormViewModel @Inject constructor(
     private val categoryRepository: CategoryRepository,
     private val scheduledRepository: ScheduledRepository,
     private val syncManager: SyncManager,
-    private val sharedAccessState: SharedAccessState,
     private val prefs: UserPreferences
 ) : ViewModel() {
 
@@ -76,30 +74,25 @@ class TransactionFormViewModel @Inject constructor(
 
     private fun loadData() {
         viewModelScope.launch {
-            val owner = sharedAccessState.selectedOwner.value
-            val isShared = owner != null
-
             val accounts: List<Account>
             val categories: List<Category>
 
             coroutineScope {
-                if (isShared) {
-                    val accountsDeferred = async { accountRepository.listFromServer(owner!!.ownerId) }
-                    val categoriesDeferred = async { categoryRepository.listFromServer(owner!!.ownerId) }
-                    accounts = accountsDeferred.await()
-                    categories = categoriesDeferred.await()
-                } else {
-                    val accountsDeferred = async { accountRepository.getCached() }
-                    val categoriesDeferred = async { categoryRepository.getCached() }
-                    accounts = accountsDeferred.await()
-                    categories = categoriesDeferred.await()
-                }
+                val accountsDeferred = async { accountRepository.getCached() }
+                val categoriesDeferred = async { categoryRepository.getCached() }
+                accounts = accountsDeferred.await()
+                categories = categoriesDeferred.await()
             }
 
+            val currentUserId = prefs.userIdFlow.first()
             val displays = accounts.map { acct ->
                 AccountDisplay(
                     account = acct,
-                    label = if (isShared) "${acct.name} (shared)" else acct.name
+                    label = when {
+                        acct.isShared && acct.userId != currentUserId && acct.ownerName.isNotEmpty() ->
+                            "${acct.name} (shared by ${acct.ownerName})"
+                        else -> acct.name
+                    }
                 )
             }
 
@@ -194,14 +187,20 @@ class TransactionFormViewModel @Inject constructor(
     fun createAccount(name: String, currency: String) {
         viewModelScope.launch {
             val id = accountRepository.create(name, currency, 0.0)
-            val owner = sharedAccessState.selectedOwner.value
-            val isShared = owner != null
-            val newAccount = Account(id = id, userId = 0, name = name, currency = currency, balance = 0.0, isLocalOnly = true)
+            val currentUserId = prefs.userIdFlow.first()
+            val newAccount = Account(
+                id = id, userId = currentUserId ?: 0,
+                name = name, currency = currency, balance = 0.0, isLocalOnly = true
+            )
             val updatedAccounts = _uiState.value.accounts + newAccount
             val updatedDisplays = updatedAccounts.map { acct ->
                 AccountDisplay(
                     account = acct,
-                    label = if (isShared) "${acct.name} (shared)" else acct.name
+                    label = when {
+                        acct.isShared && acct.userId != currentUserId && acct.ownerName.isNotEmpty() ->
+                            "${acct.name} (shared by ${acct.ownerName})"
+                        else -> acct.name
+                    }
                 )
             }
             _uiState.update {

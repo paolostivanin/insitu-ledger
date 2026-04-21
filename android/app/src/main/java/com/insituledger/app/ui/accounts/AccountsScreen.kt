@@ -60,9 +60,7 @@ fun AccountsScreen(
             )
         },
         floatingActionButton = {
-            if (!uiState.isReadOnly) {
-                BrandFab(onClick = onAddClick, contentDescription = "Add Account")
-            }
+            BrandFab(onClick = onAddClick, contentDescription = "Add Account")
         }
     ) { padding ->
         when {
@@ -71,11 +69,12 @@ fun AccountsScreen(
                 icon = Icons.Default.AccountBalanceWallet,
                 title = "No accounts yet",
                 message = "Add your first account to start tracking transactions.",
-                actionLabel = if (!uiState.isReadOnly) "Add account" else null,
-                onAction = if (!uiState.isReadOnly) onAddClick else null,
+                actionLabel = "Add account",
+                onAction = onAddClick,
                 modifier = Modifier.padding(padding)
             )
             else -> {
+                val currentUserId = uiState.currentUserId
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentPadding = PaddingValues(
@@ -87,13 +86,15 @@ fun AccountsScreen(
                     verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
                 ) {
                     items(uiState.accounts, key = { it.id }) { account ->
+                        val isOwn = currentUserId != null && account.userId == currentUserId
                         AccountRow(
                             account = account,
-                            onEdit = if (uiState.isReadOnly) null else {{ onEditClick(account.id) }},
-                            onDelete = if (uiState.isReadOnly) null else {{
+                            isOwn = isOwn,
+                            onEdit = if (isOwn) {{ onEditClick(account.id) }} else null,
+                            onDelete = if (isOwn) {{
                                 viewModel.delete(account.id)
                                 scope.launch { snackbarHostState.showSnackbar("Account deleted") }
-                            }},
+                            }} else null,
                             modifier = Modifier.animateItem()
                         )
                     }
@@ -106,6 +107,7 @@ fun AccountsScreen(
 @Composable
 private fun AccountRow(
     account: Account,
+    isOwn: Boolean,
     onEdit: (() -> Unit)?,
     onDelete: (() -> Unit)?,
     modifier: Modifier = Modifier
@@ -145,6 +147,18 @@ private fun AccountRow(
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
+                if (account.isShared) {
+                    val badge = if (isOwn) {
+                        "Shared with others"
+                    } else {
+                        account.ownerName.takeIf { it.isNotBlank() }?.let { "Shared by $it" } ?: "Shared"
+                    }
+                    Text(
+                        text = badge,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
             }
             if (onEdit != null || onDelete != null) {
                 Row {

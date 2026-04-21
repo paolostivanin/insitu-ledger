@@ -49,29 +49,19 @@
 		}
 		accessibleOwnersStore.set(accessibleOwners);
 
-		// Drop the persisted owner if their share has been revoked.
+		// Drop the persisted owner filter if their share has been revoked.
 		const savedId = $sharedOwnerUserId;
 		if (savedId && !accessibleOwners.find(o => o.owner_user_id.toString() === savedId)) {
 			clearSharedOwner();
 		}
 
-		// Apply the saved default account: switch owner if needed and pin the
-		// account filter. Silently no-ops when the account is no longer accessible
-		// (preferences GET returns null in that case).
+		// Apply the saved default account by pinning the account filter only.
+		// Since v1.15.0 dashboards aggregate own + shared, so we no longer
+		// auto-switch the owner filter based on the default account's owner —
+		// that would needlessly hide the rest of the user's data.
 		try {
 			const prefs = await prefsApi.get();
 			if (prefs.default_account_id !== null) {
-				const targetOwner = accessibleOwners.find(o =>
-					o.accounts.some(a => a.account_id === prefs.default_account_id)
-				);
-				if (targetOwner) {
-					if ($sharedOwnerUserId !== targetOwner.owner_user_id.toString()) {
-						setSharedOwner(targetOwner.owner_user_id.toString());
-					}
-				} else {
-					// Account belongs to the user themselves.
-					if ($sharedOwnerUserId !== null) clearSharedOwner();
-				}
 				setAccountFilter(prefs.default_account_id);
 			}
 		} catch {
@@ -91,7 +81,7 @@
 
 	function ownerLabel(o: AccessibleOwner): string {
 		const n = o.accounts.length;
-		return `${o.name} (${n} account${n === 1 ? '' : 's'})`;
+		return `${o.name} only (${n} account${n === 1 ? '' : 's'})`;
 	}
 
 	const navItems = [
@@ -176,8 +166,8 @@
 			</div>
 			<div class="nav-right">
 				{#if accessibleOwners.length > 0}
-					<select class="owner-switcher" value={$sharedOwnerUserId || ''} onchange={switchOwner}>
-						<option value="">My Data</option>
+					<select class="owner-switcher" value={$sharedOwnerUserId || ''} onchange={switchOwner} title="Filter by owner">
+						<option value="">All accounts</option>
 						{#each accessibleOwners as owner (owner.owner_user_id)}
 							<option value={owner.owner_user_id.toString()}>{ownerLabel(owner)}</option>
 						{/each}

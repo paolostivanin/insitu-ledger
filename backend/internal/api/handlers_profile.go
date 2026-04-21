@@ -31,7 +31,7 @@ func (s *Server) handleGetPreferences(w http.ResponseWriter, r *http.Request) {
 
 	resp := preferencesResponse{}
 	if defaultAccountID.Valid {
-		if _, _, err := checkAccountAccess(userID, defaultAccountID.Int64, s.DB); err == nil {
+		if _, err := checkAccountAccess(userID, defaultAccountID.Int64, s.DB); err == nil {
 			id := defaultAccountID.Int64
 			resp.DefaultAccountID = &id
 		}
@@ -53,7 +53,7 @@ func (s *Server) handleUpdatePreferences(w http.ResponseWriter, r *http.Request)
 	}
 
 	if req.DefaultAccountID != nil {
-		if _, _, err := checkAccountAccess(userID, *req.DefaultAccountID, s.DB); err != nil {
+		if _, err := checkAccountAccess(userID, *req.DefaultAccountID, s.DB); err != nil {
 			http.Error(w, "default account not accessible", http.StatusBadRequest)
 			return
 		}
