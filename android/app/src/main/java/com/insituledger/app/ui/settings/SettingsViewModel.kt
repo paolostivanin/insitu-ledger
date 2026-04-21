@@ -53,6 +53,7 @@ data class SettingsUiState(
     val mtlsAlias: String? = null,
     // Display preferences
     val currencySymbol: String = "€",
+    val dashboardHeroMode: String = "net_worth",
     val allowCleartextHttp: Boolean = false,
     // Backup encryption
     val backupPassphraseSet: Boolean = false,
@@ -141,6 +142,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             prefs.currencySymbolFlow.collect { symbol ->
                 _uiState.update { it.copy(currencySymbol = symbol) }
+            }
+        }
+
+        viewModelScope.launch {
+            prefs.dashboardHeroModeFlow.collect { mode ->
+                _uiState.update { it.copy(dashboardHeroMode = mode) }
             }
         }
 
@@ -385,6 +392,10 @@ class SettingsViewModel @Inject constructor(
             prefs.saveAllowCleartextHttp(enabled)
             okHttpClient.connectionPool.evictAll()
         }
+    }
+
+    fun setDashboardHeroMode(mode: String) {
+        viewModelScope.launch { prefs.saveDashboardHeroMode(mode) }
     }
 
     fun setCurrencySymbol(symbol: String) {

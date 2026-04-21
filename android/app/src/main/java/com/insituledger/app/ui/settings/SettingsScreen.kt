@@ -160,6 +160,29 @@ fun SettingsScreen(
                 }
             }
 
+            // Dashboard headline
+            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
+                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
+                    Text("Dashboard headline", style = MaterialTheme.typography.titleSmall)
+                    Spacer(modifier = Modifier.height(AppSpacing.xs))
+                    Text(
+                        "Choose what the big number on the home screen shows.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(AppSpacing.sm))
+                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                        listOf("net_worth" to "Net worth", "month_net" to "Monthly net").forEach { (value, label) ->
+                            FilterChip(
+                                selected = uiState.dashboardHeroMode == value,
+                                onClick = { viewModel.setDashboardHeroMode(value) },
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+                }
+            }
+
             // Biometric unlock
             AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
                 Row(

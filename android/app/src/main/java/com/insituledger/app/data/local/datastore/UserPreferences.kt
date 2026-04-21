@@ -51,6 +51,7 @@ class UserPreferences @Inject constructor(
         val CURRENCY_SYMBOL = stringPreferencesKey("currency_symbol")
         const val DEFAULT_CURRENCY_SYMBOL = "€"
         val ALLOW_CLEARTEXT_HTTP = booleanPreferencesKey("allow_cleartext_http")
+        val DASHBOARD_HERO_MODE = stringPreferencesKey("dashboard_hero_mode") // "net_worth" (default) | "month_net"
     }
 
     val tokenFlow: Flow<String?> = secureStore.stringFlow(SecureStore.KEY_TOKEN)
@@ -83,6 +84,7 @@ class UserPreferences @Inject constructor(
     val mtlsAliasFlow: Flow<String?> = context.dataStore.data.map { it[MTLS_ALIAS] }
     val currencySymbolFlow: Flow<String> = context.dataStore.data.map { it[CURRENCY_SYMBOL] ?: DEFAULT_CURRENCY_SYMBOL }
     val allowCleartextHttpFlow: Flow<Boolean> = context.dataStore.data.map { it[ALLOW_CLEARTEXT_HTTP] ?: false }
+    val dashboardHeroModeFlow: Flow<String> = context.dataStore.data.map { it[DASHBOARD_HERO_MODE] ?: "net_worth" }
 
     suspend fun saveToken(token: String) {
         secureStore.putString(SecureStore.KEY_TOKEN, token)
@@ -192,6 +194,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun saveAllowCleartextHttp(allowed: Boolean) {
         context.dataStore.edit { it[ALLOW_CLEARTEXT_HTTP] = allowed }
+    }
+
+    suspend fun saveDashboardHeroMode(mode: String) {
+        context.dataStore.edit { it[DASHBOARD_HERO_MODE] = mode }
     }
 
     suspend fun saveBackupPassphrase(passphrase: String?) {

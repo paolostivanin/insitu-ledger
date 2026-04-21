@@ -2,6 +2,7 @@ package com.insituledger.app.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
@@ -20,7 +21,8 @@ data class DashboardUiState(
     val data: DashboardData? = null,
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
-    val isReadOnly: Boolean = false
+    val isReadOnly: Boolean = false,
+    val heroMode: String = "net_worth"
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -28,7 +30,8 @@ data class DashboardUiState(
 class DashboardViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val transactionRepository: TransactionRepository,
-    private val sharedAccessState: SharedAccessState
+    private val sharedAccessState: SharedAccessState,
+    private val prefs: UserPreferences
 ) : ViewModel() {
 
     private val _refreshTrigger = MutableStateFlow(0)
@@ -36,7 +39,14 @@ class DashboardViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
-    init { loadData() }
+    init {
+        loadData()
+        viewModelScope.launch {
+            prefs.dashboardHeroModeFlow.collect { mode ->
+                _uiState.update { it.copy(heroMode = mode) }
+            }
+        }
+    }
 
     fun refresh() {
         viewModelScope.launch {

@@ -107,6 +107,7 @@ fun DashboardScreen(
 					HeroNetWorthCard(
 						balance = data.totalBalance,
 						monthNet = data.monthIncome - data.monthExpense,
+						mode = uiState.heroMode,
 						modifier = Modifier.animateItem()
 					)
 				}
@@ -194,11 +195,19 @@ fun DashboardScreen(
 private fun HeroNetWorthCard(
 	balance: Double,
 	monthNet: Double,
+	mode: String,
 	modifier: Modifier = Modifier
 ) {
 	val gradient = BrandGradients.hero()
 	val symbol = LocalCurrencySymbol.current
 	val netPrefix = if (monthNet >= 0) "+" else ""
+	val isMonthMode = mode == "month_net"
+	val headlineLabel = if (isMonthMode) "THIS MONTH" else "NET WORTH"
+	val headlineValue = if (isMonthMode) {
+		"$netPrefix${CurrencyFormatter.formatWithSymbol(monthNet, symbol)}"
+	} else {
+		CurrencyFormatter.formatWithSymbol(balance, symbol)
+	}
 	Surface(
 		modifier = modifier
 			.fillMaxWidth()
@@ -215,49 +224,51 @@ private fun HeroNetWorthCard(
 		) {
 			Column {
 				Text(
-					text = "NET WORTH",
+					text = headlineLabel,
 					style = MaterialTheme.typography.labelMedium,
 					color = Color.White.copy(alpha = 0.78f),
 					fontWeight = FontWeight.SemiBold
 				)
 				Spacer(modifier = Modifier.height(AppSpacing.xs))
 				Text(
-					text = CurrencyFormatter.formatWithSymbol(balance, symbol),
+					text = headlineValue,
 					style = MaterialTheme.typography.displayMedium.copy(fontFeatureSettings = "tnum"),
 					color = Color.White,
 					fontWeight = FontWeight.Bold
 				)
-				Spacer(modifier = Modifier.height(AppSpacing.md))
-				Row(verticalAlignment = Alignment.CenterVertically) {
-					Surface(
-						shape = RoundedCornerShape(50),
-						color = Color.White.copy(alpha = 0.18f)
-					) {
-						Row(
-							modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = 4.dp),
-							verticalAlignment = Alignment.CenterVertically,
-							horizontalArrangement = Arrangement.spacedBy(4.dp)
+				if (!isMonthMode) {
+					Spacer(modifier = Modifier.height(AppSpacing.md))
+					Row(verticalAlignment = Alignment.CenterVertically) {
+						Surface(
+							shape = RoundedCornerShape(50),
+							color = Color.White.copy(alpha = 0.18f)
 						) {
-							Icon(
-								imageVector = if (monthNet >= 0) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
-								contentDescription = null,
-								tint = Color.White,
-								modifier = Modifier.size(14.dp)
-							)
-							Text(
-								text = "$netPrefix${CurrencyFormatter.formatWithSymbol(monthNet, symbol)}",
-								style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
-								color = Color.White,
-								fontWeight = FontWeight.SemiBold
-							)
+							Row(
+								modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = 4.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								horizontalArrangement = Arrangement.spacedBy(4.dp)
+							) {
+								Icon(
+									imageVector = if (monthNet >= 0) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
+									contentDescription = null,
+									tint = Color.White,
+									modifier = Modifier.size(14.dp)
+								)
+								Text(
+									text = "$netPrefix${CurrencyFormatter.formatWithSymbol(monthNet, symbol)}",
+									style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+									color = Color.White,
+									fontWeight = FontWeight.SemiBold
+								)
+							}
 						}
+						Spacer(modifier = Modifier.width(AppSpacing.sm))
+						Text(
+							text = "this month",
+							style = MaterialTheme.typography.labelMedium,
+							color = Color.White.copy(alpha = 0.7f)
+						)
 					}
-					Spacer(modifier = Modifier.width(AppSpacing.sm))
-					Text(
-						text = "this month",
-						style = MaterialTheme.typography.labelMedium,
-						color = Color.White.copy(alpha = 0.7f)
-					)
 				}
 			}
 		}
