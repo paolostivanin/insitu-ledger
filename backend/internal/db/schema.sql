@@ -100,14 +100,15 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     sync_version INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS shared_access (
+CREATE TABLE IF NOT EXISTS shared_account_access (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     guest_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     permission TEXT NOT NULL CHECK (permission IN ('read', 'write')),
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     sync_version INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(owner_user_id, guest_user_id)
+    UNIQUE(owner_user_id, guest_user_id, account_id)
 );
 
 -- Indexes for query performance (critical for years of data)
@@ -119,7 +120,8 @@ CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id);
 CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_active ON scheduled_transactions(active, next_occurrence);
-CREATE INDEX IF NOT EXISTS idx_shared_access_guest ON shared_access(guest_user_id);
+CREATE INDEX IF NOT EXISTS idx_shared_account_access_guest ON shared_account_access(guest_user_id);
+CREATE INDEX IF NOT EXISTS idx_shared_account_access_account ON shared_account_access(account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_description ON transactions(description COLLATE NOCASE);
 
 -- Sync version indexes (for efficient sync queries)

@@ -155,7 +155,7 @@ export interface AutocompleteSuggestion {
 }
 
 export const transactions = {
-	list: (params?: { from?: string; to?: string; category_id?: string; limit?: string; offset?: string; sort_by?: string; sort_dir?: string; owner_id?: string }) =>
+	list: (params?: { from?: string; to?: string; category_id?: string; account_id?: string; limit?: string; offset?: string; sort_by?: string; sort_dir?: string; owner_id?: string }) =>
 		request<Transaction[]>('/transactions', { params }),
 	create: (data: TransactionInput, owner_id?: string) =>
 		request<{ id: number }>('/transactions', { method: 'POST', body: data, params: owner_id ? { owner_id } : undefined }),
@@ -179,6 +179,7 @@ export interface Category {
 	created_at: string;
 	updated_at: string;
 	sync_version: number;
+	read_only?: boolean;
 }
 
 export interface CategoryInput {
@@ -261,7 +262,8 @@ export interface ScheduledInput {
 }
 
 export const scheduled = {
-	list: (owner_id?: string) => request<ScheduledTransaction[]>('/scheduled', { params: owner_id ? { owner_id } : undefined }),
+	list: (params?: { owner_id?: string; account_id?: string }) =>
+		request<ScheduledTransaction[]>('/scheduled', { params }),
 	create: (data: ScheduledInput, owner_id?: string) =>
 		request<{ id: number }>('/scheduled', { method: 'POST', body: data, params: owner_id ? { owner_id } : undefined }),
 	update: (id: number, data: ScheduledInput, owner_id?: string) =>
@@ -292,36 +294,49 @@ export interface TrendReport {
 }
 
 export const reports = {
-	byCategory: (params?: { from?: string; to?: string; type?: string; owner_id?: string }) =>
+	byCategory: (params?: { from?: string; to?: string; type?: string; owner_id?: string; account_id?: string }) =>
 		request<CategoryReport[]>('/reports/by-category', { params }),
-	byMonth: (params?: { year?: string; owner_id?: string }) =>
+	byMonth: (params?: { year?: string; owner_id?: string; account_id?: string }) =>
 		request<MonthReport[]>('/reports/by-month', { params }),
-	trend: (params?: { from?: string; to?: string; group_by?: string; owner_id?: string }) =>
+	trend: (params?: { from?: string; to?: string; group_by?: string; owner_id?: string; account_id?: string }) =>
 		request<TrendReport[]>('/reports/trend', { params })
 };
 
-// Shared access
+// Shared access — one row per (guest, account) pair.
 export interface SharedAccess {
 	id: number;
 	owner_user_id: number;
 	guest_user_id: number;
+	account_id: number;
+	account_name: string;
 	permission: string;
 	guest_name: string;
 	guest_email: string;
+}
+
+// AccessibleOwner — an owner who has shared at least one account with the
+// auth user, with the per-account grants nested under `accounts`.
+export interface AccessibleOwnerAccount {
+	account_id: number;
+	account_name: string;
+	permission: string;
 }
 
 export interface AccessibleOwner {
 	owner_user_id: number;
 	name: string;
 	email: string;
-	permission: string;
+	accounts: AccessibleOwnerAccount[];
 }
 
 export const shared = {
 	list: () => request<SharedAccess[]>('/shared'),
 	accessible: () => request<AccessibleOwner[]>('/shared/accessible'),
-	create: (guest_email: string, permission: string) =>
-		request<{ id: number }>('/shared', { method: 'POST', body: { guest_email, permission } }),
+	create: (guest_email: string, account_id: number, permission: string) =>
+		request<{ id: number }>('/shared', {
+			method: 'POST',
+			body: { guest_email, account_id, permission }
+		}),
 	delete: (id: number) => request<void>(`/shared/${id}`, { method: 'DELETE' })
 };
 
@@ -348,6 +363,17 @@ export const me = {
 	totpReset: (password: string) => request<{ secret: string; qr_code: string; otpauth: string }>('/auth/totp/reset', { method: 'POST', body: { password } })
 };
 
+// User preferences (default account, etc.)
+export interface Preferences {
+	default_account_id: number | null;
+}
+
+export const preferences = {
+	get: () => request<Preferences>('/profile/preferences'),
+	set: (data: Preferences) =>
+		request<void>('/profile/preferences', { method: 'PUT', body: data })
+};
+
 // Admin
 export interface AdminUser {
 	id: number;
@@ -370,7 +396,7 @@ export const batch = {
 
 // CSV import/export
 export const csv = {
-	exportTransactions: async (params?: { from?: string; to?: string }) => {
+	exportTransactions: async (params?: { from?: string; to?: string; owner_id?: string; account_id?: string }) => {
 		let url = `${BASE}/transactions/export`;
 		if (params) {
 			const search = new URLSearchParams(
@@ -390,8 +416,9 @@ export const csv = {
 		a.click();
 		URL.revokeObjectURL(a.href);
 	},
-	importTransactions: async (file: File) => {
-		const url = `${BASE}/transactions/import`;
+	importTransactions: async (file: File, owner_id?: string) => {
+		let url = `${BASE}/transactions/import`;
+		if (owner_id) url += `?owner_id=${encodeURIComponent(owner_id)}`;
 		const headers: Record<string, string> = {};
 		const token = getToken();
 		if (token) headers['Authorization'] = `Bearer ${token}`;

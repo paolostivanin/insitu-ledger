@@ -67,6 +67,8 @@ func NewRouter(s *Server) http.Handler {
 	protected.HandleFunc("POST /api/auth/change-password", s.handleChangePassword)
 	protected.HandleFunc("PUT /api/auth/profile", s.handleUpdateProfile)
 	protected.HandleFunc("GET /api/auth/me", s.handleGetMe)
+	protected.HandleFunc("GET /api/profile/preferences", s.handleGetPreferences)
+	protected.HandleFunc("PUT /api/profile/preferences", s.handleUpdatePreferences)
 
 	// 2FA
 	protected.HandleFunc("POST /api/auth/totp/setup", s.handleTOTPSetup)

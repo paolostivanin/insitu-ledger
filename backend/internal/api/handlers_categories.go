@@ -17,13 +17,9 @@ type categoryRequest struct {
 func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, isOwn, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
 		return
 	}
 
@@ -38,7 +34,7 @@ func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var cats []map[string]any
+	cats := []map[string]any{}
 	for rows.Next() {
 		var id, uid, syncVersion int64
 		var parentID *int64
@@ -52,17 +48,13 @@ func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 		cats = append(cats, map[string]any{
 			"id": id, "user_id": uid, "parent_id": parentID, "name": name, "type": typ,
 			"icon": icon, "color": color, "created_at": createdAt, "updated_at": updatedAt,
-			"sync_version": syncVersion,
+			"sync_version": syncVersion, "read_only": !isOwn,
 		})
 	}
 
 	if err := rows.Err(); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
-	}
-
-	if cats == nil {
-		cats = []map[string]any{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -72,17 +64,13 @@ func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, isOwn, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
 		return
 	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+	if !isOwn {
+		http.Error(w, "forbidden: categories are not shared", http.StatusForbidden)
 		return
 	}
 
@@ -124,17 +112,13 @@ func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, isOwn, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
 		return
 	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+	if !isOwn {
+		http.Error(w, "forbidden: categories are not shared", http.StatusForbidden)
 		return
 	}
 
@@ -166,17 +150,13 @@ func (s *Server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, isOwn, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
 		return
 	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+	if !isOwn {
+		http.Error(w, "forbidden: categories are not shared", http.StatusForbidden)
 		return
 	}
 

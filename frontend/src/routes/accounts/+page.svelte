@@ -4,6 +4,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
+	import { sharedOwnerUserId, accountPermission } from '$lib/stores/shared';
 
 	let accts = $state<Account[]>([]);
 	let loading = $state(true);
@@ -20,12 +21,33 @@
 	let confirmMessage = $state('');
 	let confirmAction = $state(() => {});
 
-	onMount(load);
+	let mounted = false;
+	let prevOwnerId: string | null = null;
+
+	$effect(() => {
+		const oid = $sharedOwnerUserId;
+		if (mounted && oid !== prevOwnerId) {
+			prevOwnerId = oid;
+			void load();
+		}
+	});
+
+	onMount(async () => {
+		prevOwnerId = $sharedOwnerUserId;
+		mounted = true;
+		await load();
+	});
+
+	const isOwn = $derived($sharedOwnerUserId === null);
 
 	async function load() {
 		loading = true;
-		accts = await accounts.list();
+		accts = await accounts.list($sharedOwnerUserId || undefined);
 		loading = false;
+	}
+
+	function canMutate(a: Account): boolean {
+		return isOwn || accountPermission(a.id) === 'write';
 	}
 
 	function resetForm() {
@@ -45,9 +67,10 @@
 		e.preventDefault();
 		error = '';
 		submitting = true;
+		const oid = $sharedOwnerUserId || undefined;
 		try {
 			if (editId) {
-				await accounts.update(editId, { name: fName, currency: fCurrency });
+				await accounts.update(editId, { name: fName, currency: fCurrency }, oid);
 			} else {
 				await accounts.create({ name: fName, currency: fCurrency });
 			}
@@ -63,7 +86,7 @@
 	function remove(id: number) {
 		confirmMessage = 'Delete this account?';
 		confirmAction = async () => {
-			await accounts.delete(id);
+			await accounts.delete(id, $sharedOwnerUserId || undefined);
 			await load();
 		};
 		confirmOpen = true;
@@ -81,9 +104,11 @@
 <div class="page">
 	<div class="page-header">
 		<h1>Accounts</h1>
-		<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
-			{showForm ? 'Cancel' : '+ New Account'}
-		</button>
+		{#if isOwn}
+			<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
+				{showForm ? 'Cancel' : '+ New Account'}
+			</button>
+		{/if}
 	</div>
 
 	{#if error}
@@ -137,10 +162,14 @@
 				<div class="card acct-card">
 					<div class="acct-name">{acct.name}</div>
 					<div class="acct-balance">{fmt(acct.balance)} <span class="acct-currency">{acct.currency}</span></div>
-					<div class="actions" style="margin-top: 0.75rem">
-						<button class="btn-ghost" onclick={() => startEdit(acct)}>Edit</button>
-						<button class="btn-danger" onclick={() => remove(acct.id)}>Delete</button>
-					</div>
+					{#if canMutate(acct)}
+						<div class="actions" style="margin-top: 0.75rem">
+							<button class="btn-ghost" onclick={() => startEdit(acct)}>Edit</button>
+							{#if isOwn}
+								<button class="btn-danger" onclick={() => remove(acct.id)}>Delete</button>
+							{/if}
+						</div>
+					{/if}
 				</div>
 			{/each}
 		</div>

@@ -5,21 +5,28 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type sharedAccessRequest struct {
 	GuestEmail string `json:"guest_email"`
+	AccountID  int64  `json:"account_id"`
 	Permission string `json:"permission"` // "read" or "write"
 }
 
+// handleListSharedAccess returns the per-account shares the authenticated user
+// has granted, one row per (guest, account) pair.
 func (s *Server) handleListSharedAccess(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
 	rows, err := s.DB.Query(
-		`SELECT sa.id, sa.owner_user_id, sa.guest_user_id, sa.permission, u.name, u.email
-		 FROM shared_access sa
+		`SELECT sa.id, sa.owner_user_id, sa.guest_user_id, sa.account_id, sa.permission,
+		        u.name, u.email, a.name
+		 FROM shared_account_access sa
 		 JOIN users u ON sa.guest_user_id = u.id
-		 WHERE sa.owner_user_id = ?`, userID,
+		 JOIN accounts a ON sa.account_id = a.id
+		 WHERE sa.owner_user_id = ? AND a.deleted_at IS NULL
+		 ORDER BY u.email, a.name`, userID,
 	)
 	if err != nil {
 		http.Error(w, "query error", http.StatusInternalServerError)
@@ -27,16 +34,18 @@ func (s *Server) handleListSharedAccess(w http.ResponseWriter, r *http.Request) 
 	}
 	defer rows.Close()
 
-	var items []map[string]any
+	items := []map[string]any{}
 	for rows.Next() {
-		var id, ownerID, guestID int64
-		var permission, guestName, guestEmail string
-		if err := rows.Scan(&id, &ownerID, &guestID, &permission, &guestName, &guestEmail); err != nil {
+		var id, ownerID, guestID, accountID int64
+		var permission, guestName, guestEmail, accountName string
+		if err := rows.Scan(&id, &ownerID, &guestID, &accountID, &permission,
+			&guestName, &guestEmail, &accountName); err != nil {
 			log.Printf("shared access: scan error: %v", err)
 			continue
 		}
 		items = append(items, map[string]any{
 			"id": id, "owner_user_id": ownerID, "guest_user_id": guestID,
+			"account_id": accountID, "account_name": accountName,
 			"permission": permission, "guest_name": guestName, "guest_email": guestEmail,
 		})
 	}
@@ -45,14 +54,12 @@ func (s *Server) handleListSharedAccess(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if items == nil {
-		items = []map[string]any{}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(items)
 }
 
+// handleCreateSharedAccess grants a guest read or write access to a single
+// account owned by the authenticated user.
 func (s *Server) handleCreateSharedAccess(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 	var req sharedAccessRequest
@@ -65,26 +72,48 @@ func (s *Server) handleCreateSharedAccess(w http.ResponseWriter, r *http.Request
 		http.Error(w, "permission must be 'read' or 'write'", http.StatusBadRequest)
 		return
 	}
-
-	// Find guest user by email
-	var guestID int64
-	err := s.DB.QueryRow("SELECT id FROM users WHERE email = ?", req.GuestEmail).Scan(&guestID)
-	if err != nil {
-		http.Error(w, "user not found", http.StatusNotFound)
+	if req.AccountID == 0 {
+		http.Error(w, "account_id is required", http.StatusBadRequest)
+		return
+	}
+	req.GuestEmail = strings.TrimSpace(req.GuestEmail)
+	if req.GuestEmail == "" {
+		http.Error(w, "guest_email is required", http.StatusBadRequest)
 		return
 	}
 
+	// Account must belong to the authenticated user.
+	var accountOwner int64
+	if err := s.DB.QueryRow(
+		"SELECT user_id FROM accounts WHERE id = ? AND deleted_at IS NULL", req.AccountID,
+	).Scan(&accountOwner); err != nil {
+		http.Error(w, "account not found", http.StatusNotFound)
+		return
+	}
+	if accountOwner != userID {
+		http.Error(w, "forbidden: not the account owner", http.StatusForbidden)
+		return
+	}
+
+	var guestID int64
+	if err := s.DB.QueryRow(
+		"SELECT id FROM users WHERE email = ?", req.GuestEmail,
+	).Scan(&guestID); err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
 	if guestID == userID {
 		http.Error(w, "cannot share with yourself", http.StatusBadRequest)
 		return
 	}
 
 	result, err := s.DB.Exec(
-		"INSERT INTO shared_access (owner_user_id, guest_user_id, permission) VALUES (?, ?, ?)",
-		userID, guestID, req.Permission,
+		`INSERT INTO shared_account_access (owner_user_id, guest_user_id, account_id, permission)
+		 VALUES (?, ?, ?, ?)`,
+		userID, guestID, req.AccountID, req.Permission,
 	)
 	if err != nil {
-		http.Error(w, "already shared with this user", http.StatusConflict)
+		http.Error(w, "already shared with this user for this account", http.StatusConflict)
 		return
 	}
 
@@ -94,14 +123,19 @@ func (s *Server) handleCreateSharedAccess(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]any{"id": id})
 }
 
+// handleListAccessibleOwners returns the owners that have shared at least one
+// account with the authenticated user, with the list of accounts and per-account
+// permissions nested under each owner.
 func (s *Server) handleListAccessibleOwners(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
 	rows, err := s.DB.Query(
-		`SELECT sa.owner_user_id, u.name, u.email, sa.permission
-		 FROM shared_access sa
+		`SELECT sa.owner_user_id, u.name, u.email, sa.account_id, a.name, sa.permission
+		 FROM shared_account_access sa
 		 JOIN users u ON sa.owner_user_id = u.id
-		 WHERE sa.guest_user_id = ?`, userID,
+		 JOIN accounts a ON sa.account_id = a.id
+		 WHERE sa.guest_user_id = ? AND a.deleted_at IS NULL
+		 ORDER BY u.email, a.name`, userID,
 	)
 	if err != nil {
 		http.Error(w, "query error", http.StatusInternalServerError)
@@ -109,16 +143,35 @@ func (s *Server) handleListAccessibleOwners(w http.ResponseWriter, r *http.Reque
 	}
 	defer rows.Close()
 
-	var items []map[string]any
+	type acctEntry struct {
+		AccountID   int64  `json:"account_id"`
+		AccountName string `json:"account_name"`
+		Permission  string `json:"permission"`
+	}
+	type ownerEntry struct {
+		OwnerUserID int64       `json:"owner_user_id"`
+		Name        string      `json:"name"`
+		Email       string      `json:"email"`
+		Accounts    []acctEntry `json:"accounts"`
+	}
+
+	owners := []*ownerEntry{}
+	byID := map[int64]*ownerEntry{}
 	for rows.Next() {
-		var ownerID int64
-		var name, email, permission string
-		if err := rows.Scan(&ownerID, &name, &email, &permission); err != nil {
+		var ownerID, accountID int64
+		var name, email, accountName, permission string
+		if err := rows.Scan(&ownerID, &name, &email, &accountID, &accountName, &permission); err != nil {
 			log.Printf("accessible owners: scan error: %v", err)
 			continue
 		}
-		items = append(items, map[string]any{
-			"owner_user_id": ownerID, "name": name, "email": email, "permission": permission,
+		entry, ok := byID[ownerID]
+		if !ok {
+			entry = &ownerEntry{OwnerUserID: ownerID, Name: name, Email: email, Accounts: []acctEntry{}}
+			byID[ownerID] = entry
+			owners = append(owners, entry)
+		}
+		entry.Accounts = append(entry.Accounts, acctEntry{
+			AccountID: accountID, AccountName: accountName, Permission: permission,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -126,12 +179,8 @@ func (s *Server) handleListAccessibleOwners(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if items == nil {
-		items = []map[string]any{}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(items)
+	json.NewEncoder(w).Encode(owners)
 }
 
 func (s *Server) handleDeleteSharedAccess(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +191,9 @@ func (s *Server) handleDeleteSharedAccess(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	result, err := s.DB.Exec("DELETE FROM shared_access WHERE id = ? AND owner_user_id = ?", id, userID)
+	result, err := s.DB.Exec(
+		"DELETE FROM shared_account_access WHERE id = ? AND owner_user_id = ?", id, userID,
+	)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

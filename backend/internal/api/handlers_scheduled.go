@@ -22,22 +22,26 @@ type scheduledRequest struct {
 func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
 		return
 	}
 
+	accIDs, err := listAccessibleAccountIDs(userID, targetUserID, s.DB)
+	if err != nil {
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+
+	args := append([]any{targetUserID}, idsToArgs(accIDs)...)
 	rows, err := s.DB.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency,
 		        description, note, rrule, next_occurrence, active, max_occurrences, occurrence_count,
 		        created_at, updated_at, sync_version
-		 FROM scheduled_transactions WHERE user_id = ? AND deleted_at IS NULL ORDER BY next_occurrence`,
-		targetUserID,
+		 FROM scheduled_transactions WHERE user_id = ? AND deleted_at IS NULL
+		   AND account_id IN (`+sqlInPlaceholders(len(accIDs))+`) ORDER BY next_occurrence`,
+		args...,
 	)
 	if err != nil {
 		http.Error(w, "query error", http.StatusInternalServerError)
@@ -86,23 +90,23 @@ func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	var req scheduledRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.AccountID == 0 {
+		http.Error(w, "account_id is required", http.StatusBadRequest)
+		return
+	}
+	targetUserID, permission, err := checkAccountAccess(userID, req.AccountID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
 		return
 	}
 	if permission != "write" {
 		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
-		return
-	}
-
-	var req scheduledRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -146,20 +150,6 @@ func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateScheduled(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
-	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-		return
-	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
-		return
-	}
-
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
@@ -170,6 +160,31 @@ func (s *Server) handleUpdateScheduled(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
+	}
+
+	var oldAccountID, targetUserID int64
+	err = s.DB.QueryRow(
+		"SELECT account_id, user_id FROM scheduled_transactions WHERE id = ? AND deleted_at IS NULL",
+		id,
+	).Scan(&oldAccountID, &targetUserID)
+	if err != nil {
+		http.Error(w, "scheduled transaction not found", http.StatusNotFound)
+		return
+	}
+	if _, perm, err := checkAccountAccess(userID, oldAccountID, s.DB); err != nil || perm != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+	if req.AccountID != 0 && req.AccountID != oldAccountID {
+		newOwner, perm, err := checkAccountAccess(userID, req.AccountID, s.DB)
+		if err != nil || perm != "write" {
+			http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+			return
+		}
+		if newOwner != targetUserID {
+			http.Error(w, "forbidden: cannot move scheduled transaction across owners", http.StatusForbidden)
+			return
+		}
 	}
 
 	if err := validateDatetime(req.NextOccurrence); err != nil {
@@ -206,27 +221,26 @@ func (s *Server) handleUpdateScheduled(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteScheduled(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
-	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-		return
-	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
-		return
-	}
-
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
 
-	result, err := s.DB.Exec("UPDATE scheduled_transactions SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, targetUserID)
+	var accountID int64
+	err = s.DB.QueryRow(
+		"SELECT account_id FROM scheduled_transactions WHERE id = ? AND deleted_at IS NULL", id,
+	).Scan(&accountID)
+	if err != nil {
+		http.Error(w, "scheduled transaction not found", http.StatusNotFound)
+		return
+	}
+	if _, perm, err := checkAccountAccess(userID, accountID, s.DB); err != nil || perm != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+
+	result, err := s.DB.Exec("UPDATE scheduled_transactions SET deleted_at = datetime('now') WHERE id = ? AND deleted_at IS NULL", id)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

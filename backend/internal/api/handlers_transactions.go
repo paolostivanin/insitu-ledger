@@ -22,19 +22,21 @@ type createTransactionRequest struct {
 func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
+		return
+	}
+
+	accIDs, err := scopedAccountIDs(r, userID, targetUserID, s.DB)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Optional query params for filtering
-	from := r.URL.Query().Get("from")       // YYYY-MM-DD
-	to := r.URL.Query().Get("to")           // YYYY-MM-DD
+	from := r.URL.Query().Get("from")  // YYYY-MM-DD
+	to := r.URL.Query().Get("to")      // YYYY-MM-DD
 	catID := r.URL.Query().Get("category_id")
 
 	limitVal, offsetVal, err := parsePagination(r.URL.Query().Get("limit"), r.URL.Query().Get("offset"))
@@ -64,19 +66,22 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	accInClause := sqlInPlaceholders(len(accIDs))
 	var query string
 	if needsCategoryJoin {
 		query = `SELECT t.id, t.account_id, t.category_id, t.user_id, t.type, t.amount, t.currency,
 		           t.description, t.note, t.date, t.created_at, t.updated_at, t.sync_version
 		           FROM transactions t
 		           JOIN categories c ON t.category_id = c.id
-		           WHERE t.user_id = ? AND t.deleted_at IS NULL`
+		           WHERE t.user_id = ? AND t.deleted_at IS NULL
+		             AND t.account_id IN (` + accInClause + `)`
 	} else {
 		query = `SELECT t.id, t.account_id, t.category_id, t.user_id, t.type, t.amount, t.currency,
 		           t.description, t.note, t.date, t.created_at, t.updated_at, t.sync_version
-		           FROM transactions t WHERE t.user_id = ? AND t.deleted_at IS NULL`
+		           FROM transactions t WHERE t.user_id = ? AND t.deleted_at IS NULL
+		             AND t.account_id IN (` + accInClause + `)`
 	}
-	args := []any{targetUserID}
+	args := append([]any{targetUserID}, idsToArgs(accIDs)...)
 
 	if from != "" {
 		query += " AND t.date >= ?"
@@ -137,23 +142,23 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	var req createTransactionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.AccountID == 0 {
+		http.Error(w, "account_id is required", http.StatusBadRequest)
+		return
+	}
+	targetUserID, permission, err := checkAccountAccess(userID, req.AccountID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
 		return
 	}
 	if permission != "write" {
 		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
-		return
-	}
-
-	var req createTransactionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -263,20 +268,6 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
-	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-		return
-	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
-		return
-	}
-
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
@@ -313,17 +304,34 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 	}
 	defer tx.Rollback()
 
-	// Get old transaction to reverse balance
+	// Look up the existing transaction (no user filter — auth comes from the account check below).
 	var oldAmount float64
 	var oldType string
-	var oldAccountID int64
+	var oldAccountID, targetUserID int64
 	err = tx.QueryRow(
-		"SELECT amount, type, account_id FROM transactions WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
-		id, targetUserID,
-	).Scan(&oldAmount, &oldType, &oldAccountID)
+		"SELECT amount, type, account_id, user_id FROM transactions WHERE id = ? AND deleted_at IS NULL",
+		id,
+	).Scan(&oldAmount, &oldType, &oldAccountID, &targetUserID)
 	if err != nil {
 		http.Error(w, "transaction not found", http.StatusNotFound)
 		return
+	}
+
+	// Caller must have write access to BOTH the old account and (if changing) the new account.
+	if _, perm, err := checkAccountAccess(userID, oldAccountID, tx); err != nil || perm != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		return
+	}
+	if req.AccountID != 0 && req.AccountID != oldAccountID {
+		newOwner, perm, err := checkAccountAccess(userID, req.AccountID, tx)
+		if err != nil || perm != "write" {
+			http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+			return
+		}
+		if newOwner != targetUserID {
+			http.Error(w, "forbidden: cannot move transaction across owners", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Reverse old balance effect
@@ -368,13 +376,9 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
 		return
 	}
 
@@ -385,14 +389,22 @@ func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	accIDs, err := listAccessibleAccountIDs(userID, targetUserID, s.DB)
+	if err != nil {
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+
+	args := append([]any{targetUserID, q + "%"}, idsToArgs(accIDs)...)
 	rows, err := s.DB.Query(
 		`SELECT description, category_id FROM transactions
 		 WHERE user_id = ? AND deleted_at IS NULL AND description IS NOT NULL
 		   AND description LIKE ? COLLATE NOCASE
+		   AND account_id IN (`+sqlInPlaceholders(len(accIDs))+`)
 		 GROUP BY description COLLATE NOCASE
 		 ORDER BY MAX(date) DESC
 		 LIMIT 10`,
-		targetUserID, q+"%",
+		args...,
 	)
 	if err != nil {
 		http.Error(w, "query error", http.StatusInternalServerError)
@@ -428,20 +440,6 @@ func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.R
 func (s *Server) handleDeleteTransaction(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
-	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-		return
-	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
-		return
-	}
-
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
@@ -455,16 +453,21 @@ func (s *Server) handleDeleteTransaction(w http.ResponseWriter, r *http.Request)
 	}
 	defer tx.Rollback()
 
-	// Soft delete — reverse balance
+	// Soft delete — reverse balance. Auth via the txn's account.
 	var amount float64
 	var typ string
 	var accountID int64
 	err = tx.QueryRow(
-		"SELECT amount, type, account_id FROM transactions WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
-		id, targetUserID,
+		"SELECT amount, type, account_id FROM transactions WHERE id = ? AND deleted_at IS NULL",
+		id,
 	).Scan(&amount, &typ, &accountID)
 	if err != nil {
 		http.Error(w, "transaction not found", http.StatusNotFound)
+		return
+	}
+
+	if _, perm, err := checkAccountAccess(userID, accountID, tx); err != nil || perm != "write" {
+		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
 		return
 	}
 

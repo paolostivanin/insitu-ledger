@@ -15,21 +15,24 @@ type accountRequest struct {
 func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
 		return
 	}
 
-	rows, err := s.DB.Query(
-		`SELECT id, user_id, name, currency, balance, created_at, updated_at, sync_version
-		 FROM accounts WHERE user_id = ? AND deleted_at IS NULL ORDER BY name`,
-		targetUserID,
-	)
+	accIDs, err := listAccessibleAccountIDs(userID, targetUserID, s.DB)
+	if err != nil {
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+
+	query := `SELECT id, user_id, name, currency, balance, created_at, updated_at, sync_version
+		 FROM accounts WHERE user_id = ? AND deleted_at IS NULL
+		   AND id IN (` + sqlInPlaceholders(len(accIDs)) + `) ORDER BY name`
+	args := append([]any{targetUserID}, idsToArgs(accIDs)...)
+
+	rows, err := s.DB.Query(query, args...)
 	if err != nil {
 		http.Error(w, "query error", http.StatusInternalServerError)
 		return
@@ -69,17 +72,13 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, isOwn, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
 		return
 	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+	if !isOwn {
+		http.Error(w, "forbidden: cannot create accounts in another user's space", http.StatusForbidden)
 		return
 	}
 
@@ -123,23 +122,19 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	ownerID, permission, err := checkAccountAccess(userID, id, s.DB)
+	if err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	if permission != "write" {
 		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
-		return
-	}
-
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
 
@@ -151,7 +146,7 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 
 	_, err = s.DB.Exec(
 		"UPDATE accounts SET name=?, currency=? WHERE id=? AND user_id=?",
-		req.Name, req.Currency, id, targetUserID,
+		req.Name, req.Currency, id, ownerID,
 	)
 	if err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
@@ -164,13 +159,15 @@ func (s *Server) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	ownerID, permission, err := checkAccountAccess(userID, id, s.DB)
+	if err != nil {
+		writeAuthError(w, err)
 		return
 	}
 	if permission != "write" {
@@ -178,13 +175,7 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
-		return
-	}
-
-	result, err := s.DB.Exec("UPDATE accounts SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, targetUserID)
+	result, err := s.DB.Exec("UPDATE accounts SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, ownerID)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

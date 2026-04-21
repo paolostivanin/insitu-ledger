@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { categories, type Category } from '$lib/api/client';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { sharedOwnerUserId } from '$lib/stores/shared';
 
 	let cats = $state<Category[]>([]);
 	let loading = $state(true);
@@ -9,6 +10,7 @@
 	let editId = $state<number | null>(null);
 	let error = $state('');
 	let submitting = $state(false);
+	let readOnly = $state(false);
 
 	// Confirm dialog
 	let confirmOpen = $state(false);
@@ -21,11 +23,30 @@
 	let fColor = $state('#6366f1');
 	let fIcon = $state('');
 
-	onMount(load);
+	let mounted = false;
+	let prevOwnerId: string | null = null;
+
+	$effect(() => {
+		const oid = $sharedOwnerUserId;
+		if (mounted && oid !== prevOwnerId) {
+			prevOwnerId = oid;
+			void load();
+		}
+	});
+
+	onMount(async () => {
+		prevOwnerId = $sharedOwnerUserId;
+		mounted = true;
+		await load();
+	});
 
 	async function load() {
 		loading = true;
-		cats = await categories.list();
+		cats = await categories.list($sharedOwnerUserId || undefined);
+		// All categories from a single list response carry the same read_only
+		// flag (set true on the server when viewing another owner). Use the
+		// first row's flag, defaulting to false for an empty list.
+		readOnly = cats.length > 0 ? !!cats[0].read_only : $sharedOwnerUserId !== null;
 		loading = false;
 	}
 
@@ -103,10 +124,16 @@
 <div class="page">
 	<div class="page-header">
 		<h1>Categories</h1>
-		<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
-			{showForm ? 'Cancel' : '+ New Category'}
-		</button>
+		{#if !readOnly}
+			<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
+				{showForm ? 'Cancel' : '+ New Category'}
+			</button>
+		{/if}
 	</div>
+
+	{#if readOnly}
+		<p class="text-muted" style="margin-bottom: 1rem">Read-only: viewing another user's categories.</p>
+	{/if}
 
 	{#if error}
 		<p class="error-msg">{error}</p>
@@ -166,10 +193,12 @@
 						<span class="cat-icon">{cat.icon || ''}</span>
 						<span class="cat-name">{cat.name}</span>
 						<span class="badge {cat.type === 'income' ? 'badge-income' : 'badge-expense'}">{cat.type}</span>
-						<div class="actions">
-							<button class="btn-ghost" onclick={() => startEdit(cat)}>Edit</button>
-							<button class="btn-danger" onclick={() => remove(cat.id)}>Del</button>
-						</div>
+						{#if !readOnly}
+							<div class="actions">
+								<button class="btn-ghost" onclick={() => startEdit(cat)}>Edit</button>
+								<button class="btn-danger" onclick={() => remove(cat.id)}>Del</button>
+							</div>
+						{/if}
 					</div>
 					{#if children(cat.id).length > 0}
 						<div class="sub-cats">
@@ -177,10 +206,12 @@
 								<div class="sub-row">
 									<span class="cat-dot small" style="background: {sub.color || cat.color || '#6366f1'}"></span>
 									<span>{sub.icon || ''} {sub.name}</span>
-									<div class="actions">
-										<button class="btn-ghost" onclick={() => startEdit(sub)}>Edit</button>
-										<button class="btn-danger" onclick={() => remove(sub.id)}>Del</button>
-									</div>
+									{#if !readOnly}
+										<div class="actions">
+											<button class="btn-ghost" onclick={() => startEdit(sub)}>Edit</button>
+											<button class="btn-danger" onclick={() => remove(sub.id)}>Del</button>
+										</div>
+									{/if}
 								</div>
 							{/each}
 						</div>

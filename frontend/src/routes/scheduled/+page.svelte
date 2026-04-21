@@ -5,6 +5,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
+	import { sharedOwnerUserId, accountPermission, hasAnyWriteInCurrentContext } from '$lib/stores/shared';
 
 	let items = $state<ScheduledTransaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -50,17 +51,41 @@
 		'FREQ=YEARLY': 'Yearly'
 	};
 
-	onMount(load);
+	let mounted = false;
+	let prevOwnerId: string | null = null;
+
+	$effect(() => {
+		const oid = $sharedOwnerUserId;
+		if (mounted && oid !== prevOwnerId) {
+			prevOwnerId = oid;
+			void load();
+		}
+	});
+
+	onMount(async () => {
+		prevOwnerId = $sharedOwnerUserId;
+		mounted = true;
+		await load();
+	});
 
 	async function load() {
 		loading = true;
-		const [s, c, a] = await Promise.all([scheduled.list(), categories.list(), accounts.list()]);
+		const oid = $sharedOwnerUserId || undefined;
+		const [s, c, a] = await Promise.all([
+			scheduled.list({ owner_id: oid }),
+			categories.list(oid),
+			accounts.list(oid)
+		]);
 		items = s;
 		cats = c;
 		accts = a;
 		if (accts.length && !fAccountId) fAccountId = accts[0].id;
 		if (cats.length && !fCategoryId) fCategoryId = cats[0].id;
 		loading = false;
+	}
+
+	function canEdit(item: ScheduledTransaction): boolean {
+		return accountPermission(item.account_id) === 'write';
 	}
 
 	function catName(id: number): string {
@@ -140,11 +165,12 @@
 			next_occurrence: `${fNextDate}T${fNextTime}`,
 			max_occurrences: maxOcc && maxOcc > 0 ? maxOcc : null
 		};
+		const oid = $sharedOwnerUserId || undefined;
 		try {
 			if (editId) {
-				await scheduled.update(editId, data);
+				await scheduled.update(editId, data, oid);
 			} else {
-				await scheduled.create(data);
+				await scheduled.create(data, oid);
 			}
 			showForm = false;
 			resetForm();
@@ -158,7 +184,7 @@
 	function remove(id: number) {
 		confirmMessage = 'Delete this scheduled transaction?';
 		confirmAction = async () => {
-			await scheduled.delete(id);
+			await scheduled.delete(id, $sharedOwnerUserId || undefined);
 			await load();
 		};
 		confirmOpen = true;
@@ -176,9 +202,11 @@
 <div class="page">
 	<div class="page-header">
 		<h1>Scheduled Transactions</h1>
-		<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
-			{showForm ? 'Cancel' : '+ New Scheduled'}
-		</button>
+		{#if $hasAnyWriteInCurrentContext}
+			<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
+				{showForm ? 'Cancel' : '+ New Scheduled'}
+			</button>
+		{/if}
 	</div>
 
 	{#if error}
@@ -217,7 +245,7 @@
 					<div class="form-group">
 						<label for="account">Account</label>
 						<select id="account" bind:value={fAccountId}>
-							{#each accts as a}
+							{#each accts.filter(a => accountPermission(a.id) === 'write') as a (a.id)}
 								<option value={a.id}>{a.name}</option>
 							{/each}
 						</select>
@@ -299,8 +327,10 @@
 							<td>{item.max_occurrences != null ? `${item.occurrence_count}/${item.max_occurrences}` : '∞'}</td>
 							<td>{item.active ? 'Active' : 'Paused'}</td>
 							<td class="actions">
-								<button class="btn-ghost" onclick={() => startEdit(item)}>Edit</button>
-								<button class="btn-danger" onclick={() => remove(item.id)}>Del</button>
+								{#if canEdit(item)}
+									<button class="btn-ghost" onclick={() => startEdit(item)}>Edit</button>
+									<button class="btn-danger" onclick={() => remove(item.id)}>Del</button>
+								{/if}
 							</td>
 						</tr>
 					{/each}

@@ -50,6 +50,7 @@ func Open(dataDir string) (*sql.DB, error) {
 		"ALTER TABLE transactions ADD COLUMN note TEXT",
 		"ALTER TABLE scheduled_transactions ADD COLUMN note TEXT",
 		"ALTER TABLE users ADD COLUMN currency_symbol TEXT NOT NULL DEFAULT '€'",
+		"ALTER TABLE users ADD COLUMN default_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
 	}
 	for _, m := range migrations {
 		if _, err := conn.Exec(m); err != nil {
@@ -61,9 +62,51 @@ func Open(dataDir string) (*sql.DB, error) {
 		}
 	}
 
+	if err := migrateLegacySharedAccess(conn); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("legacy shared_access migration: %w", err)
+	}
+
 	seedDefaultAdmin(conn)
 
 	return conn, nil
+}
+
+// migrateLegacySharedAccess expands rows in the legacy global-share table
+// shared_access into per-account rows in shared_account_access (one row per
+// account the owner has at migration time), then drops the legacy table.
+// Idempotent: the absence of the legacy table is the marker that migration ran.
+func migrateLegacySharedAccess(conn *sql.DB) error {
+	var legacyExists int
+	row := conn.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='shared_access'")
+	if err := row.Scan(&legacyExists); err != nil {
+		return fmt.Errorf("probe shared_access: %w", err)
+	}
+	if legacyExists == 0 {
+		return nil
+	}
+
+	tx, err := conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		INSERT OR IGNORE INTO shared_account_access
+		    (owner_user_id, guest_user_id, account_id, permission)
+		SELECT s.owner_user_id, s.guest_user_id, a.id, s.permission
+		FROM shared_access s
+		JOIN accounts a ON a.user_id = s.owner_user_id AND a.deleted_at IS NULL
+	`); err != nil {
+		return fmt.Errorf("expand legacy shares: %w", err)
+	}
+
+	if _, err := tx.Exec("DROP TABLE shared_access"); err != nil {
+		return fmt.Errorf("drop legacy table: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // seedDefaultAdmin creates the default admin user with a randomly generated

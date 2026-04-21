@@ -4,9 +4,10 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { authenticated, userName, isAdmin, forcePasswordChange, forceTotpSetup, initAuth, clearAuth } from '$lib/stores/auth';
-	import { auth as authApi, shared as sharedApi, clearToken, clearApiCache, type AccessibleOwner } from '$lib/api/client';
+	import { auth as authApi, shared as sharedApi, preferences as prefsApi, clearToken, clearApiCache, type AccessibleOwner } from '$lib/api/client';
 	import { initTheme } from '$lib/stores/theme';
-	import { sharedOwnerUserId, setSharedOwner, clearSharedOwner } from '$lib/stores/shared';
+	import { sharedOwnerUserId, setSharedOwner, clearSharedOwner, accessibleOwners as accessibleOwnersStore } from '$lib/stores/shared';
+	import { setAccountFilter } from '$lib/stores/accountFilter';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import ToastContainer from '$lib/components/ToastContainer.svelte';
 
@@ -25,7 +26,7 @@
 			} else if ($forceTotpSetup) {
 				goto('/setup-2fa');
 			}
-			loadAccessibleOwners();
+			bootstrapSharedContext();
 		}
 
 		const goOnline = () => { isOffline = false; };
@@ -40,16 +41,41 @@
 		};
 	});
 
-	async function loadAccessibleOwners() {
+	async function bootstrapSharedContext() {
 		try {
 			accessibleOwners = await sharedApi.accessible();
 		} catch {
 			accessibleOwners = [];
 		}
-		// Clear persisted selection if the owner is no longer accessible
+		accessibleOwnersStore.set(accessibleOwners);
+
+		// Drop the persisted owner if their share has been revoked.
 		const savedId = $sharedOwnerUserId;
 		if (savedId && !accessibleOwners.find(o => o.owner_user_id.toString() === savedId)) {
 			clearSharedOwner();
+		}
+
+		// Apply the saved default account: switch owner if needed and pin the
+		// account filter. Silently no-ops when the account is no longer accessible
+		// (preferences GET returns null in that case).
+		try {
+			const prefs = await prefsApi.get();
+			if (prefs.default_account_id !== null) {
+				const targetOwner = accessibleOwners.find(o =>
+					o.accounts.some(a => a.account_id === prefs.default_account_id)
+				);
+				if (targetOwner) {
+					if ($sharedOwnerUserId !== targetOwner.owner_user_id.toString()) {
+						setSharedOwner(targetOwner.owner_user_id.toString());
+					}
+				} else {
+					// Account belongs to the user themselves.
+					if ($sharedOwnerUserId !== null) clearSharedOwner();
+				}
+				setAccountFilter(prefs.default_account_id);
+			}
+		} catch {
+			// Preferences fetch is best-effort; ignore failures.
 		}
 	}
 
@@ -59,9 +85,13 @@
 		if (val === '') {
 			clearSharedOwner();
 		} else {
-			const owner = accessibleOwners.find(o => o.owner_user_id.toString() === val);
-			setSharedOwner(val, owner?.permission || 'read');
+			setSharedOwner(val);
 		}
+	}
+
+	function ownerLabel(o: AccessibleOwner): string {
+		const n = o.accounts.length;
+		return `${o.name} (${n} account${n === 1 ? '' : 's'})`;
 	}
 
 	const navItems = [
@@ -149,7 +179,7 @@
 					<select class="owner-switcher" value={$sharedOwnerUserId || ''} onchange={switchOwner}>
 						<option value="">My Data</option>
 						{#each accessibleOwners as owner (owner.owner_user_id)}
-							<option value={owner.owner_user_id.toString()}>{owner.name} ({owner.permission})</option>
+							<option value={owner.owner_user_id.toString()}>{ownerLabel(owner)}</option>
 						{/each}
 					</select>
 				{/if}

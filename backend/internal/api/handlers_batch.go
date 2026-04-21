@@ -20,20 +20,6 @@ type batchUpdateCategoryRequest struct {
 func (s *Server) handleBatchDeleteTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
-	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-		return
-	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
-		return
-	}
-
 	var req batchDeleteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -51,17 +37,16 @@ func (s *Server) handleBatchDeleteTransactions(w http.ResponseWriter, r *http.Re
 	}
 	defer tx.Rollback()
 
-	// Fetch all matching transactions in one query
+	// Fetch all candidate transactions (no user filter — auth is per-account below).
 	placeholders := make([]string, len(req.IDs))
-	args := make([]any, 0, len(req.IDs)+1)
+	args := make([]any, 0, len(req.IDs))
 	for i, id := range req.IDs {
 		placeholders[i] = "?"
 		args = append(args, id)
 	}
-	args = append(args, targetUserID)
 
 	fetchQuery := fmt.Sprintf(
-		"SELECT id, amount, type, account_id FROM transactions WHERE id IN (%s) AND user_id = ? AND deleted_at IS NULL",
+		"SELECT id, amount, type, account_id FROM transactions WHERE id IN (%s) AND deleted_at IS NULL",
 		strings.Join(placeholders, ","),
 	)
 	rows, err := tx.Query(fetchQuery, args...)
@@ -93,6 +78,19 @@ func (s *Server) handleBatchDeleteTransactions(w http.ResponseWriter, r *http.Re
 		tx.Rollback()
 		w.WriteHeader(http.StatusNoContent)
 		return
+	}
+
+	// Verify the caller has write access to every affected account.
+	checked := map[int64]bool{}
+	for _, t := range found {
+		if checked[t.accountID] {
+			continue
+		}
+		if _, perm, err := checkAccountAccess(userID, t.accountID, tx); err != nil || perm != "write" {
+			http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+			return
+		}
+		checked[t.accountID] = true
 	}
 
 	// Soft-delete all matching transactions in one query
@@ -136,20 +134,6 @@ func (s *Server) handleBatchDeleteTransactions(w http.ResponseWriter, r *http.Re
 func (s *Server) handleBatchUpdateCategory(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
-	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-		return
-	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
-		return
-	}
-
 	var req batchUpdateCategoryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -160,30 +144,90 @@ func (s *Server) handleBatchUpdateCategory(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Verify category belongs to user
-	var catExists bool
-	err = s.DB.QueryRow("SELECT 1 FROM categories WHERE id = ? AND user_id = ? AND deleted_at IS NULL", req.CategoryID, targetUserID).Scan(&catExists)
+	tx, err := s.DB.Begin()
 	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Fetch candidate transactions and group by user_id+account_id for auth.
+	placeholders := make([]string, len(req.IDs))
+	idArgs := make([]any, 0, len(req.IDs))
+	for i, id := range req.IDs {
+		placeholders[i] = "?"
+		idArgs = append(idArgs, id)
+	}
+	rows, err := tx.Query(
+		fmt.Sprintf("SELECT id, user_id, account_id FROM transactions WHERE id IN (%s) AND deleted_at IS NULL",
+			strings.Join(placeholders, ",")),
+		idArgs...,
+	)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	type txnRef struct{ id, ownerID, accountID int64 }
+	var found []txnRef
+	for rows.Next() {
+		var t txnRef
+		if err := rows.Scan(&t.id, &t.ownerID, &t.accountID); err == nil {
+			found = append(found, t)
+		}
+	}
+	rows.Close()
+	if len(found) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Validate every transaction is in a write-accessible account, and collect owners.
+	owners := map[int64]bool{}
+	checked := map[int64]bool{}
+	for _, t := range found {
+		if !checked[t.accountID] {
+			if _, perm, err := checkAccountAccess(userID, t.accountID, tx); err != nil || perm != "write" {
+				http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+				return
+			}
+			checked[t.accountID] = true
+		}
+		owners[t.ownerID] = true
+	}
+
+	// The new category must belong to a single common owner across all affected transactions.
+	if len(owners) != 1 {
+		http.Error(w, "forbidden: transactions span multiple owners", http.StatusForbidden)
+		return
+	}
+	var ownerID int64
+	for o := range owners {
+		ownerID = o
+	}
+	var catExists int
+	if err := tx.QueryRow(
+		"SELECT 1 FROM categories WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+		req.CategoryID, ownerID,
+	).Scan(&catExists); err != nil {
 		http.Error(w, "category not found", http.StatusBadRequest)
 		return
 	}
 
-	placeholders := make([]string, len(req.IDs))
-	args := make([]any, 0, len(req.IDs)+2)
-	args = append(args, req.CategoryID)
-	for i, id := range req.IDs {
-		placeholders[i] = "?"
-		args = append(args, id)
-	}
-	args = append(args, targetUserID)
-
-	query := fmt.Sprintf(
-		"UPDATE transactions SET category_id = ? WHERE id IN (%s) AND user_id = ? AND deleted_at IS NULL",
-		strings.Join(placeholders, ","),
-	)
-
-	if _, err := s.DB.Exec(query, args...); err != nil {
+	updArgs := make([]any, 0, len(req.IDs)+1)
+	updArgs = append(updArgs, req.CategoryID)
+	updArgs = append(updArgs, idArgs...)
+	if _, err := tx.Exec(
+		fmt.Sprintf("UPDATE transactions SET category_id = ? WHERE id IN (%s) AND deleted_at IS NULL",
+			strings.Join(placeholders, ",")),
+		updArgs...,
+	); err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("batch update commit error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 

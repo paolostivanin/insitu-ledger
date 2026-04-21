@@ -4,6 +4,9 @@
 	import { isAuthenticated, accounts, transactions, reports, type Account, type Transaction, type CategoryReport, type MonthReport } from '$lib/api/client';
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
+	import { sharedOwnerUserId } from '$lib/stores/shared';
+	import { currentAccountId } from '$lib/stores/accountFilter';
+	import AccountFilterPill from '$lib/components/AccountFilterPill.svelte';
 
 	let accts = $state<Account[]>([]);
 	let recentTxns = $state<Transaction[]>([]);
@@ -11,18 +14,41 @@
 	let monthData = $state<MonthReport[]>([]);
 	let loading = $state(true);
 	let loadError = $state('');
+	let mounted = false;
+	let prevOwnerId: string | null = null;
+	let prevAccountId: number | null = null;
+
+	$effect(() => {
+		const oid = $sharedOwnerUserId;
+		const aid = $currentAccountId;
+		if (mounted && (oid !== prevOwnerId || aid !== prevAccountId)) {
+			prevOwnerId = oid;
+			prevAccountId = aid;
+			void loadDashboard();
+		}
+	});
 
 	onMount(async () => {
 		if (!isAuthenticated()) {
 			goto('/login');
 			return;
 		}
+		prevOwnerId = $sharedOwnerUserId;
+		prevAccountId = $currentAccountId;
+		mounted = true;
+		await loadDashboard();
+	});
+
+	async function loadDashboard() {
+		loading = true;
+		const oid = $sharedOwnerUserId || undefined;
+		const aid = $currentAccountId !== null ? $currentAccountId.toString() : undefined;
 		try {
 			const results = await Promise.allSettled([
-				accounts.list(),
-				transactions.list({ limit: '10' }),
-				reports.byCategory({ type: 'expense' }),
-				reports.byMonth({ year: new Date().getFullYear().toString() })
+				accounts.list(oid),
+				transactions.list({ limit: '10', owner_id: oid, account_id: aid }),
+				reports.byCategory({ type: 'expense', owner_id: oid, account_id: aid }),
+				reports.byMonth({ year: new Date().getFullYear().toString(), owner_id: oid, account_id: aid })
 			]);
 			if (results[0].status === 'fulfilled') accts = results[0].value;
 			if (results[1].status === 'fulfilled') recentTxns = results[1].value;
@@ -35,6 +61,8 @@
 				if (reason?.status !== 401) {
 					loadError = 'Failed to load dashboard data. Please try refreshing.';
 				}
+			} else {
+				loadError = '';
 			}
 		} catch (e: any) {
 			if (e?.status !== 401) {
@@ -42,7 +70,7 @@
 			}
 		}
 		loading = false;
-	});
+	}
 
 	function totalBalance(): number {
 		return accts.reduce((sum, a) => sum + a.balance, 0);
@@ -74,7 +102,10 @@
 	{:else if loadError}
 		<p class="error-msg">{loadError}</p>
 	{:else}
-		<h1>Dashboard</h1>
+		<div class="page-header">
+			<h1>Dashboard</h1>
+			<AccountFilterPill accounts={accts} />
+		</div>
 
 		<div class="stats-grid">
 			<div class="stat-card card">
@@ -144,6 +175,12 @@
 </div>
 
 <style>
+	.page-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1rem;
+	}
 	.stats-grid {
 		display: grid;
 		grid-template-columns: repeat(4, 1fr);

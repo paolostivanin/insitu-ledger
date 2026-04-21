@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS users (
     totp_secret TEXT,
     totp_enabled INTEGER NOT NULL DEFAULT 0,
     currency_symbol TEXT NOT NULL DEFAULT '€',
+    default_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     sync_version INTEGER NOT NULL DEFAULT 0
@@ -119,14 +120,15 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     sync_version INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS shared_access (
+CREATE TABLE IF NOT EXISTS shared_account_access (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     guest_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     permission TEXT NOT NULL CHECK (permission IN ('read', 'write')),
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     sync_version INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(owner_user_id, guest_user_id)
+    UNIQUE(owner_user_id, guest_user_id, account_id)
 );
 
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -1070,15 +1072,17 @@ func TestSharedAccessListAccessible(t *testing.T) {
 		t.Errorf("expected 0 accessible owners, got %d", len(owners))
 	}
 
-	// Admin shares with guest (read)
-	req = authedRequest("POST", "/api/shared", `{"guest_email":"guest@test.com","permission":"read"}`, adminToken)
+	// Admin creates an account and shares it with guest (read)
+	acctID, _ := createTestAccountAndCategory(t, handler, adminToken)
+	body := fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":%d,"permission":"read"}`, acctID)
+	req = authedRequest("POST", "/api/shared", body, adminToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != 201 {
 		t.Fatalf("create share: got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Guest now sees admin as accessible owner
+	// Guest now sees admin as accessible owner with the one shared account
 	req = authedRequest("GET", "/api/shared/accessible", "", guestToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -1086,8 +1090,13 @@ func TestSharedAccessListAccessible(t *testing.T) {
 	if len(owners) != 1 {
 		t.Fatalf("expected 1 accessible owner, got %d", len(owners))
 	}
-	if owners[0]["permission"] != "read" {
-		t.Errorf("permission = %v, want read", owners[0]["permission"])
+	accts := owners[0]["accounts"].([]any)
+	if len(accts) != 1 {
+		t.Fatalf("expected 1 shared account, got %d", len(accts))
+	}
+	first := accts[0].(map[string]any)
+	if first["permission"] != "read" {
+		t.Errorf("permission = %v, want read", first["permission"])
 	}
 }
 
@@ -1108,9 +1117,13 @@ func TestSharedAccessReadOnly(t *testing.T) {
 	txnID := int(created["id"].(float64))
 
 	// Share with read permission
-	req = authedRequest("POST", "/api/shared", `{"guest_email":"guest@test.com","permission":"read"}`, adminToken)
+	shareBody := fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":%d,"permission":"read"}`, acctID)
+	req = authedRequest("POST", "/api/shared", shareBody, adminToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("create share: got %d: %s", w.Code, w.Body.String())
+	}
 
 	// Guest can read admin's transactions
 	req = authedRequest("GET", "/api/transactions?owner_id=1", "", guestToken)
@@ -1177,9 +1190,13 @@ func TestSharedAccessWritePermission(t *testing.T) {
 	acctID, catID := createTestAccountAndCategory(t, handler, adminToken)
 
 	// Share with write permission
-	req := authedRequest("POST", "/api/shared", `{"guest_email":"guest@test.com","permission":"write"}`, adminToken)
+	shareBody := fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":%d,"permission":"write"}`, acctID)
+	req := authedRequest("POST", "/api/shared", shareBody, adminToken)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("create share: got %d: %s", w.Code, w.Body.String())
+	}
 
 	// Guest CAN create transactions for admin
 	body := fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":30,"date":"2025-02-01"}`, acctID, catID)
@@ -1263,9 +1280,13 @@ func TestSharedAccessReports(t *testing.T) {
 	handler.ServeHTTP(w, req)
 
 	// Share with read
-	req = authedRequest("POST", "/api/shared", `{"guest_email":"guest@test.com","permission":"read"}`, adminToken)
+	shareBody := fmt.Sprintf(`{"guest_email":"guest@test.com","account_id":%d,"permission":"read"}`, acctID)
+	req = authedRequest("POST", "/api/shared", shareBody, adminToken)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("create share: got %d: %s", w.Code, w.Body.String())
+	}
 
 	// Guest can view reports for admin
 	req = authedRequest("GET", "/api/reports/by-category?owner_id=1", "", guestToken)

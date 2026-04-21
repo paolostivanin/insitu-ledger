@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.12.0"
+  version: "1.13.0"
 
 servers:
   - url: /api
@@ -67,6 +67,19 @@ components:
           type: boolean
         totp_enabled:
           type: boolean
+        currency_symbol:
+          type: string
+
+    Preferences:
+      type: object
+      properties:
+        default_account_id:
+          type: integer
+          nullable: true
+          description: >-
+            Account to land on at app startup. May reference an account the
+            user owns or one shared with them. Returns null when unset, when
+            the account no longer exists, or when the share has been revoked.
 
     Transaction:
       type: object
@@ -162,6 +175,11 @@ components:
           format: date-time
         sync_version:
           type: integer
+        read_only:
+          type: boolean
+          description: >-
+            True when the auth user is viewing another owner's categories
+            (always read-only); false when viewing own.
 
     CategoryInput:
       type: object
@@ -290,6 +308,7 @@ components:
 
     SharedAccess:
       type: object
+      description: A single grant: one guest can read or write one specific account.
       properties:
         id:
           type: integer
@@ -297,6 +316,10 @@ components:
           type: integer
         guest_user_id:
           type: integer
+        account_id:
+          type: integer
+        account_name:
+          type: string
         permission:
           type: string
           enum: [read, write]
@@ -304,6 +327,29 @@ components:
           type: string
         guest_email:
           type: string
+
+    AccessibleOwner:
+      type: object
+      description: An owner who has shared at least one account with the auth user.
+      properties:
+        owner_user_id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        accounts:
+          type: array
+          items:
+            type: object
+            properties:
+              account_id:
+                type: integer
+              account_name:
+                type: string
+              permission:
+                type: string
+                enum: [read, write]
 
     CategoryReport:
       type: object
@@ -568,6 +614,16 @@ paths:
       tags: [Transactions]
       summary: List transactions
       parameters:
+        - name: owner_id
+          in: query
+          description: View another owner's data (requires a share). Defaults to self.
+          schema:
+            type: integer
+        - name: account_id
+          in: query
+          description: Restrict results to one account in the target owner's space.
+          schema:
+            type: integer
         - name: from
           in: query
           schema:
@@ -698,6 +754,14 @@ paths:
       tags: [Transactions]
       summary: Export transactions as CSV
       parameters:
+        - name: owner_id
+          in: query
+          schema:
+            type: integer
+        - name: account_id
+          in: query
+          schema:
+            type: integer
         - name: from
           in: query
           schema:
@@ -720,6 +784,14 @@ paths:
     post:
       tags: [Transactions]
       summary: Import transactions from CSV
+      parameters:
+        - name: owner_id
+          in: query
+          description: >-
+            Import on behalf of another owner who shared at least one writable
+            account with the auth user.
+          schema:
+            type: integer
       requestBody:
         required: true
         content:
@@ -745,6 +817,14 @@ paths:
     get:
       tags: [Categories]
       summary: List categories
+      parameters:
+        - name: owner_id
+          in: query
+          description: >-
+            View another owner's categories. Always returned read-only —
+            categories are never directly shared.
+          schema:
+            type: integer
       responses:
         "200":
           description: List of categories
@@ -810,6 +890,14 @@ paths:
     get:
       tags: [Accounts]
       summary: List accounts
+      parameters:
+        - name: owner_id
+          in: query
+          description: >-
+            View another owner's accounts. Returns only the accounts they
+            have shared with the auth user.
+          schema:
+            type: integer
       responses:
         "200":
           description: List of accounts
@@ -875,6 +963,15 @@ paths:
     get:
       tags: [Scheduled]
       summary: List scheduled transactions
+      parameters:
+        - name: owner_id
+          in: query
+          schema:
+            type: integer
+        - name: account_id
+          in: query
+          schema:
+            type: integer
       responses:
         "200":
           description: List of scheduled transactions
@@ -945,6 +1042,14 @@ paths:
           in: query
           schema:
             type: integer
+        - name: owner_id
+          in: query
+          description: >-
+            Sync another owner's space (only the accounts they have shared
+            with the auth user, plus matching transactions, scheduled, and
+            the owner's full read-only category list).
+          schema:
+            type: integer
       responses:
         "200":
           description: Sync data
@@ -954,6 +1059,14 @@ paths:
       tags: [Reports]
       summary: Report by category
       parameters:
+        - name: owner_id
+          in: query
+          schema:
+            type: integer
+        - name: account_id
+          in: query
+          schema:
+            type: integer
         - name: from
           in: query
           schema:
@@ -984,6 +1097,14 @@ paths:
       tags: [Reports]
       summary: Report by month
       parameters:
+        - name: owner_id
+          in: query
+          schema:
+            type: integer
+        - name: account_id
+          in: query
+          schema:
+            type: integer
         - name: year
           in: query
           schema:
@@ -1003,6 +1124,14 @@ paths:
       tags: [Reports]
       summary: Trend report
       parameters:
+        - name: owner_id
+          in: query
+          schema:
+            type: integer
+        - name: account_id
+          in: query
+          schema:
+            type: integer
         - name: from
           in: query
           schema:
@@ -1031,10 +1160,10 @@ paths:
   /shared:
     get:
       tags: [Shared]
-      summary: List shared access
+      summary: List per-account shares granted by the auth user
       responses:
         "200":
-          description: Shared access list
+          description: Shared access list (one row per guest+account pair)
           content:
             application/json:
               schema:
@@ -1043,17 +1172,20 @@ paths:
                   $ref: "#/components/schemas/SharedAccess"
     post:
       tags: [Shared]
-      summary: Grant shared access
+      summary: Grant a guest read or write access to one account
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [guest_email, permission]
+              required: [guest_email, account_id, permission]
               properties:
                 guest_email:
                   type: string
+                account_id:
+                  type: integer
+                  description: An account owned by the auth user.
                 permission:
                   type: string
                   enum: [read, write]
@@ -1067,11 +1199,13 @@ paths:
                 properties:
                   id:
                     type: integer
+        "409":
+          description: This guest already has a share for this account
 
   /shared/{id}:
     delete:
       tags: [Shared]
-      summary: Revoke shared access
+      summary: Revoke a single per-account share
       parameters:
         - name: id
           in: path
@@ -1081,6 +1215,46 @@ paths:
       responses:
         "204":
           description: Revoked
+
+  /shared/accessible:
+    get:
+      tags: [Shared]
+      summary: List owners who have shared at least one account with the auth user
+      responses:
+        "200":
+          description: Accessible owners with their shared accounts grouped
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AccessibleOwner"
+
+  /profile/preferences:
+    get:
+      tags: [Auth]
+      summary: Get the auth user's preferences
+      responses:
+        "200":
+          description: Current preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Preferences"
+    put:
+      tags: [Auth]
+      summary: Update preferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Preferences"
+      responses:
+        "204":
+          description: Updated
+        "400":
+          description: Referenced account is not accessible to the user
 
   /admin/users:
     get:

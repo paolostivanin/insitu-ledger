@@ -9,13 +9,15 @@ import (
 func (s *Server) handleReportByCategory(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
+		return
+	}
+
+	accIDs, err := scopedAccountIDs(r, userID, targetUserID, s.DB)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -26,8 +28,9 @@ func (s *Server) handleReportByCategory(w http.ResponseWriter, r *http.Request) 
 	query := `SELECT c.id, c.name, c.color, t.type, SUM(t.amount) as total
 	          FROM transactions t
 	          JOIN categories c ON t.category_id = c.id
-	          WHERE t.user_id = ? AND t.deleted_at IS NULL`
-	args := []any{targetUserID}
+	          WHERE t.user_id = ? AND t.deleted_at IS NULL
+	            AND t.account_id IN (` + sqlInPlaceholders(len(accIDs)) + `)`
+	args := append([]any{targetUserID}, idsToArgs(accIDs)...)
 
 	if from != "" {
 		query += " AND t.date >= ?"
@@ -82,13 +85,15 @@ func (s *Server) handleReportByCategory(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleReportByMonth(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
+		return
+	}
+
+	accIDs, err := scopedAccountIDs(r, userID, targetUserID, s.DB)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -96,8 +101,9 @@ func (s *Server) handleReportByMonth(w http.ResponseWriter, r *http.Request) {
 
 	query := `SELECT strftime('%Y-%m', date) as month, type, SUM(amount) as total
 	          FROM transactions
-	          WHERE user_id = ? AND deleted_at IS NULL`
-	args := []any{targetUserID}
+	          WHERE user_id = ? AND deleted_at IS NULL
+	            AND account_id IN (` + sqlInPlaceholders(len(accIDs)) + `)`
+	args := append([]any{targetUserID}, idsToArgs(accIDs)...)
 
 	if year != "" {
 		query += " AND strftime('%Y', date) = ?"
@@ -141,13 +147,15 @@ func (s *Server) handleReportByMonth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleReportTrend(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
+		return
+	}
+
+	accIDs, err := scopedAccountIDs(r, userID, targetUserID, s.DB)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -167,8 +175,9 @@ func (s *Server) handleReportTrend(w http.ResponseWriter, r *http.Request) {
 
 	query := `SELECT strftime('` + strftimeFmt + `', date) as period, type, SUM(amount) as total
 	          FROM transactions
-	          WHERE user_id = ? AND deleted_at IS NULL`
-	args := []any{targetUserID}
+	          WHERE user_id = ? AND deleted_at IS NULL
+	            AND account_id IN (` + sqlInPlaceholders(len(accIDs)) + `)`
+	args := append([]any{targetUserID}, idsToArgs(accIDs)...)
 
 	if from != "" {
 		query += " AND date >= ?"

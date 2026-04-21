@@ -1,11 +1,16 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { shared, me, type SharedAccess, type UserProfile } from '$lib/api/client';
+	import { shared, me, accounts as accountsApi, preferences as prefsApi, type SharedAccess, type UserProfile, type Account, type AccessibleOwner } from '$lib/api/client';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { setCurrencySymbol, DEFAULT_CURRENCY_SYMBOL } from '$lib/stores/auth';
 
 	let profile = $state<UserProfile | null>(null);
 	let sharedList = $state<SharedAccess[]>([]);
+	let myAccounts = $state<Account[]>([]);
+	let accessibleOwners = $state<AccessibleOwner[]>([]);
+	let defaultAccountId = $state<number | null>(null);
+	let defaultSaved = $state(false);
+	let defaultError = $state('');
 	let loading = $state(true);
 	let error = $state('');
 	let showShareForm = $state(false);
@@ -16,6 +21,7 @@
 	let confirmAction = $state(() => {});
 
 	let fEmail = $state('');
+	let fAccountId = $state(0);
 	let fPermission = $state('read');
 
 	// Password change
@@ -48,7 +54,13 @@
 
 	onMount(async () => {
 		loading = true;
-		const [p, s] = await Promise.all([me.get(), shared.list()]);
+		const [p, s, a, owners, prefs] = await Promise.all([
+			me.get(),
+			shared.list(),
+			accountsApi.list(),
+			shared.accessible(),
+			prefsApi.get().catch(() => ({ default_account_id: null }))
+		]);
 		profile = p;
 		profileUsername = p.username;
 		profileEmail = p.email;
@@ -56,8 +68,23 @@
 		currencyInput = p.currency_symbol ?? DEFAULT_CURRENCY_SYMBOL;
 		setCurrencySymbol(currencyInput);
 		sharedList = s;
+		myAccounts = a;
+		accessibleOwners = owners;
+		defaultAccountId = prefs.default_account_id;
+		if (myAccounts.length > 0 && !fAccountId) fAccountId = myAccounts[0].id;
 		loading = false;
 	});
+
+	async function saveDefaultAccount() {
+		defaultError = '';
+		defaultSaved = false;
+		try {
+			await prefsApi.set({ default_account_id: defaultAccountId });
+			defaultSaved = true;
+		} catch (e: any) {
+			defaultError = e.message || 'Failed to save default account';
+		}
+	}
 
 	async function saveCurrency(e: Event) {
 		e.preventDefault();
@@ -81,10 +108,15 @@
 	async function submitShare(e: Event) {
 		e.preventDefault();
 		error = '';
+		if (!fAccountId) {
+			error = 'Pick an account to share';
+			return;
+		}
 		try {
-			await shared.create(fEmail, fPermission);
+			await shared.create(fEmail, fAccountId, fPermission);
 			fEmail = '';
 			fPermission = 'read';
+			fAccountId = myAccounts[0]?.id ?? 0;
 			showShareForm = false;
 			await loadShared();
 		} catch (e: any) {
@@ -311,15 +343,48 @@
 			{/if}
 		</div>
 
+		<!-- Default Account -->
+		<div class="card section">
+			<h2>Default Account</h2>
+			<p class="desc">When set, the app opens directly on the dashboard filtered to this account. It will switch to the right owner if the account belongs to someone who shared with you.</p>
+			{#if defaultError}<p class="error-msg">{defaultError}</p>{/if}
+			{#if defaultSaved}<p class="success-msg">Saved.</p>{/if}
+			<div class="form-row">
+				<div class="form-group">
+					<label for="def-acct">Default account</label>
+					<select id="def-acct" bind:value={defaultAccountId}>
+						<option value={null}>None</option>
+						{#if myAccounts.length > 0}
+							<optgroup label="My accounts">
+								{#each myAccounts as a (a.id)}
+									<option value={a.id}>{a.name}</option>
+								{/each}
+							</optgroup>
+						{/if}
+						{#each accessibleOwners as o (o.owner_user_id)}
+							<optgroup label={`Shared by ${o.name}`}>
+								{#each o.accounts as a (a.account_id)}
+									<option value={a.account_id}>{a.account_name}</option>
+								{/each}
+							</optgroup>
+						{/each}
+					</select>
+				</div>
+				<div class="form-group" style="display: flex; align-items: flex-end">
+					<button class="btn-primary" onclick={saveDefaultAccount}>Save</button>
+				</div>
+			</div>
+		</div>
+
 		<!-- Shared Access -->
 		<div class="card section">
 			<div class="section-header">
 				<h2>Shared Access</h2>
-				<button class="btn-primary" onclick={() => showShareForm = !showShareForm}>
+				<button class="btn-primary" onclick={() => showShareForm = !showShareForm} disabled={myAccounts.length === 0}>
 					{showShareForm ? 'Cancel' : '+ Share'}
 				</button>
 			</div>
-			<p class="desc">Share your financial data with other users.</p>
+			<p class="desc">Share a single account with another user. Each share grants access only to that account; categories are always read-only for guests.</p>
 
 			{#if error}<p class="error-msg">{error}</p>{/if}
 
@@ -329,6 +394,14 @@
 						<div class="form-group">
 							<label for="s-email">User Email</label>
 							<input id="s-email" type="email" bind:value={fEmail} required placeholder="user@example.com" />
+						</div>
+						<div class="form-group">
+							<label for="s-account">Account</label>
+							<select id="s-account" bind:value={fAccountId} required>
+								{#each myAccounts as a (a.id)}
+									<option value={a.id}>{a.name}</option>
+								{/each}
+							</select>
 						</div>
 						<div class="form-group">
 							<label for="s-perm">Permission</label>
@@ -345,18 +418,19 @@
 			{/if}
 
 			{#if sharedList.length === 0}
-				<p class="empty-state">Not shared with anyone.</p>
+				<p class="empty-state">No accounts shared with anyone.</p>
 			{:else}
 				<div class="table-wrap">
 					<table>
 						<thead>
-							<tr><th>Name</th><th>Email</th><th>Permission</th><th></th></tr>
+							<tr><th>Guest</th><th>Email</th><th>Account</th><th>Permission</th><th></th></tr>
 						</thead>
 						<tbody>
-							{#each sharedList as s}
+							{#each sharedList as s (s.id)}
 								<tr>
 									<td>{s.guest_name}</td>
 									<td>{s.guest_email}</td>
+									<td>{s.account_name}</td>
 									<td><span class="badge">{s.permission}</span></td>
 									<td><button class="btn-danger" onclick={() => removeShare(s.id)}>Revoke</button></td>
 								</tr>

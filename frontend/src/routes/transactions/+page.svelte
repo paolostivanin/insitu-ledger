@@ -3,8 +3,10 @@
 	import { transactions, categories, accounts, batch, csv, scheduled, type Transaction, type Category, type Account, type AutocompleteSuggestion } from '$lib/api/client';
 	import CategoryPicker from '$lib/components/CategoryPicker.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import AccountFilterPill from '$lib/components/AccountFilterPill.svelte';
 	import { addToast } from '$lib/stores/toast';
-	import { sharedOwnerUserId, sharedOwnerPermission } from '$lib/stores/shared';
+	import { sharedOwnerUserId, accountPermission, hasAnyWriteInCurrentContext } from '$lib/stores/shared';
+	import { currentAccountId } from '$lib/stores/accountFilter';
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
 
@@ -108,18 +110,23 @@
 	let loadingMore = $state(false);
 
 	let prevOwnerId: string | null = null;
+	let prevAccountId: number | null = null;
 	let mounted = false;
 
 	$effect(() => {
 		const currentOwnerId = $sharedOwnerUserId;
-		if (mounted && currentOwnerId !== prevOwnerId) {
+		const currentAcctId = $currentAccountId;
+		if (mounted && (currentOwnerId !== prevOwnerId || currentAcctId !== prevAccountId)) {
+			const ownerChanged = currentOwnerId !== prevOwnerId;
 			prevOwnerId = currentOwnerId;
-			loadAll();
+			prevAccountId = currentAcctId;
+			ownerChanged ? loadAll() : load();
 		}
 	});
 
 	onMount(() => {
 		prevOwnerId = $sharedOwnerUserId;
+		prevAccountId = $currentAccountId;
 		mounted = true;
 		loadAll();
 		window.addEventListener('shortcut-new', onShortcutNew);
@@ -166,7 +173,8 @@
 
 	async function loadTransactions() {
 		const oid = $sharedOwnerUserId || undefined;
-		txns = await transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat, limit: PAGE_SIZE.toString(), sort_by: sortBy, sort_dir: sortDir, owner_id: oid });
+		const aid = $currentAccountId !== null ? $currentAccountId.toString() : undefined;
+		txns = await transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat, account_id: aid, limit: PAGE_SIZE.toString(), sort_by: sortBy, sort_dir: sortDir, owner_id: oid });
 		hasMore = txns.length === PAGE_SIZE;
 		selectedIds = new Set();
 	}
@@ -174,9 +182,10 @@
 	async function loadMore() {
 		loadingMore = true;
 		const oid = $sharedOwnerUserId || undefined;
+		const aid = $currentAccountId !== null ? $currentAccountId.toString() : undefined;
 		try {
 			const more = await transactions.list({
-				from: filterFrom, to: filterTo, category_id: filterCat,
+				from: filterFrom, to: filterTo, category_id: filterCat, account_id: aid,
 				limit: PAGE_SIZE.toString(), offset: txns.length.toString(),
 				sort_by: sortBy, sort_dir: sortDir, owner_id: oid
 			});
@@ -186,6 +195,10 @@
 			error = e.message;
 		}
 		loadingMore = false;
+	}
+
+	function canEdit(txn: Transaction): boolean {
+		return accountPermission(txn.account_id) === 'write';
 	}
 
 	function toggleSort(column: string) {
@@ -372,7 +385,12 @@
 	async function exportCsv() {
 		error = '';
 		try {
-			await csv.exportTransactions({ from: filterFrom, to: filterTo });
+			await csv.exportTransactions({
+				from: filterFrom,
+				to: filterTo,
+				owner_id: $sharedOwnerUserId || undefined,
+				account_id: $currentAccountId !== null ? $currentAccountId.toString() : undefined
+			});
 		} catch (e: any) {
 			error = e.message;
 		}
@@ -384,7 +402,7 @@
 		if (!file) return;
 		error = '';
 		try {
-			const result = await csv.importTransactions(file);
+			const result = await csv.importTransactions(file, $sharedOwnerUserId || undefined);
 			addToast(`Successfully imported ${result.imported} transaction(s).`);
 			await load();
 		} catch (e: any) {
@@ -398,8 +416,9 @@
 	<div class="page-header">
 		<h1>Transactions</h1>
 		<div class="header-actions">
+			<AccountFilterPill accounts={accts} />
 			<button class="btn-ghost" onclick={exportCsv}>Export CSV</button>
-			{#if $sharedOwnerPermission === 'write'}
+			{#if $hasAnyWriteInCurrentContext}
 				<button class="btn-ghost" onclick={() => importInput?.click()}>Import CSV</button>
 				<input type="file" accept=".csv" bind:this={importInput} onchange={importCsv} style="display:none" />
 				<button class="btn-primary" onclick={() => { resetForm(); showForm = !showForm; }}>
@@ -456,7 +475,7 @@
 					<div class="form-group">
 						<label for="account">Account</label>
 						<select id="account" bind:value={fAccountId} onchange={() => localStorage.setItem('lastUsedAccountId', fAccountId.toString())}>
-							{#each accts as a (a.id)}
+							{#each accts.filter(a => accountPermission(a.id) === 'write') as a (a.id)}
 								<option value={a.id}>{a.name}{$sharedOwnerUserId ? ' (shared)' : ''}</option>
 							{/each}
 						</select>
@@ -614,7 +633,7 @@
 								{txn.type === 'income' ? '+' : '-'}{fmt(txn.amount)} {txn.currency}
 							</td>
 							<td class="actions">
-								{#if $sharedOwnerPermission === 'write'}
+								{#if canEdit(txn)}
 									<button class="btn-ghost" onclick={() => startEdit(txn)}>Edit</button>
 									<button class="btn-danger" onclick={() => remove(txn.id)}>Del</button>
 								{/if}

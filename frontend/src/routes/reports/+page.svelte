@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { reports, type CategoryReport, type MonthReport, type TrendReport } from '$lib/api/client';
 	import { theme } from '$lib/stores/theme';
+	import { sharedOwnerUserId } from '$lib/stores/shared';
 	import type * as EChartsType from 'echarts';
 
 	let echarts: typeof EChartsType;
@@ -70,6 +71,17 @@
 		if (trendChart) trendChart.dispose();
 	});
 
+	let mounted = false;
+	let prevOwnerId: string | null = null;
+
+	$effect(() => {
+		const oid = $sharedOwnerUserId;
+		if (mounted && oid !== prevOwnerId) {
+			prevOwnerId = oid;
+			void loadAll();
+		}
+	});
+
 	onMount(async () => {
 		echarts = await import('echarts');
 
@@ -80,6 +92,8 @@
 
 		window.addEventListener('resize', handleResize);
 
+		prevOwnerId = $sharedOwnerUserId;
+		mounted = true;
 		await loadAll();
 	});
 
@@ -88,17 +102,20 @@
 	}
 
 	async function loadCategory() {
-		categoryData = await reports.byCategory({ type: reportType });
+		const oid = $sharedOwnerUserId || undefined;
+		categoryData = await reports.byCategory({ type: reportType, owner_id: oid });
 		renderPie();
 	}
 
 	async function loadMonth() {
-		monthData = await reports.byMonth({ year });
+		const oid = $sharedOwnerUserId || undefined;
+		monthData = await reports.byMonth({ year, owner_id: oid });
 		renderBar();
 	}
 
 	async function loadTrend() {
-		trendData = await reports.trend({ from: trendFrom, to: trendTo, group_by: trendGroupBy });
+		const oid = $sharedOwnerUserId || undefined;
+		trendData = await reports.trend({ from: trendFrom, to: trendTo, group_by: trendGroupBy, owner_id: oid });
 		renderTrend();
 	}
 

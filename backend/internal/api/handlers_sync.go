@@ -10,13 +10,9 @@ import (
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, isOwn, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
 		return
 	}
 
@@ -30,6 +26,43 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	// Build the sync account scope: own data sees all accounts (including
+	// soft-deleted, so clients can purge them); guests see only the IDs in
+	// shared_account_access (also including soft-deleted, for the same reason).
+	var syncAccIDs []int64
+	if isOwn {
+		idRows, err := tx.Query(`SELECT id FROM accounts WHERE user_id = ?`, targetUserID)
+		if err != nil {
+			http.Error(w, "query error", http.StatusInternalServerError)
+			return
+		}
+		for idRows.Next() {
+			var id int64
+			if err := idRows.Scan(&id); err == nil {
+				syncAccIDs = append(syncAccIDs, id)
+			}
+		}
+		idRows.Close()
+	} else {
+		idRows, err := tx.Query(
+			`SELECT account_id FROM shared_account_access
+			 WHERE owner_user_id = ? AND guest_user_id = ?`,
+			targetUserID, userID,
+		)
+		if err != nil {
+			http.Error(w, "query error", http.StatusInternalServerError)
+			return
+		}
+		for idRows.Next() {
+			var id int64
+			if err := idRows.Scan(&id); err == nil {
+				syncAccIDs = append(syncAccIDs, id)
+			}
+		}
+		idRows.Close()
+	}
+	accInClause := sqlInPlaceholders(len(syncAccIDs))
 
 	var currentVersion int64
 	tx.QueryRow("SELECT version FROM sync_meta WHERE id = 1").Scan(&currentVersion)
@@ -49,10 +82,12 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{"current_version": currentVersion}
 
 	// Fetch changed transactions (including soft-deleted ones so mobile can remove them)
+	txnArgs := append([]any{targetUserID, since}, idsToArgs(syncAccIDs)...)
 	txnRows, err := tx.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency,
 		        description, note, date, created_at, updated_at, deleted_at, sync_version
-		 FROM transactions WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
+		 FROM transactions WHERE user_id = ? AND sync_version > ?
+		   AND account_id IN (`+accInClause+`)`, txnArgs...,
 	)
 	if err != nil {
 		log.Printf("sync: transaction query error: %v", err)
@@ -123,10 +158,12 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	resp["categories"] = cats
 
-	// Fetch changed accounts
+	// Fetch changed accounts (only those in scope for this user)
+	acctArgs := append([]any{targetUserID, since}, idsToArgs(syncAccIDs)...)
 	acctRows, err := tx.Query(
 		`SELECT id, user_id, name, currency, balance, created_at, updated_at, deleted_at, sync_version
-		 FROM accounts WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
+		 FROM accounts WHERE user_id = ? AND sync_version > ?
+		   AND id IN (`+accInClause+`)`, acctArgs...,
 	)
 	if err != nil {
 		log.Printf("sync: account query error: %v", err)
@@ -160,11 +197,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	resp["accounts"] = accts
 
 	// Fetch changed scheduled transactions
+	schedArgs := append([]any{targetUserID, since}, idsToArgs(syncAccIDs)...)
 	schedRows, err := tx.Query(
 		`SELECT id, account_id, category_id, user_id, type, amount, currency,
 		        description, note, rrule, next_occurrence, active, max_occurrences, occurrence_count,
 		        created_at, updated_at, deleted_at, sync_version
-		 FROM scheduled_transactions WHERE user_id = ? AND sync_version > ?`, targetUserID, since,
+		 FROM scheduled_transactions WHERE user_id = ? AND sync_version > ?
+		   AND account_id IN (`+accInClause+`)`, schedArgs...,
 	)
 	if err != nil {
 		log.Printf("sync: scheduled query error: %v", err)

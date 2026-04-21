@@ -14,13 +14,15 @@ import (
 func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, _, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		writeAuthError(w, err)
+		return
+	}
+
+	accIDs, err := scopedAccountIDs(r, userID, targetUserID, s.DB)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -32,8 +34,9 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 		FROM transactions t
 		LEFT JOIN categories c ON c.id = t.category_id
 		LEFT JOIN accounts a ON a.id = t.account_id
-		WHERE t.user_id = ? AND t.deleted_at IS NULL`
-	args := []any{targetUserID}
+		WHERE t.user_id = ? AND t.deleted_at IS NULL
+		  AND t.account_id IN (` + sqlInPlaceholders(len(accIDs)) + `)`
+	args := append([]any{targetUserID}, idsToArgs(accIDs)...)
 
 	if from != "" {
 		query += " AND SUBSTR(t.date, 1, 10) >= ?"
@@ -93,17 +96,9 @@ const maxImportRows = 50000
 func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
-	targetUserID, permission, err := resolveTargetUserID(r, userID, s.DB)
+	targetUserID, _, err := resolveTargetOwner(r, userID, s.DB)
 	if err != nil {
-		if err.Error() == "forbidden: no shared access" {
-			http.Error(w, err.Error(), http.StatusForbidden)
-		} else {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-		return
-	}
-	if permission != "write" {
-		http.Error(w, "forbidden: read-only access", http.StatusForbidden)
+		writeAuthError(w, err)
 		return
 	}
 
@@ -177,7 +172,21 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	acctRows, err := s.DB.Query("SELECT id, name FROM accounts WHERE user_id = ? AND deleted_at IS NULL", targetUserID)
+	// Only accounts the auth user has write access to are valid import targets.
+	writableAccIDs, err := listWritableAccountIDs(userID, targetUserID, s.DB)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if len(writableAccIDs) == 0 {
+		http.Error(w, "forbidden: no writable accounts", http.StatusForbidden)
+		return
+	}
+	acctRows, err := s.DB.Query(
+		"SELECT id, name FROM accounts WHERE user_id = ? AND deleted_at IS NULL AND id IN ("+
+			sqlInPlaceholders(len(writableAccIDs))+")",
+		append([]any{targetUserID}, idsToArgs(writableAccIDs)...)...,
+	)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
