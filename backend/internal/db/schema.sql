@@ -149,7 +149,8 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_active ON scheduled_transactions(active
 CREATE INDEX IF NOT EXISTS idx_shared_account_access_guest ON shared_account_access(guest_user_id);
 CREATE INDEX IF NOT EXISTS idx_shared_account_access_account ON shared_account_access(account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_description ON transactions(description COLLATE NOCASE);
-CREATE INDEX IF NOT EXISTS idx_transactions_created_by ON transactions(created_by_user_id);
+-- idx_transactions_created_by is created by migrateSharedAccessAttribution after
+-- the column is added (legacy DBs need the ALTER first).
 
 -- Sync version indexes (for efficient sync queries)
 CREATE INDEX IF NOT EXISTS idx_transactions_sync ON transactions(sync_version);
