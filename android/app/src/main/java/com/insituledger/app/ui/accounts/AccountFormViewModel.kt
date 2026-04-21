@@ -38,7 +38,7 @@ class AccountFormViewModel @Inject constructor(
                 if (account != null) {
                     _uiState.update {
                         it.copy(name = account.name, currency = account.currency,
-                            balance = account.balance.toString(), isLoading = false)
+                            balance = "%.2f".format(account.balance), isLoading = false)
                     }
                 } else {
                     _uiState.update { it.copy(isLoading = false) }

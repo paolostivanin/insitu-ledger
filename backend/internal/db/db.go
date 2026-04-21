@@ -74,6 +74,11 @@ func Open(dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("shared access attribution migration: %w", err)
 	}
 
+	if err := bumpSharedAccountsForAttribution(conn); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("bump shared accounts: %w", err)
+	}
+
 	seedDefaultAdmin(conn)
 
 	return conn, nil
@@ -153,6 +158,34 @@ func migrateSharedAccessAttribution(conn *sql.DB) error {
 	}
 
 	return tx.Commit()
+}
+
+// bumpSharedAccountsForAttribution forces a one-time sync_version bump on
+// every account that has a shared_account_access row, so existing clients
+// re-pull them and pick up the new is_shared / owner_name fields introduced
+// in v1.15.0. Without this, accounts that were shared *before* the v1.15.0
+// upgrade keep their pre-upgrade sync_version and incremental clients never
+// see the new flags. Guarded by PRAGMA user_version so it runs exactly once.
+func bumpSharedAccountsForAttribution(conn *sql.DB) error {
+	var ver int
+	if err := conn.QueryRow("PRAGMA user_version").Scan(&ver); err != nil {
+		return fmt.Errorf("read user_version: %w", err)
+	}
+	if ver >= 1 {
+		return nil
+	}
+
+	if _, err := conn.Exec(
+		`UPDATE accounts SET name = name
+		 WHERE id IN (SELECT DISTINCT account_id FROM shared_account_access)`,
+	); err != nil {
+		return fmt.Errorf("bump shared accounts sync_version: %w", err)
+	}
+
+	if _, err := conn.Exec("PRAGMA user_version = 1"); err != nil {
+		return fmt.Errorf("set user_version: %w", err)
+	}
+	return nil
 }
 
 // seedDefaultAdmin creates the default admin user with a randomly generated
