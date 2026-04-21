@@ -24,8 +24,8 @@ class SharedRepository @Inject constructor(
         return if (response.isSuccessful) response.body() ?: emptyList() else emptyList()
     }
 
-    suspend fun createSharedAccess(guestEmail: String, permission: String): Result<Long> {
-        val response = sharedApi.create(SharedAccessInput(guestEmail, permission))
+    suspend fun createSharedAccess(guestEmail: String, accountId: Long, permission: String): Result<Long> {
+        val response = sharedApi.create(SharedAccessInput(guestEmail, accountId, permission))
         return if (response.isSuccessful) {
             Result.success(response.body()?.id ?: 0)
         } else {

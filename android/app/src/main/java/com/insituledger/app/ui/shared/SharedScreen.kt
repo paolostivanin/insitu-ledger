@@ -10,6 +10,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -17,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.domain.model.Account
 import com.insituledger.app.ui.common.LoadingIndicator
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,6 +97,12 @@ fun SharedScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
 
+                        AccountPicker(
+                            accounts = uiState.accounts,
+                            selectedId = uiState.selectedAccountId,
+                            onSelect = viewModel::updateAccount
+                        )
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(AppSpacing.lg)
@@ -120,7 +130,7 @@ fun SharedScreen(
                         Button(
                             onClick = viewModel::add,
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = !uiState.isSaving
+                            enabled = !uiState.isSaving && uiState.email.isNotBlank() && uiState.selectedAccountId != null
                         ) {
                             if (uiState.isSaving) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary)
                             else Text("Add")
@@ -143,7 +153,7 @@ fun SharedScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(access.guestName, style = MaterialTheme.typography.bodyMedium)
                                 Text(
-                                    "${access.guestEmail} · ${access.permission}",
+                                    "${access.accountName} · ${access.guestEmail} · ${access.permission}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -154,6 +164,40 @@ fun SharedScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AccountPicker(
+    accounts: List<Account>,
+    selectedId: Long?,
+    onSelect: (Long) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = accounts.find { it.id == selectedId }
+    val label = selected?.name ?: if (accounts.isEmpty()) "No accounts available" else "Pick an account"
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { if (accounts.isNotEmpty()) expanded = it }
+    ) {
+        OutlinedTextField(
+            value = label,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Account") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable, true)
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            accounts.forEach { acct ->
+                DropdownMenuItem(
+                    text = { Text(acct.name) },
+                    onClick = { onSelect(acct.id); expanded = false }
+                )
             }
         }
     }

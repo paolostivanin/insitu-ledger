@@ -462,6 +462,32 @@ fun SettingsScreen(
                 }
             }
 
+            // Default account (only when webapp connected and there are accounts to pick)
+            if (uiState.syncMode == "webapp" && uiState.isWebappConnected && uiState.accessibleAccountOptions.isNotEmpty()) {
+                LaunchedEffect(Unit) { viewModel.refreshAccessibleAccounts() }
+                AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
+                    Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Star, contentDescription = null)
+                            Spacer(modifier = Modifier.width(AppSpacing.md))
+                            Text("Default account", style = MaterialTheme.typography.titleSmall)
+                        }
+                        Spacer(modifier = Modifier.height(AppSpacing.xs))
+                        Text(
+                            "Selected on launch when forms ask for an account.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(AppSpacing.sm))
+                        DefaultAccountPicker(
+                            options = uiState.accessibleAccountOptions,
+                            selectedId = uiState.defaultAccountId,
+                            onSelect = viewModel::setDefaultAccount
+                        )
+                    }
+                }
+            }
+
             // Change password (only when webapp connected)
             if (uiState.syncMode == "webapp" && uiState.isWebappConnected) {
                 var showPasswordDialog by remember { mutableStateOf(false) }
@@ -479,6 +505,59 @@ fun SettingsScreen(
                         error = uiState.passwordError,
                         onDismiss = { showPasswordDialog = false },
                         onConfirm = { current, new -> viewModel.changePassword(current, new) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DefaultAccountPicker(
+    options: List<AccessibleAccountOption>,
+    selectedId: Long?,
+    onSelect: (Long?) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = options.find { it.accountId == selectedId }
+    val label = selected?.let { "${it.ownerName} · ${it.accountName}" } ?: "None"
+    val grouped = options.groupBy { it.ownerName }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded }
+    ) {
+        OutlinedTextField(
+            value = label,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Default account") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth()
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("None") },
+                onClick = { onSelect(null); expanded = false }
+            )
+            grouped.forEach { (ownerName, ownerAccounts) ->
+                HorizontalDivider()
+                DropdownMenuItem(
+                    enabled = false,
+                    text = {
+                        Text(
+                            ownerName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    onClick = {}
+                )
+                ownerAccounts.forEach { opt ->
+                    DropdownMenuItem(
+                        text = { Text(opt.accountName) },
+                        onClick = { onSelect(opt.accountId); expanded = false }
                     )
                 }
             }

@@ -27,8 +27,10 @@ class AccountsViewModel @Inject constructor(
     val uiState: StateFlow<AccountsUiState> = sharedAccessState.selectedOwner
         .flatMapLatest { owner ->
             if (owner != null) {
+                // When viewing another owner, accounts are always read-only — guests
+                // cannot create, edit, or delete accounts in someone else's space.
                 val accounts = accountRepository.listFromServer(owner.ownerId)
-                flowOf(AccountsUiState(accounts = accounts, isLoading = false, isReadOnly = owner.permission == "read"))
+                flowOf(AccountsUiState(accounts = accounts, isLoading = false, isReadOnly = true))
             } else {
                 accountRepository.getAll().map { accounts ->
                     AccountsUiState(accounts = accounts, isLoading = false, isReadOnly = false)
@@ -38,7 +40,7 @@ class AccountsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AccountsUiState())
 
     fun delete(id: Long) {
-        if (sharedAccessState.isReadOnly) return
+        if (sharedAccessState.isViewingShared) return
         viewModelScope.launch { accountRepository.delete(id) }
     }
 }

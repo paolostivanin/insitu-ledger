@@ -81,4 +81,5 @@ object NetworkModule {
     @Provides @Singleton fun provideScheduledApi(retrofit: Retrofit): ScheduledApi = retrofit.create(ScheduledApi::class.java)
     @Provides @Singleton fun provideSyncApi(retrofit: Retrofit): SyncApi = retrofit.create(SyncApi::class.java)
     @Provides @Singleton fun provideSharedApi(retrofit: Retrofit): SharedApi = retrofit.create(SharedApi::class.java)
+    @Provides @Singleton fun provideProfileApi(retrofit: Retrofit): ProfileApi = retrofit.create(ProfileApi::class.java)
 }

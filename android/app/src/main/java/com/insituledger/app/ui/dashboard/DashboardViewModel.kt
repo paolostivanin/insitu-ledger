@@ -43,7 +43,7 @@ class DashboardViewModel @Inject constructor(
             _uiState.update { it.copy(isRefreshing = true) }
             val owner = sharedAccessState.selectedOwner.value
             if (owner != null) {
-                loadFromServer(owner.ownerId, owner.permission == "read")
+                loadFromServer(owner.ownerId, owner.accounts.none { it.permission == "write" })
             } else {
                 // Trigger re-emission from the local flow
                 _refreshTrigger.update { it + 1 }
@@ -59,7 +59,7 @@ class DashboardViewModel @Inject constructor(
                     if (owner != null) {
                         flow {
                             _uiState.update { it.copy(isLoading = true) }
-                            loadFromServer(owner.ownerId, owner.permission == "read")
+                            loadFromServer(owner.ownerId, owner.accounts.none { it.permission == "write" })
                             emit(Unit)
                         }
                     } else {

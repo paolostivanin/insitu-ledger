@@ -12,11 +12,12 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 - **Categories** — hierarchical categories (with parent/child, icons, and colors) for income and expense
 - **Scheduled transactions** — recurring transactions with date and time (daily, weekly, monthly, yearly), automatically materialized by the backend scheduler (checks every minute) and by the Android local WorkManager (every 15 minutes). Future-dated transactions are automatically converted to one-time scheduled entries
 - **Reports** — spending by category, by month, and trend analysis (powered by ECharts)
-- **Multi-user** — admin-created users, shared access with read/write permissions
+- **Multi-user** — admin-created users, per-account sharing with read/write permissions (grant access to individual accounts, not your whole ledger)
+- **Default account** — pick a default account in your profile preferences; clients select it on launch for new transactions and persist the choice server-side
 - **Authentication** — bcrypt passwords, bearer-token sessions (30-day expiry, hashed at rest), TOTP two-factor authentication
 - **Rate limiting** — login (10 per IP per 15 min), TOTP verification, and per-IP API throttling
 - **Mobile sync** — version-based incremental sync API for offline-first mobile clients
-- **Android app** — local-first with optional sync; SQLCipher-encrypted Room database (Keystore-bound), encrypted local backups (PBKDF2 + AES-256-GCM via SAF), optional mTLS client-certificate authentication for sync, home-screen quick-add widget, swipe-to-delete
+- **Android app** — local-first with optional sync; SQLCipher-encrypted Room database (Keystore-bound), encrypted local backups (PBKDF2 + AES-256-GCM via SAF), optional mTLS client-certificate authentication for sync, home-screen quick-add widget, swipe-to-delete, owner switcher to view accounts shared with you
 - **Dark/Light mode** — theme toggle with localStorage persistence and FOUC prevention
 - **Keyboard shortcuts** — `n` (new item), `Escape` (close), `?` (help)
 - **Batch operations** — multi-select transactions for bulk delete or category change
@@ -77,7 +78,7 @@ Full interactive documentation is available at `/api/docs` (Swagger UI).
 - `GET /api/docs/openapi.yaml` — OpenAPI 3.0 spec
 
 ### Protected (Bearer token required)
-- **Auth** — `POST logout`, `POST change-password`, `PUT profile`, `GET me`
+- **Auth** — `POST logout`, `POST change-password`, `PUT profile`, `GET me`, `GET/PUT profile/preferences`
 - **TOTP** — `POST totp/setup`, `POST totp/verify`, `POST totp/reset`
 - **Transactions** — `GET`, `POST`, `PUT {id}`, `DELETE {id}`
 - **Batch** — `POST batch-delete`, `POST batch-update-category`

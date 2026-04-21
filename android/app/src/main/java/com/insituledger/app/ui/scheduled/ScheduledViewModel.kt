@@ -28,7 +28,10 @@ class ScheduledViewModel @Inject constructor(
         .flatMapLatest { owner ->
             if (owner != null) {
                 val items = scheduledRepository.listFromServer(owner.ownerId)
-                flowOf(ScheduledUiState(items = items, isLoading = false, isReadOnly = owner.permission == "read"))
+                // Screen-level "read-only" disables the FAB; per-row write checks
+                // happen at delete time against the item's accountId.
+                val anyWrite = owner.accounts.any { it.permission == "write" }
+                flowOf(ScheduledUiState(items = items, isLoading = false, isReadOnly = !anyWrite))
             } else {
                 scheduledRepository.getAll().map { items ->
                     ScheduledUiState(items = items, isLoading = false, isReadOnly = false)
@@ -38,7 +41,8 @@ class ScheduledViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ScheduledUiState())
 
     fun delete(id: Long) {
-        if (sharedAccessState.isReadOnly) return
+        val item = uiState.value.items.find { it.id == id } ?: return
+        if (!sharedAccessState.canWrite(item.accountId)) return
         viewModelScope.launch { scheduledRepository.delete(id) }
     }
 }

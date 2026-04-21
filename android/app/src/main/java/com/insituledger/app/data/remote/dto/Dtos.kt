@@ -172,6 +172,12 @@ data class AccessibleOwnerDto(
     @SerializedName("owner_user_id") val ownerUserId: Long,
     val name: String,
     val email: String,
+    val accounts: List<SharedAccountGrantDto> = emptyList()
+)
+
+data class SharedAccountGrantDto(
+    @SerializedName("account_id") val accountId: Long,
+    @SerializedName("account_name") val accountName: String,
     val permission: String
 )
 
@@ -179,6 +185,8 @@ data class SharedAccessDto(
     val id: Long,
     @SerializedName("owner_user_id") val ownerUserId: Long,
     @SerializedName("guest_user_id") val guestUserId: Long,
+    @SerializedName("account_id") val accountId: Long,
+    @SerializedName("account_name") val accountName: String,
     val permission: String,
     @SerializedName("guest_name") val guestName: String,
     @SerializedName("guest_email") val guestEmail: String
@@ -186,5 +194,10 @@ data class SharedAccessDto(
 
 data class SharedAccessInput(
     @SerializedName("guest_email") val guestEmail: String,
+    @SerializedName("account_id") val accountId: Long,
     val permission: String
+)
+
+data class UserPreferencesDto(
+    @SerializedName("default_account_id") val defaultAccountId: Long?
 )

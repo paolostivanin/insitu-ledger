@@ -36,6 +36,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.remote.dto.AccessibleOwnerDto
+import com.insituledger.app.data.repository.PreferencesRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.SharedRepository
 import com.insituledger.app.ui.accounts.AccountFormScreen
@@ -77,11 +78,16 @@ private val bottomNavRoutes = bottomNavItems.map { it.screen.route }.toSet()
 class SharedOwnerViewModel @Inject constructor(
     private val sharedRepository: SharedRepository,
     private val sharedAccessState: SharedAccessState,
+    private val preferencesRepository: PreferencesRepository,
     private val prefs: UserPreferences
 ) : ViewModel() {
     val accessibleOwners = sharedAccessState.accessibleOwners
     val selectedOwner = sharedAccessState.selectedOwner
     val syncMode = prefs.syncModeFlow
+
+    // Apply the server-side default account exactly once per process so that
+    // manual owner switches during the session are not overridden.
+    private var defaultApplied = false
 
     init {
         viewModelScope.launch {
@@ -90,12 +96,14 @@ class SharedOwnerViewModel @Inject constructor(
                 if (mode == "webapp" && token != null) {
                     try {
                         val owners = sharedRepository.loadAccessibleOwners()
-                        // Restore persisted owner selection
-                        prefs.sharedOwnerIdFlow.first().let { savedId ->
-                            if (savedId != null) {
-                                val owner = owners.find { it.ownerUserId == savedId }
-                                if (owner != null) sharedAccessState.selectOwner(owner)
-                            }
+                        val savedId = prefs.sharedOwnerIdFlow.first()
+                        if (savedId != null) {
+                            val owner = owners.find { it.ownerUserId == savedId }
+                            if (owner != null) sharedAccessState.selectOwner(owner)
+                        }
+                        if (!defaultApplied) {
+                            defaultApplied = true
+                            applyServerDefaultAccount(owners)
                         }
                     } catch (_: Exception) {
                         // Network error — ignore, will retry on next emission
@@ -104,9 +112,27 @@ class SharedOwnerViewModel @Inject constructor(
                     sharedAccessState.updateAccessibleOwners(emptyList())
                     sharedAccessState.clearOwner()
                     prefs.saveSharedOwnerId(null)
+                    defaultApplied = false
                 }
             }
         }
+    }
+
+    private suspend fun applyServerDefaultAccount(owners: List<AccessibleOwnerDto>) {
+        val defaultId = preferencesRepository.loadFromServer().getOrNull() ?: return
+        // Find the owner that owns this account; null = own data.
+        val matchingOwner = owners.firstOrNull { o -> o.accounts.any { it.accountId == defaultId } }
+        if (matchingOwner != null) {
+            sharedAccessState.selectOwner(matchingOwner)
+            prefs.saveSharedOwnerId(matchingOwner.ownerUserId)
+        } else {
+            // Account is in the user's own space (or no longer accessible — backend
+            // returns null in the latter case so we wouldn't reach here).
+            sharedAccessState.clearOwner()
+            prefs.saveSharedOwnerId(null)
+        }
+        // Pin the per-form last-used account so the txn form lands on it.
+        prefs.saveLastUsedAccountId(defaultId)
     }
 
     fun selectOwner(owner: AccessibleOwnerDto) {
@@ -192,7 +218,10 @@ fun AppNavigation(
                     color = MaterialTheme.colorScheme.tertiaryContainer
                 ) {
                     Text(
-                        text = "Viewing ${selectedOwner!!.name}'s data (${selectedOwner!!.permission})",
+                        text = run {
+                            val n = selectedOwner!!.accounts.size
+                            "Viewing ${selectedOwner!!.name}'s data ($n account${if (n == 1) "" else "s"})"
+                        },
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onTertiaryContainer,
                         modifier = Modifier.padding(horizontal = AppSpacing.lg, vertical = 6.dp)
@@ -380,7 +409,7 @@ private fun OwnerSwitcher(
         "My Data"
     } else {
         val owner = owners.find { it.ownerUserId == selectedOwnerId }
-        owner?.let { "${it.name} (${it.permission})" } ?: "My Data"
+        owner?.let { "${it.name} (${it.accounts.size})" } ?: "My Data"
     }
 
     Surface(
@@ -410,7 +439,7 @@ private fun OwnerSwitcher(
                     )
                     owners.forEach { owner ->
                         DropdownMenuItem(
-                            text = { Text("${owner.name} (${owner.permission})") },
+                            text = { Text("${owner.name} (${owner.accounts.size} account${if (owner.accounts.size == 1) "" else "s"})") },
                             onClick = { onSelect(owner); expanded = false }
                         )
                     }

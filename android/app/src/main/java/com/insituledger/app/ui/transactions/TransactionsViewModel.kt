@@ -62,7 +62,9 @@ class TransactionsViewModel @Inject constructor(
     private val categoriesFlow: StateFlow<Pair<List<Category>, Boolean>> = sharedAccessState.selectedOwner
         .flatMapLatest { owner ->
             if (owner != null) {
-                flowOf(categoryRepository.listFromServer(owner.ownerId) to (owner.permission == "read"))
+                // Read-only at screen level when no shared account is writable.
+                val anyWrite = owner.accounts.any { it.permission == "write" }
+                flowOf(categoryRepository.listFromServer(owner.ownerId) to !anyWrite)
             } else {
                 categoryRepository.getAll().map { cats -> cats to false }
             }
@@ -180,15 +182,19 @@ class TransactionsViewModel @Inject constructor(
     }
 
     fun deleteSelected() {
-        if (sharedAccessState.isReadOnly) return
         viewModelScope.launch {
-            _uiState.value.selectedIds.forEach { id -> transactionRepository.delete(id) }
+            val byId = _uiState.value.transactions.associateBy { it.id }
+            _uiState.value.selectedIds.forEach { id ->
+                val txn = byId[id] ?: return@forEach
+                if (sharedAccessState.canWrite(txn.accountId)) transactionRepository.delete(id)
+            }
             clearSelection()
         }
     }
 
     fun delete(id: Long) {
-        if (sharedAccessState.isReadOnly) return
+        val txn = _uiState.value.transactions.find { it.id == id } ?: return
+        if (!sharedAccessState.canWrite(txn.accountId)) return
         viewModelScope.launch { transactionRepository.delete(id) }
     }
 }

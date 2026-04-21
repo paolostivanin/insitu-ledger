@@ -34,7 +34,8 @@ class CategoriesViewModel @Inject constructor(
                         incomeCategories = categories.filter { c -> c.type == "income" },
                         expenseCategories = categories.filter { c -> c.type == "expense" },
                         isLoading = false,
-                        isReadOnly = owner.permission == "read"
+                        // Guests can never create/edit/delete categories — backend 403s.
+                        isReadOnly = true
                     )
                 )
             } else {
@@ -51,7 +52,7 @@ class CategoriesViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), CategoriesUiState())
 
     fun delete(id: Long) {
-        if (sharedAccessState.isReadOnly) return
+        if (sharedAccessState.isViewingShared) return
         viewModelScope.launch { categoryRepository.delete(id) }
     }
 }

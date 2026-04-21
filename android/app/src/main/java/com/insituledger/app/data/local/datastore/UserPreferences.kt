@@ -36,6 +36,7 @@ class UserPreferences @Inject constructor(
         val SYNC_MODE = stringPreferencesKey("sync_mode") // "none", "webapp", "gdrive"
         val SHARED_OWNER_ID = longPreferencesKey("shared_owner_id")
         val LAST_USED_ACCOUNT_ID = longPreferencesKey("last_used_account_id")
+        val DEFAULT_ACCOUNT_ID = longPreferencesKey("default_account_id")
         val WEEK_START_DAY = stringPreferencesKey("week_start_day")
         val SCREEN_SECURE = booleanPreferencesKey("screen_secure")
         val AUTO_BACKUP_FOLDER_URI = stringPreferencesKey("auto_backup_folder_uri")
@@ -68,6 +69,7 @@ class UserPreferences @Inject constructor(
     val syncModeFlow: Flow<String> = context.dataStore.data.map { it[SYNC_MODE] ?: "none" }
     val sharedOwnerIdFlow: Flow<Long?> = context.dataStore.data.map { it[SHARED_OWNER_ID] }
     val lastUsedAccountIdFlow: Flow<Long?> = context.dataStore.data.map { it[LAST_USED_ACCOUNT_ID] }
+    val defaultAccountIdFlow: Flow<Long?> = context.dataStore.data.map { it[DEFAULT_ACCOUNT_ID] }
     val weekStartDayFlow: Flow<String> = context.dataStore.data.map { it[WEEK_START_DAY] ?: "monday" }
     val screenSecureFlow: Flow<Boolean> = context.dataStore.data.map { it[SCREEN_SECURE] ?: true }
     val autoBackupFolderUriFlow: Flow<String?> = context.dataStore.data.map { it[AUTO_BACKUP_FOLDER_URI] }
@@ -125,6 +127,13 @@ class UserPreferences @Inject constructor(
 
     suspend fun saveLastUsedAccountId(accountId: Long) {
         context.dataStore.edit { it[LAST_USED_ACCOUNT_ID] = accountId }
+    }
+
+    suspend fun saveDefaultAccountId(accountId: Long?) {
+        context.dataStore.edit {
+            if (accountId != null) it[DEFAULT_ACCOUNT_ID] = accountId
+            else it.remove(DEFAULT_ACCOUNT_ID)
+        }
     }
 
     suspend fun saveWeekStartDay(day: String) {

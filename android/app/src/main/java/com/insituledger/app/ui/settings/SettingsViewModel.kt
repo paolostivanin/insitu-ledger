@@ -6,8 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.remote.tls.ClientCertificateKeyManager
+import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.AuthRepository
 import com.insituledger.app.data.repository.FileBackupRepository
+import com.insituledger.app.data.repository.PreferencesRepository
+import com.insituledger.app.data.repository.SharedAccessState
+import com.insituledger.app.data.repository.SharedRepository
 import com.insituledger.app.data.sync.BackupManager
 import com.insituledger.app.data.sync.SyncManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -53,7 +57,16 @@ data class SettingsUiState(
     // Backup encryption
     val backupPassphraseSet: Boolean = false,
     val pendingImportUri: String? = null,
-    val pendingImportNeedsPassphrase: Boolean = false
+    val pendingImportNeedsPassphrase: Boolean = false,
+    // Default account (only meaningful when connected to webapp)
+    val defaultAccountId: Long? = null,
+    val accessibleAccountOptions: List<AccessibleAccountOption> = emptyList()
+)
+
+data class AccessibleAccountOption(
+    val ownerName: String,
+    val accountId: Long,
+    val accountName: String
 )
 
 @HiltViewModel
@@ -65,7 +78,11 @@ class SettingsViewModel @Inject constructor(
     private val prefs: UserPreferences,
     private val pendingOpDao: PendingOperationDao,
     private val okHttpClient: OkHttpClient,
-    private val clientCertKeyManager: ClientCertificateKeyManager
+    private val clientCertKeyManager: ClientCertificateKeyManager,
+    private val accountRepository: AccountRepository,
+    private val sharedRepository: SharedRepository,
+    private val sharedAccessState: SharedAccessState,
+    private val preferencesRepository: PreferencesRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -137,6 +154,28 @@ class SettingsViewModel @Inject constructor(
             prefs.backupPassphraseSetFlow.collect { set ->
                 _uiState.update { it.copy(backupPassphraseSet = set) }
             }
+        }
+
+        viewModelScope.launch {
+            combine(
+                prefs.defaultAccountIdFlow,
+                sharedAccessState.accessibleOwners
+            ) { defaultId, owners ->
+                val ownAccounts = accountRepository.getCached().map {
+                    AccessibleAccountOption("My accounts", it.id, it.name)
+                }
+                val sharedAccounts = owners.flatMap { owner ->
+                    owner.accounts.map {
+                        AccessibleAccountOption(owner.name, it.accountId, it.accountName)
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        defaultAccountId = defaultId,
+                        accessibleAccountOptions = ownAccounts + sharedAccounts
+                    )
+                }
+            }.collect()
         }
 
         viewModelScope.launch {
@@ -356,6 +395,14 @@ class SettingsViewModel @Inject constructor(
                 authRepository.updateCurrencySymbol(trimmed)
             }
         }
+    }
+
+    fun setDefaultAccount(accountId: Long?) {
+        viewModelScope.launch { preferencesRepository.setDefaultAccount(accountId) }
+    }
+
+    fun refreshAccessibleAccounts() {
+        viewModelScope.launch { sharedRepository.loadAccessibleOwners() }
     }
 
     fun setMtlsAlias(alias: String?) {

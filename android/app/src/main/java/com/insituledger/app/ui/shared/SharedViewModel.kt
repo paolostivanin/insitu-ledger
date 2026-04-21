@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.remote.dto.SharedAccessDto
+import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.SharedRepository
+import com.insituledger.app.domain.model.Account
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -12,9 +14,11 @@ import javax.inject.Inject
 
 data class SharedUiState(
     val accesses: List<SharedAccessDto> = emptyList(),
+    val accounts: List<Account> = emptyList(),
     val isLoading: Boolean = true,
     val isConnected: Boolean = false,
     val email: String = "",
+    val selectedAccountId: Long? = null,
     val permission: String = "read",
     val isSaving: Boolean = false,
     val error: String? = null
@@ -23,6 +27,7 @@ data class SharedUiState(
 @HiltViewModel
 class SharedViewModel @Inject constructor(
     private val sharedRepository: SharedRepository,
+    private val accountRepository: AccountRepository,
     private val prefs: UserPreferences
 ) : ViewModel() {
 
@@ -45,7 +50,18 @@ class SharedViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, isConnected = true, error = null) }
             try {
                 val list = sharedRepository.listSharedAccess()
-                _uiState.update { it.copy(accesses = list, isLoading = false) }
+                val accounts = accountRepository.getCached()
+                _uiState.update {
+                    it.copy(
+                        accesses = list,
+                        accounts = accounts,
+                        isLoading = false,
+                        // Preserve a previous selection if still valid; otherwise pick the first.
+                        selectedAccountId = it.selectedAccountId
+                            ?.takeIf { id -> accounts.any { a -> a.id == id } }
+                            ?: accounts.firstOrNull()?.id
+                    )
+                }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = e.message ?: "Failed to load shared access") }
             }
@@ -53,6 +69,7 @@ class SharedViewModel @Inject constructor(
     }
 
     fun updateEmail(email: String) { _uiState.update { it.copy(email = email) } }
+    fun updateAccount(accountId: Long) { _uiState.update { it.copy(selectedAccountId = accountId) } }
     fun updatePermission(permission: String) { _uiState.update { it.copy(permission = permission) } }
 
     fun add() {
@@ -61,9 +78,14 @@ class SharedViewModel @Inject constructor(
             _uiState.update { it.copy(error = "Email is required") }
             return
         }
+        val accountId = state.selectedAccountId
+        if (accountId == null) {
+            _uiState.update { it.copy(error = "Pick an account to share") }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, error = null) }
-            sharedRepository.createSharedAccess(state.email.trim(), state.permission)
+            sharedRepository.createSharedAccess(state.email.trim(), accountId, state.permission)
                 .onSuccess {
                     _uiState.update { it.copy(email = "", isSaving = false) }
                     load()
