@@ -159,7 +159,9 @@ data class ScheduledInput(
     val note: String? = null,
     val rrule: String,
     @SerializedName("next_occurrence") val nextOccurrence: String,
-    @SerializedName("max_occurrences") val maxOccurrences: Int? = null
+    @SerializedName("max_occurrences") val maxOccurrences: Int? = null,
+    // null = leave server-side default / existing value untouched.
+    val active: Boolean? = null
 )
 
 data class SyncResponse(

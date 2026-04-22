@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.15.1"
+  version: "1.16.0"
 
 servers:
   - url: /api
@@ -345,9 +345,23 @@ components:
           maxLength: 2000
         rrule:
           type: string
+          description: >-
+            RFC 5545 RRULE. Supports FREQ=DAILY|WEEKLY|MONTHLY|YEARLY,
+            optional INTERVAL, and optional UNTIL=YYYYMMDDTHHMMSSZ to set an
+            end date (the scheduler deactivates the schedule once next > UNTIL).
         next_occurrence:
           type: string
           format: date
+        max_occurrences:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: Optional cap on how many times the schedule fires before being deactivated.
+        active:
+          type: boolean
+          description: >-
+            Optional. Omit on create to default to true. On update, omit to keep
+            the existing value, or send false/true to pause/resume.
 
     SharedAccess:
       type: object

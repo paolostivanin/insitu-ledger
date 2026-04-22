@@ -120,9 +120,9 @@ func processDue(db *sql.DB) {
 			continue
 		}
 
-		next := advanceDate(s.nextOccurrence, s.rrule)
+		next, pastUntil := advanceDate(s.nextOccurrence, s.rrule)
 		newCount := s.occurrenceCount + 1
-		deactivate := s.maxOccurrences != nil && newCount >= *s.maxOccurrences
+		deactivate := pastUntil || (s.maxOccurrences != nil && newCount >= *s.maxOccurrences)
 
 		active := 1
 		if deactivate {
@@ -158,9 +158,11 @@ func processDue(db *sql.DB) {
 
 // advanceDate calculates the next occurrence from the current date and rrule.
 // Supports simplified RRULE: FREQ=DAILY, FREQ=WEEKLY, FREQ=MONTHLY, FREQ=YEARLY
-// with optional INTERVAL=n.
+// with optional INTERVAL=n and UNTIL=YYYYMMDD[THHMMSSZ].
 // Preserves time component if present (e.g. 2026-03-18T09:00 -> 2026-04-18T09:00).
-func advanceDate(current string, rrule string) string {
+// Returns (next, pastUntil) where pastUntil is true if the new occurrence falls
+// after the rrule's UNTIL value (caller should deactivate the schedule).
+func advanceDate(current string, rrule string) (string, bool) {
 	// Try datetime first, then date-only
 	format := "2006-01-02T15:04"
 	t, err := time.Parse(format, current)
@@ -168,12 +170,13 @@ func advanceDate(current string, rrule string) string {
 		format = "2006-01-02"
 		t, err = time.Parse(format, current)
 		if err != nil {
-			return current
+			return current, false
 		}
 	}
 
 	freq := ""
 	interval := 1
+	untilStr := ""
 
 	for _, part := range strings.Split(rrule, ";") {
 		kv := strings.SplitN(part, "=", 2)
@@ -193,6 +196,8 @@ func advanceDate(current string, rrule string) string {
 			if n > 0 {
 				interval = n
 			}
+		case "UNTIL":
+			untilStr = kv[1]
 		}
 	}
 
@@ -209,5 +214,31 @@ func advanceDate(current string, rrule string) string {
 		t = t.AddDate(0, 1, 0) // fallback: monthly
 	}
 
-	return t.Format(format)
+	pastUntil := false
+	if untilStr != "" {
+		if until, ok := parseUntil(untilStr); ok && t.After(until) {
+			pastUntil = true
+		}
+	}
+
+	return t.Format(format), pastUntil
+}
+
+// parseUntil accepts the common RFC 5545 UNTIL forms:
+//
+//	20261231T235959Z, 20261231T235959, 20261231, 2026-12-31, 2026-12-31T23:59:59
+func parseUntil(s string) (time.Time, bool) {
+	for _, layout := range []string{
+		"20060102T150405Z",
+		"20060102T150405",
+		"20060102",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }

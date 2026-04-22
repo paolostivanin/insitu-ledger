@@ -31,7 +31,10 @@
 	let fFrequency = $state('monthly');
 	let fNextDate = $state(new Date().toISOString().slice(0, 10));
 	let fNextTime = $state('09:00');
+	let fEndMode = $state<'never' | 'count' | 'date'>('never');
 	let fMaxOccurrences = $state<string>('');
+	let fEndDate = $state('');
+	let fActive = $state(true);
 
 	const frequencyMap: Record<string, string> = {
 		daily: 'FREQ=DAILY',
@@ -111,6 +114,33 @@
 		return dt.split('T')[1].slice(0, 5);
 	}
 
+	// Strip optional ;UNTIL=... from an rrule and return the base + the YYYY-MM-DD UNTIL date (if any).
+	function splitRrule(rrule: string): { base: string; until: string } {
+		const parts = rrule.split(';');
+		const base = parts.filter(p => !p.startsWith('UNTIL=')).join(';');
+		const untilRaw = parts.find(p => p.startsWith('UNTIL='))?.slice(6) || '';
+		// Tolerate 20261231T235959Z, 20261231, 2026-12-31, 2026-12-31T...
+		let until = '';
+		if (untilRaw) {
+			const core = untilRaw.split('T')[0];
+			if (/^\d{8}$/.test(core)) {
+				until = `${core.slice(0, 4)}-${core.slice(4, 6)}-${core.slice(6, 8)}`;
+			} else {
+				until = core;
+			}
+		}
+		return { base, until };
+	}
+
+	function buildRrule(frequencyKey: string, endMode: string, endDate: string): string {
+		const base = frequencyMap[frequencyKey];
+		if (endMode === 'date' && endDate) {
+			const compact = endDate.replace(/-/g, '');
+			return `${base};UNTIL=${compact}T235959Z`;
+		}
+		return base;
+	}
+
 	function resetForm() {
 		editId = null;
 		fType = 'expense';
@@ -121,7 +151,10 @@
 		fFrequency = 'monthly';
 		fNextDate = new Date().toISOString().slice(0, 10);
 		fNextTime = '09:00';
+		fEndMode = 'never';
 		fMaxOccurrences = '';
+		fEndDate = '';
+		fActive = true;
 		if (accts.length) fAccountId = accts[0].id;
 		if (cats.length) fCategoryId = cats[0].id;
 	}
@@ -144,18 +177,36 @@
 			fNextDate = item.next_occurrence;
 			fNextTime = '09:00';
 		}
-		// reverse lookup frequency
-		fFrequency = Object.entries(frequencyMap).find(([, v]) => v === item.rrule)?.[0] || 'monthly';
-		fMaxOccurrences = item.max_occurrences != null ? String(item.max_occurrences) : '';
+		// Strip ;UNTIL=... before reverse-looking up the frequency key.
+		const { base, until } = splitRrule(item.rrule);
+		fFrequency = Object.entries(frequencyMap).find(([, v]) => v === base)?.[0] || 'monthly';
+		if (until) {
+			fEndMode = 'date';
+			fEndDate = until;
+			fMaxOccurrences = '';
+		} else if (item.max_occurrences != null) {
+			fEndMode = 'count';
+			fMaxOccurrences = String(item.max_occurrences);
+			fEndDate = '';
+		} else {
+			fEndMode = 'never';
+			fMaxOccurrences = '';
+			fEndDate = '';
+		}
+		fActive = item.active;
 		showForm = true;
 	}
 
 	async function submit(e: Event) {
 		e.preventDefault();
 		error = '';
+		if (fEndMode === 'date' && !fEndDate) {
+			error = 'Pick an end date';
+			return;
+		}
 		submitting = true;
-		const maxOcc = fMaxOccurrences ? parseInt(fMaxOccurrences, 10) : null;
-		const data = {
+		const maxOcc = fEndMode === 'count' && fMaxOccurrences ? parseInt(fMaxOccurrences, 10) : null;
+		const data: any = {
 			account_id: fAccountId,
 			category_id: fCategoryId,
 			type: fType,
@@ -163,13 +214,14 @@
 			currency: fCurrency,
 			description: fDescription || undefined,
 			note: fNote || undefined,
-			rrule: frequencyMap[fFrequency],
+			rrule: buildRrule(fFrequency, fEndMode, fEndDate),
 			next_occurrence: `${fNextDate}T${fNextTime}`,
 			max_occurrences: maxOcc && maxOcc > 0 ? maxOcc : null
 		};
 		try {
 			if (editId) {
-				await scheduled.update(editId, data);
+				// Only send `active` on update so create-flow keeps server default.
+				await scheduled.update(editId, { ...data, active: fActive });
 			} else {
 				await scheduled.create(data);
 			}
@@ -271,10 +323,34 @@
 						<input id="next-time" type="time" bind:value={fNextTime} required />
 					</div>
 					<div class="form-group">
-						<label for="max-occ">Stop after N occurrences</label>
-						<input id="max-occ" type="number" min="1" bind:value={fMaxOccurrences} placeholder="Unlimited" />
+						<label for="ends">Ends</label>
+						<select id="ends" bind:value={fEndMode}>
+							<option value="never">Never</option>
+							<option value="count">After N occurrences</option>
+							<option value="date">On date</option>
+						</select>
 					</div>
+					{#if fEndMode === 'count'}
+						<div class="form-group">
+							<label for="max-occ">Stop after N</label>
+							<input id="max-occ" type="number" min="1" bind:value={fMaxOccurrences} placeholder="e.g. 12" />
+						</div>
+					{:else if fEndMode === 'date'}
+						<div class="form-group">
+							<label for="end-date">End date</label>
+							<input id="end-date" type="date" bind:value={fEndDate} required />
+						</div>
+					{/if}
 				</div>
+				{#if editId}
+					<div class="form-group">
+						<label class="inline-toggle">
+							<input type="checkbox" bind:checked={fActive} />
+							<span>Active</span>
+							<span class="hint">{fActive ? 'Schedule is running' : 'Paused — no new transactions will be created'}</span>
+						</label>
+					</div>
+				{/if}
 				<div class="form-group">
 					<label for="desc">Name</label>
 					<input id="desc" type="text" bind:value={fDescription} placeholder="Optional" maxlength="500" />
@@ -352,6 +428,16 @@
 	}
 	h2 { font-size: 1rem; margin-bottom: 1rem; }
 	.added-by {
+		color: var(--text-muted);
+		font-size: 0.85rem;
+	}
+	.inline-toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		cursor: pointer;
+	}
+	.inline-toggle .hint {
 		color: var(--text-muted);
 		font-size: 0.85rem;
 	}

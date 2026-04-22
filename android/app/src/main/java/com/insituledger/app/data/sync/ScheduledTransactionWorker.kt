@@ -41,9 +41,10 @@ class ScheduledTransactionWorker @AssistedInject constructor(
 
         for (scheduled in due) {
             val txDate = scheduled.nextOccurrence
-            val next = advanceDate(scheduled.nextOccurrence, scheduled.rrule)
+            val (next, pastUntil) = advanceDate(scheduled.nextOccurrence, scheduled.rrule)
             val newCount = scheduled.occurrenceCount + 1
-            val deactivate = scheduled.maxOccurrences != null && newCount >= scheduled.maxOccurrences
+            val deactivate = pastUntil ||
+                (scheduled.maxOccurrences != null && newCount >= scheduled.maxOccurrences)
 
             database.withTransaction {
                 // Generate a local negative ID for the new transaction
@@ -85,18 +86,20 @@ class ScheduledTransactionWorker @AssistedInject constructor(
         return Result.success()
     }
 
-    private fun advanceDate(current: String, rrule: String): String {
+    private fun advanceDate(current: String, rrule: String): Pair<String, Boolean> {
         val hasTime = current.contains('T') || current.contains(' ')
         val dateTime = DateTimeUtil.parseFlexibleLocalDateTime(current)
 
         var freq = ""
         var interval = 1
+        var untilStr: String? = null
         for (part in rrule.split(";")) {
             val kv = part.split("=", limit = 2)
             if (kv.size != 2) continue
             when (kv[0]) {
                 "FREQ" -> freq = kv[1]
                 "INTERVAL" -> kv[1].toIntOrNull()?.let { if (it > 0) interval = it }
+                "UNTIL" -> untilStr = kv[1]
             }
         }
 
@@ -108,10 +111,37 @@ class ScheduledTransactionWorker @AssistedInject constructor(
             else -> dateTime.plusMonths(1)
         }
 
-        return if (hasTime) {
+        val pastUntil = untilStr?.let { parseUntil(it) }?.let { next.isAfter(it) } ?: false
+
+        val nextStr = if (hasTime) {
             DateTimeUtil.formatLocalDateTime(next)
         } else {
             next.toLocalDate().toString()
         }
+        return nextStr to pastUntil
+    }
+
+    // RFC 5545 UNTIL: typical forms are 20261231T235959Z or 20261231; we also
+    // tolerate the same set the backend tolerates so round-tripping is safe.
+    private fun parseUntil(s: String): LocalDateTime? {
+        val patterns = listOf(
+            "yyyyMMdd'T'HHmmss'Z'",
+            "yyyyMMdd'T'HHmmss",
+            "yyyyMMdd",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm",
+            "yyyy-MM-dd"
+        )
+        for (p in patterns) {
+            try {
+                val fmt = java.time.format.DateTimeFormatter.ofPattern(p)
+                return if (p == "yyyyMMdd" || p == "yyyy-MM-dd") {
+                    java.time.LocalDate.parse(s, fmt).atTime(23, 59, 59)
+                } else {
+                    LocalDateTime.parse(s, fmt)
+                }
+            } catch (_: Exception) { /* try next */ }
+        }
+        return null
     }
 }

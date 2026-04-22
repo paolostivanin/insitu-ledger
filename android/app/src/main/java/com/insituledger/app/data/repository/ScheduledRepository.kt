@@ -90,17 +90,19 @@ class ScheduledRepository @Inject constructor(
     suspend fun update(
         id: Long, accountId: Long, categoryId: Long, type: String,
         amount: Double, currency: String, description: String?, note: String?,
-        rrule: String, nextOccurrence: String, maxOccurrences: Int? = null
+        rrule: String, nextOccurrence: String, maxOccurrences: Int? = null,
+        active: Boolean? = null
     ) {
         val existing = scheduledDao.getById(id) ?: return
         scheduledDao.upsert(existing.copy(
             accountId = accountId, categoryId = categoryId, type = type,
             amount = amount, currency = currency, description = description, note = note,
-            rrule = rrule, nextOccurrence = nextOccurrence, maxOccurrences = maxOccurrences
+            rrule = rrule, nextOccurrence = nextOccurrence, maxOccurrences = maxOccurrences,
+            active = active ?: existing.active
         ))
 
         if (isSyncEnabled()) {
-            val input = ScheduledInput(accountId, categoryId, type, amount, currency, description, note, rrule, nextOccurrence, maxOccurrences)
+            val input = ScheduledInput(accountId, categoryId, type, amount, currency, description, note, rrule, nextOccurrence, maxOccurrences, active)
             pendingOpDao.insert(PendingOperationEntity(
                 entityType = "scheduled",
                 operation = "UPDATE",

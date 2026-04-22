@@ -297,6 +297,8 @@ export interface ScheduledInput {
 	rrule: string;
 	next_occurrence: string;
 	max_occurrences?: number | null;
+	// Omit on create (defaults true server-side); omit on update to keep existing.
+	active?: boolean;
 }
 
 export const scheduled = {

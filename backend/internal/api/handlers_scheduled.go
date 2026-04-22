@@ -17,6 +17,8 @@ type scheduledRequest struct {
 	RRule          string  `json:"rrule"`
 	NextOccurrence string  `json:"next_occurrence"`
 	MaxOccurrences *int64  `json:"max_occurrences"`
+	// Optional: omit on create (defaults true via DB), omit on update to keep existing value.
+	Active *bool `json:"active"`
 }
 
 func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
@@ -126,10 +128,14 @@ func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	active := 1
+	if req.Active != nil && !*req.Active {
+		active = 0
+	}
 	result, err := s.DB.Exec(
-		`INSERT INTO scheduled_transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences,
+		`INSERT INTO scheduled_transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences, active)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences, active,
 	)
 	if err != nil {
 		http.Error(w, "failed to create scheduled transaction", http.StatusInternalServerError)
@@ -199,12 +205,25 @@ func (s *Server) handleUpdateScheduled(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, err = s.DB.Exec(
-		`UPDATE scheduled_transactions SET account_id=?, category_id=?, type=?, amount=?, currency=?,
-		 description=?, note=?, rrule=?, next_occurrence=?, max_occurrences=? WHERE id=? AND user_id=?`,
-		req.AccountID, req.CategoryID, req.Type, req.Amount, req.Currency,
-		req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences, id, targetUserID,
-	)
+	if req.Active != nil {
+		activeVal := 0
+		if *req.Active {
+			activeVal = 1
+		}
+		_, err = s.DB.Exec(
+			`UPDATE scheduled_transactions SET account_id=?, category_id=?, type=?, amount=?, currency=?,
+			 description=?, note=?, rrule=?, next_occurrence=?, max_occurrences=?, active=? WHERE id=? AND user_id=?`,
+			req.AccountID, req.CategoryID, req.Type, req.Amount, req.Currency,
+			req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences, activeVal, id, targetUserID,
+		)
+	} else {
+		_, err = s.DB.Exec(
+			`UPDATE scheduled_transactions SET account_id=?, category_id=?, type=?, amount=?, currency=?,
+			 description=?, note=?, rrule=?, next_occurrence=?, max_occurrences=? WHERE id=? AND user_id=?`,
+			req.AccountID, req.CategoryID, req.Type, req.Amount, req.Currency,
+			req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences, id, targetUserID,
+		)
+	}
 	if err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
 		return
