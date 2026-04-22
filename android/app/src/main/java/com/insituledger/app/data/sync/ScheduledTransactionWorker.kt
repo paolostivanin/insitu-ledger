@@ -59,8 +59,10 @@ class ScheduledTransactionWorker @AssistedInject constructor(
                     amount = scheduled.amount,
                     currency = scheduled.currency,
                     description = scheduled.description,
+                    note = scheduled.note,
                     date = txDate,
-                    isLocalOnly = true
+                    isLocalOnly = true,
+                    createdByUserId = scheduled.createdByUserId
                 )
                 transactionDao.upsert(transaction)
 

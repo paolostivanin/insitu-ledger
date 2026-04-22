@@ -92,7 +92,7 @@ button {
 	color: var(--text);
 }
 
-input, select {
+input, select, textarea {
 	font-family: inherit;
 	font-size: 0.875rem;
 	padding: 0.5rem 0.75rem;
@@ -104,8 +104,14 @@ input, select {
 	transition: border 0.15s;
 }
 
-input:focus, select:focus {
+input:focus, select:focus, textarea:focus {
 	border-color: var(--primary);
+}
+
+textarea {
+	resize: vertical;
+	min-height: 4.5rem;
+	line-height: 1.5;
 }
 
 label {
@@ -144,7 +150,8 @@ label {
 }
 
 .form-group input:not([type="checkbox"]):not([type="radio"]),
-.form-group select {
+.form-group select,
+.form-group textarea {
 	width: 100%;
 }
 

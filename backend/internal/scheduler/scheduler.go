@@ -38,7 +38,7 @@ func processDue(db *sql.DB) {
 	nowStr := now.Format("2006-01-02T15:04")
 
 	rows, err := db.Query(
-		`SELECT id, account_id, category_id, user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences, occurrence_count
+		`SELECT id, account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences, occurrence_count
 		 FROM scheduled_transactions
 		 WHERE active = 1 AND deleted_at IS NULL AND next_occurrence <= ?`, nowStr,
 	)
@@ -53,6 +53,7 @@ func processDue(db *sql.DB) {
 		accountID       int64
 		categoryID      int64
 		userID          int64
+		createdByUserID sql.NullInt64
 		typ             string
 		amount          float64
 		currency        string
@@ -67,7 +68,7 @@ func processDue(db *sql.DB) {
 	var due []scheduled
 	for rows.Next() {
 		var s scheduled
-		if err := rows.Scan(&s.id, &s.accountID, &s.categoryID, &s.userID, &s.typ,
+		if err := rows.Scan(&s.id, &s.accountID, &s.categoryID, &s.userID, &s.createdByUserID, &s.typ,
 			&s.amount, &s.currency, &s.description, &s.note, &s.rrule, &s.nextOccurrence,
 			&s.maxOccurrences, &s.occurrenceCount); err != nil {
 			log.Printf("scheduler: scan error: %v", err)
@@ -99,9 +100,9 @@ func processDue(db *sql.DB) {
 		}
 
 		_, err = tx.Exec(
-			`INSERT INTO transactions (account_id, category_id, user_id, type, amount, currency, description, note, date)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			s.accountID, s.categoryID, s.userID, s.typ, s.amount, s.currency, s.description, s.note, s.nextOccurrence,
+			`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			s.accountID, s.categoryID, s.userID, s.createdByUserID, s.typ, s.amount, s.currency, s.description, s.note, s.nextOccurrence,
 		)
 		if err != nil {
 			tx.Rollback()
