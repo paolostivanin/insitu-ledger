@@ -6,6 +6,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.room.withTransaction
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.db.dao.AccountDao
 import com.insituledger.app.data.local.db.dao.ScheduledTransactionDao
@@ -23,7 +24,8 @@ class ScheduledTransactionWorker @AssistedInject constructor(
     private val database: AppDatabase,
     private val scheduledDao: ScheduledTransactionDao,
     private val transactionDao: TransactionDao,
-    private val accountDao: AccountDao
+    private val accountDao: AccountDao,
+    private val prefs: UserPreferences
 ) : CoroutineWorker(context, params) {
 
     companion object {
@@ -31,6 +33,11 @@ class ScheduledTransactionWorker @AssistedInject constructor(
     }
 
     override suspend fun doWork(): Result {
+        // In webapp sync mode the backend is the authoritative materializer.
+        // Belt-and-suspenders against a worker enqueued before the SyncManager
+        // gate landed, or one already running when the user switched modes.
+        if (prefs.getSyncModeImmediate() == "webapp") return Result.success()
+
         val now = LocalDateTime.now()
         val nowStr = DateTimeUtil.formatLocalDateTime(now)
 

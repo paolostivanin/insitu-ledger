@@ -1,13 +1,3 @@
-# curl -s -X POST https://insitu.polnas.eu/api/auth/login -H 'Content-Type: application/json' -d '{"login":"lbassan","password":"","totp_code":""}'
-
-INSITU_TOKEN="$TK" python3 scripts/insitu_bootstrap.py --base https://insitu.polnas.eu account
-INSITU_TOKEN="$TK" python3 scripts/insitu_bootstrap.py --base https://insitu.polnas.eu categories
-INSITU_TOKEN="$TK" python3 scripts/insitu_bootstrap.py --base https://insitu.polnas.eu share --grantee-email pstivanin@fastmail.com
-python3 scripts/transform_csv.py --spouse wife --in wife.csv --out wife_for_insitu.csv
-
-# then upload wife_for_insitu.csv via Transactions → Import CSV
-
-
 # ============================================================================
 # Next major version — schema cleanup
 # ============================================================================
@@ -23,4 +13,26 @@ python3 scripts/transform_csv.py --spouse wife --in wife.csv --out wife_for_insi
 #   2. Update the Android sync layer to stop relying on user_id as a partition
 #      key.
 #   3. Drop the indexes that reference user_id, then drop the column.
+
+# ============================================================================
+# Scheduled-tx idempotency — defense-in-depth
+# ============================================================================
+# v1.16.1 fixed the duplicate-materialization race by gating the Android local
+# scheduler on sync mode (backend is the sole materializer in webapp mode).
+# That closes the dual-execution path, but the schema still has no safeguard
+# if a third actor (a future client, a manual API call, a retry) re-materializes
+# the same occurrence.
+#
+# Add a second gate at the schema layer:
+#   1. Add scheduled_transaction_id (nullable INTEGER, FK to scheduled_transactions)
+#      to the transactions table. Backfill is unnecessary — only new rows set it.
+#   2. Add UNIQUE(scheduled_transaction_id, date) WHERE scheduled_transaction_id
+#      IS NOT NULL (partial index — SQLite supports it).
+#   3. Backend scheduler (scheduler.go) sets the FK on insert.
+#   4. Android worker sets the FK on its local insert; sync push includes it.
+#   5. POST /api/transactions accepts an optional scheduled_transaction_id and
+#      relies on the unique index to reject duplicates with a clear 409.
+#   6. Bonus: the scheduled-tx UI can then show "X/Y" derived from
+#      COUNT(transactions WHERE scheduled_transaction_id = ?) instead of the
+#      brittle counter field, which would self-heal after any past duplication.
 

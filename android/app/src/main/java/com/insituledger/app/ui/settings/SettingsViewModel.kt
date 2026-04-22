@@ -232,6 +232,9 @@ class SettingsViewModel @Inject constructor(
             if (mode != "webapp") {
                 syncManager.cancelAll()
             }
+            // Reconcile the local scheduled-tx worker for the new mode without
+            // requiring an app restart: cancels in webapp mode, (re)enqueues otherwise.
+            syncManager.scheduleScheduledTransactionCheck()
         }
     }
 
@@ -259,6 +262,8 @@ class SettingsViewModel @Inject constructor(
             authRepository.logout()
             syncManager.cancelAll()
             prefs.saveSyncMode("none")
+            // Bring the local scheduled-tx worker back up now that we're local-first again.
+            syncManager.scheduleScheduledTransactionCheck()
             _uiState.update { it.copy(disconnected = true) }
         }
     }

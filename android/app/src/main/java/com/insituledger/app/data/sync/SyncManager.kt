@@ -65,6 +65,12 @@ class SyncManager @Inject constructor(
     }
 
     fun scheduleScheduledTransactionCheck() {
+        if (prefs.getSyncModeImmediate() == "webapp") {
+            // Backend is the authoritative materializer when synced — running the
+            // local worker too produces duplicate transactions for each occurrence.
+            workManager.get().cancelUniqueWork(SCHEDULED_TX_WORK)
+            return
+        }
         val request = PeriodicWorkRequestBuilder<ScheduledTransactionWorker>(15, TimeUnit.MINUTES)
             .build()
 
@@ -76,11 +82,13 @@ class SyncManager @Inject constructor(
     }
 
     fun triggerImmediateScheduledCheck() {
+        if (prefs.getSyncModeImmediate() == "webapp") return
         val request = OneTimeWorkRequestBuilder<ScheduledTransactionWorker>().build()
         workManager.get().enqueue(request)
     }
 
     fun scheduleDelayedScheduledCheck(delayMillis: Long) {
+        if (prefs.getSyncModeImmediate() == "webapp") return
         val request = OneTimeWorkRequestBuilder<ScheduledTransactionWorker>()
             .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
             .build()
