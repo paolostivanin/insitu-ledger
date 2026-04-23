@@ -11,6 +11,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -210,6 +215,22 @@ fun CategoryDropdownWithAdd(
     // Bottom sheet modal
     if (showModal) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        // Absorb leftover scroll/fling from the inner LazyColumn so scrolling at the
+        // top of the list doesn't get forwarded to the sheet's drag handler. Direct
+        // drag on the sheet's drag handle / non-scrollable areas still dismisses.
+        val absorbScrollConnection = remember {
+            object : NestedScrollConnection {
+                override fun onPostScroll(
+                    consumed: Offset,
+                    available: Offset,
+                    source: NestedScrollSource
+                ): Offset = available
+                override suspend fun onPostFling(
+                    consumed: Velocity,
+                    available: Velocity
+                ): Velocity = available
+            }
+        }
         var searchQuery by remember { mutableStateOf("") }
 
         val topLevel = remember(filteredCats) { filteredCats.filter { it.parentId == null } }
@@ -282,7 +303,8 @@ fun CategoryDropdownWithAdd(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 400.dp),
+                        .heightIn(max = 400.dp)
+                        .nestedScroll(absorbScrollConnection),
                     contentPadding = PaddingValues(horizontal = AppSpacing.lg, vertical = AppSpacing.sm),
                     verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
                 ) {

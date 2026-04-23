@@ -14,8 +14,8 @@ android {
         applicationId = "com.insituledger.app"
         minSdk = 34
         targetSdk = 35
-        versionCode = 30
-        versionName = "1.25.1"
+        versionCode = 32
+        versionName = "1.26.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -28,6 +28,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
