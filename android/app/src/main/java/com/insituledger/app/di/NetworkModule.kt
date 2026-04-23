@@ -49,8 +49,8 @@ object NetworkModule {
         return OkHttpClient.Builder()
             .cache(cache)
             .sslSocketFactory(sslContext.socketFactory, trustManager)
-            .addInterceptor(cleartextGuard)
             .addInterceptor(authInterceptor)
+            .addInterceptor(cleartextGuard)
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = if (BuildConfig.DEBUG) {
                     HttpLoggingInterceptor.Level.BODY
