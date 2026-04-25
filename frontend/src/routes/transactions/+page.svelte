@@ -96,6 +96,8 @@
 	function selectSuggestion(s: AutocompleteSuggestion) {
 		fDescription = s.description;
 		fCategoryId = s.category_id;
+		const cat = cats.find(c => c.id === s.category_id);
+		if (cat) fType = cat.type;
 		suggestions = [];
 		showSuggestions = false;
 		selectedSuggestionIndex = -1;

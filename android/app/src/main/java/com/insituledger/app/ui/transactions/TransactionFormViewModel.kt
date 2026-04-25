@@ -167,9 +167,11 @@ class TransactionFormViewModel @Inject constructor(
 
     fun selectSuggestion(suggestion: DescriptionSuggestion) {
         _uiState.update {
+            val derivedType = it.categories.find { c -> c.id == suggestion.categoryId }?.type ?: it.type
             it.copy(
                 description = suggestion.description,
                 categoryId = suggestion.categoryId,
+                type = derivedType,
                 suggestions = emptyList(),
                 showSuggestions = false
             )

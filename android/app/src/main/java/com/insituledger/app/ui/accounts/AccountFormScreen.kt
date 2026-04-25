@@ -7,6 +7,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.insituledger.app.ui.theme.AppSpacing
@@ -48,7 +49,9 @@ fun AccountFormScreen(
             Spacer(modifier = Modifier.height(AppSpacing.xs))
 
             OutlinedTextField(value = uiState.name, onValueChange = viewModel::updateName,
-                label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                label = { Text("Name") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                modifier = Modifier.fillMaxWidth())
 
             OutlinedTextField(value = uiState.currency, onValueChange = viewModel::updateCurrency,
                 label = { Text("Currency") }, singleLine = true, modifier = Modifier.fillMaxWidth())
