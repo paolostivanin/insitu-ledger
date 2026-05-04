@@ -90,8 +90,11 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 		args = append(args, to)
 	}
 	if catID != "" {
-		query += " AND t.category_id = ?"
-		args = append(args, catID)
+		// Expand parent → direct children: filtering by a parent category
+		// ("Vacation") must include transactions tagged to its sub-categories
+		// ("Hotel", "Flights", …). Authorization stays via t.account_id IN (...).
+		query += " AND t.category_id IN (SELECT id FROM categories WHERE id = ? OR parent_id = ?)"
+		args = append(args, catID, catID)
 	}
 
 	query += " ORDER BY " + sortColumn + " " + sortDirection + ", t.id DESC LIMIT ? OFFSET ?"

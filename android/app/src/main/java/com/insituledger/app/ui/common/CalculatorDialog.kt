@@ -6,6 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.Locale
 
 @Composable
 fun CalculatorDialog(
@@ -86,7 +87,7 @@ fun CalculatorDialog(
             Column {
                 Text(
                     text = display,
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = MaterialTheme.typography.headlineLarge,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
                 )
 
@@ -101,7 +102,7 @@ fun CalculatorDialog(
                 buttons.forEach { row ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         row.forEach { label ->
                             val weight = if (row.size == 2) 2f else 1f
@@ -116,7 +117,7 @@ fun CalculatorDialog(
                                         "⌫" -> onBackspace()
                                     }
                                 },
-                                modifier = Modifier.weight(weight).height(48.dp),
+                                modifier = Modifier.weight(weight).height(60.dp),
                                 colors = when (label) {
                                     "+", "−", "×", "÷" -> ButtonDefaults.filledTonalButtonColors()
                                     "C", "⌫" -> ButtonDefaults.outlinedButtonColors()
@@ -130,11 +131,11 @@ fun CalculatorDialog(
                                 },
                                 contentPadding = PaddingValues(0.dp)
                             ) {
-                                Text(label, fontSize = 18.sp)
+                                Text(label, fontSize = 22.sp)
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                 }
             }
         },
@@ -151,6 +152,9 @@ private fun formatResult(value: Double): String {
     return if (value == value.toLong().toDouble()) {
         value.toLong().toString()
     } else {
-        "%.2f".format(value).trimEnd('0').trimEnd('.')
+        // Force Locale.US so the display always uses dot as decimal separator.
+        // toDoubleOrNull() relies on Java's parser which only accepts dots,
+        // so any comma here would break onOperator/onEquals on the next press.
+        String.format(Locale.US, "%.2f", value).trimEnd('0').trimEnd('.')
     }
 }

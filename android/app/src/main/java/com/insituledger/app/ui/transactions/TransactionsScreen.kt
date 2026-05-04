@@ -259,6 +259,7 @@ private fun TransactionsList(
                 }
                 rowItems(group.rows, isSelectionMode, selectedIds, onRowClick, onRowLongClick)
             }
+            loadMoreItem(uiState.hasMore, uiState.isLoadingMore) { viewModel.loadMore() }
         }
     } else {
         val rows = remember(uiState.transactions, categoryMap, accountMap, currentUserId, symbol) {
@@ -271,6 +272,29 @@ private fun TransactionsList(
             verticalArrangement = itemSpacing
         ) {
             rowItems(rows, isSelectionMode, selectedIds, onRowClick, onRowLongClick)
+            loadMoreItem(uiState.hasMore, uiState.isLoadingMore) { viewModel.loadMore() }
+        }
+    }
+}
+
+private fun LazyListScope.loadMoreItem(
+    hasMore: Boolean,
+    isLoading: Boolean,
+    onLoadMore: () -> Unit
+) {
+    if (!hasMore) return
+    item(key = "load_more", contentType = "load_more") {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = AppSpacing.md),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+            } else {
+                OutlinedButton(onClick = onLoadMore) { Text("Load more") }
+            }
         }
     }
 }

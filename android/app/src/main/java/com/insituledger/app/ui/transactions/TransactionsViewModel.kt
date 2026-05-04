@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 private const val STOP_TIMEOUT_MS = 5_000L
+private const val PAGE_SIZE = 100
 
 data class TransactionsUiState(
     val transactions: List<Transaction> = emptyList(),
@@ -35,7 +36,9 @@ data class TransactionsUiState(
     val isSearchActive: Boolean = false,
     val selectedIds: Set<Long> = emptySet(),
     val isSelectionMode: Boolean = false,
-    val currentUserId: Long? = null
+    val currentUserId: Long? = null,
+    val hasMore: Boolean = false,
+    val isLoadingMore: Boolean = false
 )
 
 data class FilterAndSort(
@@ -45,6 +48,13 @@ data class FilterAndSort(
     val sortBy: String = "date",
     val sortDir: String = "desc",
     val searchQuery: String = ""
+)
+
+private data class PageRequest(
+    val fs: FilterAndSort,
+    val ownerFilter: Long?,
+    val accounts: List<Account>,
+    val pages: Int
 )
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
@@ -63,10 +73,14 @@ class TransactionsViewModel @Inject constructor(
 
     private val _filterAndSort = MutableStateFlow(FilterAndSort())
     private val _searchInput = MutableStateFlow("")
+    // Pages requested. Increments via loadMore(); resets to 1 whenever filters,
+    // sort, or search change. Multiplied by PAGE_SIZE for the LIMIT.
+    private val _pageCount = MutableStateFlow(1)
 
     init {
         viewModelScope.launch {
             _searchInput.debounce(300).collectLatest { query ->
+                _pageCount.value = 1
                 _filterAndSort.update { it.copy(searchQuery = query) }
             }
         }
@@ -83,38 +97,52 @@ class TransactionsViewModel @Inject constructor(
             }.collect()
         }
 
-        // Load transactions reactively based on filters, sort, search, and owner filter
+        // Load transactions reactively based on filters, sort, search, owner filter,
+        // and the current page count. The growing-LIMIT pattern keeps the Flow
+        // reactive (newly-inserted transactions still appear without re-pagination).
         viewModelScope.launch {
             combine(
                 _filterAndSort,
                 sharedAccessState.ownerFilter,
-                accountRepository.getAll()
-            ) { fs, filter, accounts -> Triple(fs, filter, accounts) }
-                .flatMapLatest { (fs, filter, accounts) ->
-                    val accountIds: Set<Long>? = filter?.let { f ->
-                        accounts.filter { it.userId == f }.map { it.id }.toSet()
+                accountRepository.getAll(),
+                _pageCount
+            ) { fs, filter, accounts, pages -> PageRequest(fs, filter, accounts, pages) }
+                .flatMapLatest { req ->
+                    val accountIds: Set<Long>? = req.ownerFilter?.let { f ->
+                        req.accounts.filter { it.userId == f }.map { it.id }.toSet()
                     }
                     _uiState.update { it.copy(isLoading = true) }
-                    val txnFlow = if (fs.searchQuery.isNotBlank()) {
-                        transactionRepository.search(fs.searchQuery)
+                    val limit = req.pages * PAGE_SIZE
+                    val txnFlow = if (req.fs.searchQuery.isNotBlank()) {
+                        // Search ignores pagination — relatively bounded result set.
+                        transactionRepository.search(req.fs.searchQuery)
                     } else {
                         transactionRepository.getSorted(
-                            from = fs.from, to = fs.to, categoryId = fs.categoryId,
-                            sortBy = fs.sortBy, sortDir = fs.sortDir
+                            from = req.fs.from, to = req.fs.to, categoryId = req.fs.categoryId,
+                            sortBy = req.fs.sortBy, sortDir = req.fs.sortDir,
+                            limit = limit, offset = 0
                         )
                     }
                     txnFlow.map { txns ->
-                        if (accountIds == null) txns else txns.filter { it.accountId in accountIds }
+                        val visible = if (accountIds == null) txns else txns.filter { it.accountId in accountIds }
+                        // hasMore is true when this page filled the LIMIT entirely
+                        // (and we're not in search mode, which doesn't paginate).
+                        val isSearch = req.fs.searchQuery.isNotBlank()
+                        val more = !isSearch && txns.size >= limit
+                        visible to more
                     }
                 }
-                .collect { txns ->
-                    _uiState.update { it.copy(transactions = txns, isLoading = false) }
+                .collect { (txns, more) ->
+                    _uiState.update {
+                        it.copy(transactions = txns, isLoading = false, isLoadingMore = false, hasMore = more)
+                    }
                 }
         }
     }
 
     fun setFilters(from: String?, to: String?, categoryId: Long?) {
         _uiState.update { it.copy(filterFrom = from, filterTo = to, filterCategoryId = categoryId) }
+        _pageCount.value = 1
         _filterAndSort.update { it.copy(from = from, to = to, categoryId = categoryId) }
     }
 
@@ -124,7 +152,14 @@ class TransactionsViewModel @Inject constructor(
 
     fun setSort(sortBy: String, sortDir: String) {
         _uiState.update { it.copy(sortBy = sortBy, sortDir = sortDir) }
+        _pageCount.value = 1
         _filterAndSort.update { it.copy(sortBy = sortBy, sortDir = sortDir) }
+    }
+
+    fun loadMore() {
+        if (!_uiState.value.hasMore || _uiState.value.isLoadingMore) return
+        _uiState.update { it.copy(isLoadingMore = true) }
+        _pageCount.update { it + 1 }
     }
 
     fun refresh() {
@@ -145,6 +180,7 @@ class TransactionsViewModel @Inject constructor(
         _uiState.update { it.copy(isSearchActive = newActive, searchQuery = if (!newActive) "" else it.searchQuery) }
         if (!newActive) {
             _searchInput.value = ""
+            _pageCount.value = 1
             _filterAndSort.update { it.copy(searchQuery = "") }
         }
     }

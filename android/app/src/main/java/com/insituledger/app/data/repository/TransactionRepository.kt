@@ -81,7 +81,10 @@ class TransactionRepository @Inject constructor(
             args.add(to)
         }
         if (categoryId != null) {
-            sb.append(" AND category_id = ?")
+            // Expand parent → direct children so filtering by a parent category
+            // includes its sub-categories' transactions. Mirrors the backend.
+            sb.append(" AND category_id IN (SELECT id FROM categories WHERE id = ? OR parent_id = ?)")
+            args.add(categoryId)
             args.add(categoryId)
         }
 

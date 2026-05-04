@@ -576,6 +576,63 @@ func TestTransactionNoteRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTransactionsFilterByParentCategory(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+
+	acctID, _ := createTestAccountAndCategory(t, handler, token)
+
+	// Parent category "Vacation"
+	req := authedRequest("POST", "/api/categories", `{"name":"Vacation","type":"expense"}`, token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var parent map[string]any
+	json.Unmarshal(w.Body.Bytes(), &parent)
+	parentID := int(parent["id"].(float64))
+
+	// Child category "Hotel" under "Vacation"
+	body := fmt.Sprintf(`{"name":"Hotel","type":"expense","parent_id":%d}`, parentID)
+	req = authedRequest("POST", "/api/categories", body, token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var child map[string]any
+	json.Unmarshal(w.Body.Bytes(), &child)
+	childID := int(child["id"].(float64))
+
+	// One transaction tagged to the child category
+	body = fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":120,"date":"2025-04-01"}`, acctID, childID)
+	req = authedRequest("POST", "/api/transactions", body, token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("create transaction: got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Filtering by the parent must return the child's transaction.
+	req = authedRequest("GET", fmt.Sprintf("/api/transactions?category_id=%d", parentID), "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var txns []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	if len(txns) != 1 {
+		t.Fatalf("filter by parent: got %d transactions, want 1", len(txns))
+	}
+	if int(txns[0]["category_id"].(float64)) != childID {
+		t.Errorf("filter by parent: got category_id %v, want child %d", txns[0]["category_id"], childID)
+	}
+
+	// Filtering by the child still returns only the child's transaction.
+	req = authedRequest("GET", fmt.Sprintf("/api/transactions?category_id=%d", childID), "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	if len(txns) != 1 {
+		t.Errorf("filter by child: got %d transactions, want 1", len(txns))
+	}
+}
+
 // ===== Batch Operations Tests =====
 
 func TestBatchDelete(t *testing.T) {
