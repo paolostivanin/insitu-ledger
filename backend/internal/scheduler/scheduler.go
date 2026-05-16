@@ -3,7 +3,9 @@ package scheduler
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
+	"runtime/debug"
 	"strings"
 	"time"
 )
@@ -13,8 +15,7 @@ import (
 // It stops when the context is cancelled.
 func Start(ctx context.Context, db *sql.DB, interval time.Duration) {
 	go func() {
-		// Run once immediately on startup
-		processDue(db)
+		safeProcessDue(db)
 
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -24,10 +25,39 @@ func Start(ctx context.Context, db *sql.DB, interval time.Duration) {
 				log.Println("scheduler: shutting down")
 				return
 			case <-ticker.C:
-				processDue(db)
+				safeProcessDue(db)
 			}
 		}
 	}()
+}
+
+// safeProcessDue runs processDue under a recover so a panic in one tick
+// (e.g. a malformed row) does not terminate the scheduler goroutine and
+// silently freeze all future scheduled materializations.
+func safeProcessDue(db *sql.DB) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("scheduler: panic recovered: %v\n%s", rec, debug.Stack())
+		}
+	}()
+	processDue(db)
+}
+
+type scheduled struct {
+	id              int64
+	accountID       int64
+	categoryID      int64
+	userID          int64
+	createdByUserID sql.NullInt64
+	typ             string
+	amount          float64
+	currency        string
+	description     *string
+	note            *string
+	rrule           string
+	nextOccurrence  string
+	maxOccurrences  *int64
+	occurrenceCount int64
 }
 
 func processDue(db *sql.DB) {
@@ -48,23 +78,6 @@ func processDue(db *sql.DB) {
 	}
 	defer rows.Close()
 
-	type scheduled struct {
-		id              int64
-		accountID       int64
-		categoryID      int64
-		userID          int64
-		createdByUserID sql.NullInt64
-		typ             string
-		amount          float64
-		currency        string
-		description     *string
-		note            *string
-		rrule           string
-		nextOccurrence  string
-		maxOccurrences  *int64
-		occurrenceCount int64
-	}
-
 	var due []scheduled
 	for rows.Next() {
 		var s scheduled
@@ -78,82 +91,90 @@ func processDue(db *sql.DB) {
 	}
 
 	for _, s := range due {
-		// Retry up to 3 times with short backoff for transient SQLite "database
-		// is locked" errors that can happen if the API is mid-write at the
-		// moment the scheduler tick fires.
-		var tx *sql.Tx
+		// Retry the entire tx body (not just Begin) on transient SQLite
+		// locked/busy errors — a writer can grab the lock between Begin and
+		// the first Exec, and without retrying the whole body those errors
+		// would cause the schedule to be skipped this tick.
 		var err error
 		for attempt := 0; attempt < 3; attempt++ {
-			tx, err = db.Begin()
-			if err == nil {
-				break
-			}
-			if !strings.Contains(strings.ToLower(err.Error()), "locked") &&
-				!strings.Contains(strings.ToLower(err.Error()), "busy") {
+			err = processOne(db, s, now)
+			if err == nil || !isLockedError(err) {
 				break
 			}
 			time.Sleep(time.Duration(50*(attempt+1)) * time.Millisecond)
 		}
 		if err != nil {
-			log.Printf("scheduler: begin tx error for scheduled %d: %v", s.id, err)
-			continue
-		}
-
-		_, err = tx.Exec(
-			`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			s.accountID, s.categoryID, s.userID, s.createdByUserID, s.typ, s.amount, s.currency, s.description, s.note, s.nextOccurrence,
-		)
-		if err != nil {
-			tx.Rollback()
-			log.Printf("scheduler: insert transaction error for scheduled %d: %v", s.id, err)
-			continue
-		}
-
-		sign := 1.0
-		if s.typ == "expense" {
-			sign = -1.0
-		}
-		if _, err := tx.Exec("UPDATE accounts SET balance = balance + ? WHERE id = ?", s.amount*sign, s.accountID); err != nil {
-			tx.Rollback()
-			log.Printf("scheduler: update balance error for scheduled %d: %v", s.id, err)
-			continue
-		}
-
-		next, pastUntil := advanceDate(s.nextOccurrence, s.rrule)
-		newCount := s.occurrenceCount + 1
-		deactivate := pastUntil || (s.maxOccurrences != nil && newCount >= *s.maxOccurrences)
-
-		active := 1
-		if deactivate {
-			active = 0
-		}
-
-		deletedAt := sql.NullTime{}
-		if deactivate {
-			deletedAt = sql.NullTime{Time: now, Valid: true}
-		}
-
-		if _, err := tx.Exec(
-			"UPDATE scheduled_transactions SET next_occurrence = ?, occurrence_count = ?, active = ?, deleted_at = ? WHERE id = ?",
-			next, newCount, active, deletedAt, s.id,
-		); err != nil {
-			tx.Rollback()
-			log.Printf("scheduler: advance next_occurrence error for scheduled %d: %v", s.id, err)
-			continue
-		}
-
-		if err := tx.Commit(); err != nil {
-			log.Printf("scheduler: commit error for scheduled %d: %v", s.id, err)
-			continue
-		}
-
-		if deactivate {
-			log.Printf("scheduler: materialized scheduled %d, deactivated after %d occurrences", s.id, newCount)
-		} else {
-			log.Printf("scheduler: materialized scheduled %d, next: %s (%d/%v)", s.id, next, newCount, s.maxOccurrences)
+			log.Printf("scheduler: scheduled %d failed: %v", s.id, err)
 		}
 	}
+}
+
+// processOne materializes a single due scheduled row inside one transaction.
+// Returns nil on success; the caller decides whether to retry.
+func processOne(db *sql.DB, s scheduled, now time.Time) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.accountID, s.categoryID, s.userID, s.createdByUserID, s.typ, s.amount, s.currency, s.description, s.note, s.nextOccurrence,
+	); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("insert transaction: %w", err)
+	}
+
+	sign := 1.0
+	if s.typ == "expense" {
+		sign = -1.0
+	}
+	if _, err := tx.Exec("UPDATE accounts SET balance = balance + ? WHERE id = ?", s.amount*sign, s.accountID); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("update balance: %w", err)
+	}
+
+	next, pastUntil := advanceDate(s.nextOccurrence, s.rrule)
+	newCount := s.occurrenceCount + 1
+	deactivate := pastUntil || (s.maxOccurrences != nil && newCount >= *s.maxOccurrences)
+
+	active := 1
+	if deactivate {
+		active = 0
+	}
+
+	deletedAt := sql.NullTime{}
+	if deactivate {
+		deletedAt = sql.NullTime{Time: now, Valid: true}
+	}
+
+	if _, err := tx.Exec(
+		"UPDATE scheduled_transactions SET next_occurrence = ?, occurrence_count = ?, active = ?, deleted_at = ? WHERE id = ?",
+		next, newCount, active, deletedAt, s.id,
+	); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("advance next_occurrence: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	if deactivate {
+		log.Printf("scheduler: materialized scheduled %d, deactivated after %d occurrences", s.id, newCount)
+	} else {
+		log.Printf("scheduler: materialized scheduled %d, next: %s (%d/%v)", s.id, next, newCount, s.maxOccurrences)
+	}
+	return nil
+}
+
+func isLockedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "locked") || strings.Contains(s, "busy")
 }
 
 // advanceDate calculates the next occurrence from the current date and rrule.

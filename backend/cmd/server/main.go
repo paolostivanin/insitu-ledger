@@ -69,6 +69,14 @@ func main() {
 	srv := &http.Server{
 		Addr:    *addr,
 		Handler: router,
+		// ReadHeaderTimeout closes the door on slowloris-style attacks where a
+		// client opens a connection and drips bytes to occupy it forever.
+		// Body read uses the longer ReadTimeout to accommodate large CSV
+		// imports and DB restores on slow connections.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       5 * time.Minute,
+		WriteTimeout:      5 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
 	}
 
 	// Graceful shutdown on SIGINT/SIGTERM

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -40,6 +41,23 @@ func AuthMiddleware(store *auth.Store) func(http.Handler) http.Handler {
 func UserIDFromContext(ctx context.Context) int64 {
 	id, _ := ctx.Value(userIDKey).(int64)
 	return id
+}
+
+// RecoverMiddleware catches panics from downstream handlers, logs them with a
+// stack trace, and returns a 500 so a single bad request does not crash the
+// process. Must be placed inside LoggingMiddleware so the 500 status is
+// captured in the access log.
+func RecoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("panic: %s %s: %v\n%s", r.Method, r.URL.Path, rec, debug.Stack())
+				// If headers were already written this is a no-op; nothing else we can do.
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // LoggingMiddleware logs method, path, status, and duration for every request.

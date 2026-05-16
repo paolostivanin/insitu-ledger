@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -30,10 +31,19 @@ func StartBackup(ctx context.Context, db *sql.DB, dataDir string, checkInterval 
 				log.Println("backup-scheduler: shutting down")
 				return
 			case <-ticker.C:
-				runBackupIfDue(db, backupDir)
+				safeRunBackupIfDue(db, backupDir)
 			}
 		}
 	}()
+}
+
+func safeRunBackupIfDue(db *sql.DB, backupDir string) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("backup-scheduler: panic recovered: %v\n%s", rec, debug.Stack())
+		}
+	}()
+	runBackupIfDue(db, backupDir)
 }
 
 func runBackupIfDue(db *sql.DB, backupDir string) {

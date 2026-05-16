@@ -152,8 +152,10 @@ func NewRouter(s *Server) http.Handler {
 	// (e.g. /login, /transactions) survive a full page load or refresh.
 	mux.Handle("/", spaHandler("static"))
 
-	// Wrap entire mux with logging, body limit, and security headers
-	return LoggingMiddleware(SecurityHeadersMiddleware(BodyLimitMiddleware(mux)))
+	// Wrap entire mux. Order matters: LoggingMiddleware must be outermost so
+	// it sees the final status (including 500s synthesized by RecoverMiddleware);
+	// RecoverMiddleware sits just inside it so the access log reflects the panic.
+	return LoggingMiddleware(RecoverMiddleware(SecurityHeadersMiddleware(BodyLimitMiddleware(mux))))
 }
 
 // spaHandler serves files from dir; for any path that does not resolve to an
