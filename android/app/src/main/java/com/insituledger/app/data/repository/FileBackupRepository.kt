@@ -235,10 +235,16 @@ class FileBackupRepository @Inject constructor(
 
 // Backup payloads come from untrusted files (any .json picked via SAF). Gson
 // is lenient and will silently fill fields with defaults, so we explicitly
-// validate every entity before upserting — invalid type strings, non-finite
-// amounts, or transactions referencing accounts/categories not present in the
-// payload would all corrupt the live DB. Returns null on success or the first
+// validate every entity before upserting — invalid type strings or non-finite
+// amounts would corrupt the live DB. Returns null on success or the first
 // problem encountered.
+//
+// We intentionally do NOT enforce FK integrity within the payload: category /
+// account deletes on Android are soft-deletes that exclude the row from
+// future exports, but existing transactions keep the now-dangling reference.
+// Rejecting such backups would lock users out of re-importing their own data
+// after any category/account cleanup. The downstream impact of a dangling id
+// is purely cosmetic (the UI shows "(unknown)").
 private val TYPE_VALUES = setOf("income", "expense")
 private val DATE_PREFIX = Regex("^\\d{4}-\\d{2}-\\d{2}")
 
@@ -260,12 +266,6 @@ internal fun validateBackup(backup: BackupData): String? {
         if (c.parentId != null && c.parentId <= 0) return "categories[$i]: invalid parent_id ${c.parentId}"
         if (!categoryIds.add(c.id)) return "categories[$i]: duplicate id ${c.id}"
     }
-    // Category parent must resolve within the payload (or be null).
-    backup.categories.forEachIndexed { i, c ->
-        if (c.parentId != null && c.parentId !in categoryIds) {
-            return "categories[$i]: parent_id ${c.parentId} not present in payload"
-        }
-    }
 
     backup.transactions.forEachIndexed { i, t ->
         if (t.id <= 0) return "transactions[$i]: invalid id ${t.id}"
@@ -273,8 +273,6 @@ internal fun validateBackup(backup: BackupData): String? {
         if (!t.amount.isFinite() || t.amount <= 0) return "transactions[$i]: amount must be positive and finite"
         if (t.currency.isBlank()) return "transactions[$i]: currency is empty"
         if (!DATE_PREFIX.containsMatchIn(t.date)) return "transactions[$i]: unparseable date '${t.date}'"
-        if (t.accountId !in accountIds) return "transactions[$i]: account_id ${t.accountId} not present in payload"
-        if (t.categoryId !in categoryIds) return "transactions[$i]: category_id ${t.categoryId} not present in payload"
     }
 
     backup.scheduledTransactions.forEachIndexed { i, s ->
@@ -284,8 +282,6 @@ internal fun validateBackup(backup: BackupData): String? {
         if (s.currency.isBlank()) return "scheduled[$i]: currency is empty"
         if (!s.rrule.startsWith("FREQ=")) return "scheduled[$i]: rrule must start with FREQ="
         if (!DATE_PREFIX.containsMatchIn(s.nextOccurrence)) return "scheduled[$i]: unparseable next_occurrence '${s.nextOccurrence}'"
-        if (s.accountId !in accountIds) return "scheduled[$i]: account_id ${s.accountId} not present in payload"
-        if (s.categoryId !in categoryIds) return "scheduled[$i]: category_id ${s.categoryId} not present in payload"
     }
 
     return null

@@ -30,16 +30,16 @@ class ValidateBackupTest {
         assertNull(validateBackup(backup(emptyList(), emptyList(), emptyList(), emptyList())))
     }
 
-    @Test fun `transaction referencing missing account is rejected`() {
-        val result = validateBackup(backup(transactions = listOf(tx(accountId = 999))))
-        assertNotNull(result)
-        assertTrue(result!!, result.contains("account_id 999"))
+    // FK integrity is intentionally NOT enforced — soft-deleting a category or
+    // account on Android leaves live transactions referencing a now-absent id,
+    // so a legitimate self-generated backup will contain dangling references
+    // after any reorganization. Importing must accept these.
+    @Test fun `transaction with dangling account_id is accepted (soft-delete leak)`() {
+        assertNull(validateBackup(backup(transactions = listOf(tx(accountId = 999)))))
     }
 
-    @Test fun `transaction referencing missing category is rejected`() {
-        val result = validateBackup(backup(transactions = listOf(tx(categoryId = 999))))
-        assertNotNull(result)
-        assertTrue(result!!, result.contains("category_id 999"))
+    @Test fun `transaction with dangling category_id is accepted (soft-delete leak)`() {
+        assertNull(validateBackup(backup(transactions = listOf(tx(categoryId = 999)))))
     }
 
     @Test fun `non-finite amount is rejected`() {
@@ -83,10 +83,8 @@ class ValidateBackupTest {
         assertTrue(result!!, result.contains("FREQ="))
     }
 
-    @Test fun `category with unknown parent is rejected`() {
-        val result = validateBackup(backup(categories = listOf(cat(1, parentId = 999))))
-        assertNotNull(result)
-        assertTrue(result!!, result.contains("parent_id 999"))
+    @Test fun `category with dangling parent_id is accepted (soft-delete leak)`() {
+        assertNull(validateBackup(backup(categories = listOf(cat(1, parentId = 999)))))
     }
 
     @Test fun `category with valid parent passes`() {
