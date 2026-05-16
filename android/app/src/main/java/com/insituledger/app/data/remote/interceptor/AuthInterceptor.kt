@@ -68,10 +68,12 @@ class AuthInterceptor @Inject constructor(
 
         val response = chain.proceed(newRequest)
 
-        // Auto-logout on 401 (except for login endpoint)
+        // Auto-logout on 401 (except for login endpoint). Use clearAuthSession
+        // so install-wide preferences (theme, biometric, sync mode, auto-backup
+        // schedule, mtls config) survive a transient token rejection.
         if (response.code == 401 && !original.url.encodedPath.endsWith("auth/login")) {
             cachedToken = null
-            scope.launch { userPreferences.clearAll() }
+            scope.launch { userPreferences.clearAuthSession() }
         }
 
         return response

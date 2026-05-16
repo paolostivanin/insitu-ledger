@@ -276,5 +276,23 @@ class UserPreferences @Inject constructor(
         }
     }
 
+    // clearAuthSession wipes only the per-session identity & token so a
+    // transient 401 (token expired, server restarted, brief auth-DB blip) does
+    // NOT also reset the user's theme, biometric, sync mode, auto-backup
+    // schedule, or any other install-wide preference. Use this on auth
+    // interceptor 401; use clearAll() for an explicit user-initiated logout.
+    suspend fun clearAuthSession() {
+        secureStore.remove(SecureStore.KEY_TOKEN)
+        context.dataStore.edit { prefs ->
+            prefs.remove(USER_ID)
+            prefs.remove(USER_NAME)
+            prefs.remove(IS_ADMIN)
+            prefs.remove(FORCE_PASSWORD_CHANGE)
+            prefs.remove(TOTP_ENABLED)
+            prefs.remove(LAST_SYNC_VERSION)
+            prefs.remove(SHARED_OWNER_ID)
+        }
+    }
+
     fun getTokenImmediate(): String? = secureStore.getStringBlocking(SecureStore.KEY_TOKEN)
 }

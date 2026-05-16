@@ -174,6 +174,8 @@ class FileBackupRepository @Inject constructor(
                 return Result.failure(Exception("Backup version ${backup.version} is not supported."))
             }
 
+            validateBackup(backup)?.let { return Result.failure(Exception(it)) }
+
             // Import categories first (transactions reference them)
             val categoryEntities = backup.categories.map {
                 CategoryEntity(
@@ -229,4 +231,62 @@ class FileBackupRepository @Inject constructor(
             Result.failure(e)
         }
     }
+}
+
+// Backup payloads come from untrusted files (any .json picked via SAF). Gson
+// is lenient and will silently fill fields with defaults, so we explicitly
+// validate every entity before upserting — invalid type strings, non-finite
+// amounts, or transactions referencing accounts/categories not present in the
+// payload would all corrupt the live DB. Returns null on success or the first
+// problem encountered.
+private val TYPE_VALUES = setOf("income", "expense")
+private val DATE_PREFIX = Regex("^\\d{4}-\\d{2}-\\d{2}")
+
+internal fun validateBackup(backup: BackupData): String? {
+    val accountIds = HashSet<Long>(backup.accounts.size)
+    backup.accounts.forEachIndexed { i, a ->
+        if (a.id <= 0) return "accounts[$i]: invalid id ${a.id}"
+        if (a.name.isBlank()) return "accounts[$i]: name is empty"
+        if (a.currency.isBlank()) return "accounts[$i]: currency is empty"
+        if (!a.balance.isFinite()) return "accounts[$i]: balance is not a finite number"
+        if (!accountIds.add(a.id)) return "accounts[$i]: duplicate id ${a.id}"
+    }
+
+    val categoryIds = HashSet<Long>(backup.categories.size)
+    backup.categories.forEachIndexed { i, c ->
+        if (c.id <= 0) return "categories[$i]: invalid id ${c.id}"
+        if (c.name.isBlank()) return "categories[$i]: name is empty"
+        if (c.type !in TYPE_VALUES) return "categories[$i]: invalid type '${c.type}'"
+        if (c.parentId != null && c.parentId <= 0) return "categories[$i]: invalid parent_id ${c.parentId}"
+        if (!categoryIds.add(c.id)) return "categories[$i]: duplicate id ${c.id}"
+    }
+    // Category parent must resolve within the payload (or be null).
+    backup.categories.forEachIndexed { i, c ->
+        if (c.parentId != null && c.parentId !in categoryIds) {
+            return "categories[$i]: parent_id ${c.parentId} not present in payload"
+        }
+    }
+
+    backup.transactions.forEachIndexed { i, t ->
+        if (t.id <= 0) return "transactions[$i]: invalid id ${t.id}"
+        if (t.type !in TYPE_VALUES) return "transactions[$i]: invalid type '${t.type}'"
+        if (!t.amount.isFinite() || t.amount <= 0) return "transactions[$i]: amount must be positive and finite"
+        if (t.currency.isBlank()) return "transactions[$i]: currency is empty"
+        if (!DATE_PREFIX.containsMatchIn(t.date)) return "transactions[$i]: unparseable date '${t.date}'"
+        if (t.accountId !in accountIds) return "transactions[$i]: account_id ${t.accountId} not present in payload"
+        if (t.categoryId !in categoryIds) return "transactions[$i]: category_id ${t.categoryId} not present in payload"
+    }
+
+    backup.scheduledTransactions.forEachIndexed { i, s ->
+        if (s.id <= 0) return "scheduled[$i]: invalid id ${s.id}"
+        if (s.type !in TYPE_VALUES) return "scheduled[$i]: invalid type '${s.type}'"
+        if (!s.amount.isFinite() || s.amount <= 0) return "scheduled[$i]: amount must be positive and finite"
+        if (s.currency.isBlank()) return "scheduled[$i]: currency is empty"
+        if (!s.rrule.startsWith("FREQ=")) return "scheduled[$i]: rrule must start with FREQ="
+        if (!DATE_PREFIX.containsMatchIn(s.nextOccurrence)) return "scheduled[$i]: unparseable next_occurrence '${s.nextOccurrence}'"
+        if (s.accountId !in accountIds) return "scheduled[$i]: account_id ${s.accountId} not present in payload"
+        if (s.categoryId !in categoryIds) return "scheduled[$i]: category_id ${s.categoryId} not present in payload"
+    }
+
+    return null
 }

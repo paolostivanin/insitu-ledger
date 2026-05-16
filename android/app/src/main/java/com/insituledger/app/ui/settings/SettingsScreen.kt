@@ -24,6 +24,8 @@ import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+private const val MIN_BACKUP_PASSPHRASE_LENGTH = 12
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -681,6 +683,10 @@ private fun BackupPassphraseDialog(
     var passphrase by remember { mutableStateOf("") }
     var confirmation by remember { mutableStateOf("") }
     val mismatch = passphrase.isNotEmpty() && confirmation.isNotEmpty() && passphrase != confirmation
+    // 200k PBKDF2 iterations is fast against a low-entropy passphrase; require
+    // at least 12 characters so the derived key is meaningfully expensive to
+    // brute-force on stolen backup files.
+    val tooShort = passphrase.isNotEmpty() && passphrase.length < MIN_BACKUP_PASSPHRASE_LENGTH
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -696,9 +702,10 @@ private fun BackupPassphraseDialog(
                 OutlinedTextField(
                     value = passphrase,
                     onValueChange = { passphrase = it },
-                    label = { Text("Passphrase") },
+                    label = { Text("Passphrase (min $MIN_BACKUP_PASSPHRASE_LENGTH chars)") },
                     visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true
+                    singleLine = true,
+                    isError = tooShort
                 )
                 OutlinedTextField(
                     value = confirmation,
@@ -708,6 +715,13 @@ private fun BackupPassphraseDialog(
                     singleLine = true,
                     isError = mismatch
                 )
+                if (tooShort) {
+                    Text(
+                        "Passphrase must be at least $MIN_BACKUP_PASSPHRASE_LENGTH characters.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 if (mismatch) {
                     Text(
                         "Passphrases do not match.",
@@ -720,7 +734,7 @@ private fun BackupPassphraseDialog(
         confirmButton = {
             Button(
                 onClick = { onSave(passphrase) },
-                enabled = passphrase.isNotEmpty() && passphrase == confirmation
+                enabled = passphrase.length >= MIN_BACKUP_PASSPHRASE_LENGTH && passphrase == confirmation
             ) {
                 Text("Save")
             }
