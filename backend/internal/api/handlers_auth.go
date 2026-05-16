@@ -180,6 +180,17 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // handleChangePassword lets any user change their own password.
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	// Per-user throttle on the current-password check — without this, a stolen
+	// session token can be used to brute-force the password from inside the
+	// authenticated API. Shares the limiter with login-time TOTP verification
+	// so all sensitive per-user actions draw from one budget.
+	limitKey := strconv.FormatInt(userID, 10)
+	if !s.TOTPRateLimiter.Allow(limitKey) {
+		http.Error(w, "too many attempts, try again later", http.StatusTooManyRequests)
+		return
+	}
+
 	var req changePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -202,6 +213,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "current password is incorrect", http.StatusUnauthorized)
 		return
 	}
+	s.TOTPRateLimiter.Reset(limitKey)
 
 	newHash, err := auth.HashPassword(req.NewPassword)
 	if err != nil {
@@ -313,12 +325,21 @@ func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
 // --- 2FA (TOTP) ---
 
 // handleTOTPSetup generates a new TOTP secret and returns a QR code.
+// Only valid while 2FA is not yet enabled — rotating a live 2FA secret must
+// go through handleTOTPReset, which requires password confirmation. Without
+// this guard, a stolen session token could silently replace the secret and
+// lock the legitimate user out of their account.
 func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
 	var email string
-	if err := s.DB.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&email); err != nil {
+	var totpEnabled bool
+	if err := s.DB.QueryRow("SELECT email, totp_enabled FROM users WHERE id = ?", userID).Scan(&email, &totpEnabled); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if totpEnabled {
+		http.Error(w, "2FA already enabled — use reset to rotate", http.StatusConflict)
 		return
 	}
 
@@ -362,6 +383,12 @@ func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
+	limitKey := strconv.FormatInt(userID, 10)
+	if !s.TOTPRateLimiter.Allow(limitKey) {
+		http.Error(w, "too many attempts, try again later", http.StatusTooManyRequests)
+		return
+	}
+
 	var req struct {
 		Code string `json:"code"`
 	}
@@ -384,6 +411,7 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid code — try again", http.StatusBadRequest)
 		return
 	}
+	s.TOTPRateLimiter.Reset(limitKey)
 
 	if _, err := s.DB.Exec("UPDATE users SET totp_enabled = 1 WHERE id = ?", userID); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -396,6 +424,12 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 // The user must verify the new code via handleTOTPVerify to re-enable.
 func (s *Server) handleTOTPReset(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
+
+	limitKey := strconv.FormatInt(userID, 10)
+	if !s.TOTPRateLimiter.Allow(limitKey) {
+		http.Error(w, "too many attempts, try again later", http.StatusTooManyRequests)
+		return
+	}
 
 	var req struct {
 		Password string `json:"password"`
@@ -415,6 +449,7 @@ func (s *Server) handleTOTPReset(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "incorrect password", http.StatusUnauthorized)
 		return
 	}
+	s.TOTPRateLimiter.Reset(limitKey)
 
 	// Disable current 2FA
 	if _, err := s.DB.Exec("UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?", userID); err != nil {
