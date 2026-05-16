@@ -228,15 +228,22 @@ func advanceDate(current string, rrule string) (string, bool) {
 //
 //	20261231T235959Z, 20261231T235959, 20261231, 2026-12-31, 2026-12-31T23:59:59
 func parseUntil(s string) (time.Time, bool) {
-	for _, layout := range []string{
-		"20060102T150405Z",
-		"20060102T150405",
-		"20060102",
-		"2006-01-02T15:04:05",
-		"2006-01-02T15:04",
-		"2006-01-02",
+	for _, e := range []struct {
+		layout   string
+		dateOnly bool
+	}{
+		{"20060102T150405Z", false},
+		{"20060102T150405", false},
+		{"20060102", true},
+		{"2006-01-02T15:04:05", false},
+		{"2006-01-02T15:04", false},
+		{"2006-01-02", true},
 	} {
-		if t, err := time.Parse(layout, s); err == nil {
+		if t, err := time.Parse(e.layout, s); err == nil {
+			if e.dateOnly {
+				// RFC 5545: a date-only UNTIL is inclusive of the whole day.
+				t = t.Add(24*time.Hour - time.Nanosecond)
+			}
 			return t, true
 		}
 	}

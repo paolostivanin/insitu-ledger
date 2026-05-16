@@ -162,3 +162,63 @@ func TestProcessDueForwardsNullCreatedBy(t *testing.T) {
 		t.Errorf("created_by_user_id = %d, want NULL", createdBy.Int64)
 	}
 }
+
+// TestParseUntilDateOnlyInclusive: per RFC 5545, a date-only UNTIL value is
+// inclusive of the whole day, so it must parse as the last instant of that day
+// rather than midnight (which would exclude any later time on the same date).
+func TestParseUntilDateOnlyInclusive(t *testing.T) {
+	want := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC).Add(24*time.Hour - time.Nanosecond)
+	for _, s := range []string{"20261231", "2026-12-31"} {
+		got, ok := parseUntil(s)
+		if !ok {
+			t.Errorf("parseUntil(%q) failed", s)
+			continue
+		}
+		if !got.Equal(want) {
+			t.Errorf("parseUntil(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+// TestParseUntilExplicitTimePreserved: when UNTIL carries an explicit time, it
+// must be honored verbatim, not extended to end-of-day.
+func TestParseUntilExplicitTimePreserved(t *testing.T) {
+	cases := map[string]time.Time{
+		"20261231T235959Z":    time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC),
+		"20261231T120000":     time.Date(2026, 12, 31, 12, 0, 0, 0, time.UTC),
+		"2026-12-31T15:30":    time.Date(2026, 12, 31, 15, 30, 0, 0, time.UTC),
+		"2026-12-31T15:30:45": time.Date(2026, 12, 31, 15, 30, 45, 0, time.UTC),
+	}
+	for s, want := range cases {
+		got, ok := parseUntil(s)
+		if !ok {
+			t.Errorf("parseUntil(%q) failed", s)
+			continue
+		}
+		if !got.Equal(want) {
+			t.Errorf("parseUntil(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+// TestAdvanceDateDailyUntilDateOnlyIncludesUntilDay: regression test for the
+// date-only UNTIL inclusivity bug. Before the fix, a daily schedule with
+// UNTIL=20261231 would deactivate after Dec 30 fires, because the advanced
+// Dec 31 09:00 was incorrectly flagged as past UNTIL (compared to midnight).
+func TestAdvanceDateDailyUntilDateOnlyIncludesUntilDay(t *testing.T) {
+	next, pastUntil := advanceDate("2026-12-30T09:00", "FREQ=DAILY;UNTIL=20261231")
+	if next != "2026-12-31T09:00" {
+		t.Errorf("next = %q, want %q", next, "2026-12-31T09:00")
+	}
+	if pastUntil {
+		t.Errorf("pastUntil = true, want false (Dec 31 is inclusive)")
+	}
+
+	next, pastUntil = advanceDate("2026-12-31T09:00", "FREQ=DAILY;UNTIL=20261231")
+	if next != "2027-01-01T09:00" {
+		t.Errorf("next = %q, want %q", next, "2027-01-01T09:00")
+	}
+	if !pastUntil {
+		t.Errorf("pastUntil = false, want true (Jan 1 is past Dec 31)")
+	}
+}
