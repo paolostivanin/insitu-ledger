@@ -49,3 +49,16 @@ export function setAccountFilter(id: number | null) {
 export function clearAccountFilter() {
 	currentAccountId.set(null);
 }
+
+// Logout helper: drops every persisted per-owner filter so the next user on
+// the same browser does not inherit the previous user's account selection.
+export function clearAllAccountFilters() {
+	if (typeof localStorage === 'undefined') return;
+	const keys: string[] = [];
+	for (let i = 0; i < localStorage.length; i++) {
+		const k = localStorage.key(i);
+		if (k && k.startsWith('accountFilter:')) keys.push(k);
+	}
+	for (const k of keys) localStorage.removeItem(k);
+	currentAccountId.set(null);
+}

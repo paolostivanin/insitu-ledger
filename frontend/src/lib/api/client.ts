@@ -1,3 +1,6 @@
+import { goto } from '$app/navigation';
+import { addToast } from '$lib/stores/toast';
+
 const BASE = '/api';
 
 interface RequestOptions {
@@ -87,7 +90,13 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 	if (res.status === 401 && !path.startsWith('/auth/login')) {
 		clearToken();
 		clearApiCache();
-		if (typeof window !== 'undefined') window.location.href = '/login';
+		if (typeof window !== 'undefined') {
+			// Soft-navigate so in-progress form input on the source page isn't
+			// dumped by a full page reload. The throw below still lets each
+			// caller render its own "session expired" state if it wants to.
+			addToast('Your session has expired. Please log in again.', 'error', 6000);
+			goto('/login', { replaceState: true });
+		}
 		throw new ApiError(401, 'Your session has expired. Please log in again.');
 	}
 
@@ -452,7 +461,7 @@ export const csv = {
 		const token = getToken();
 		if (token) headers['Authorization'] = `Bearer ${token}`;
 		const res = await fetch(url, { headers });
-		if (!res.ok) throw new ApiError(res.status, await res.text());
+		if (!res.ok) throw new ApiError(res.status, friendlyError(res.status, await res.text()));
 		const blob = await res.blob();
 		const a = document.createElement('a');
 		a.href = URL.createObjectURL(blob);
@@ -468,7 +477,7 @@ export const csv = {
 		const form = new FormData();
 		form.append('file', file);
 		const res = await fetch(url, { method: 'POST', headers, body: form });
-		if (!res.ok) throw new ApiError(res.status, await res.text());
+		if (!res.ok) throw new ApiError(res.status, friendlyError(res.status, await res.text()));
 		return res.json() as Promise<{ imported: number }>;
 	}
 };
@@ -517,7 +526,7 @@ export const admin = {
 		const token = getToken();
 		if (token) headers['Authorization'] = `Bearer ${token}`;
 		const res = await fetch(url, { headers });
-		if (!res.ok) throw new ApiError(res.status, await res.text());
+		if (!res.ok) throw new ApiError(res.status, friendlyError(res.status, await res.text()));
 		const blob = await res.blob();
 		const a = document.createElement('a');
 		a.href = URL.createObjectURL(blob);

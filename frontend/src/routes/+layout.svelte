@@ -7,7 +7,8 @@
 	import { auth as authApi, shared as sharedApi, preferences as prefsApi, clearToken, clearApiCache, type AccessibleOwner } from '$lib/api/client';
 	import { initTheme } from '$lib/stores/theme';
 	import { sharedOwnerUserId, setSharedOwner, clearSharedOwner, accessibleOwners as accessibleOwnersStore } from '$lib/stores/shared';
-	import { setAccountFilter } from '$lib/stores/accountFilter';
+	import { setAccountFilter, clearAllAccountFilters } from '$lib/stores/accountFilter';
+	import { addToast } from '$lib/stores/toast';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import ToastContainer from '$lib/components/ToastContainer.svelte';
 
@@ -129,15 +130,27 @@
 	}
 
 	async function logout() {
+		let serverUnreachable = false;
 		try {
 			await authApi.logout();
-		} catch {
-			// ignore
+		} catch (e) {
+			// A failed POST /auth/logout could leave the server-side session live.
+			// We still clear locally — the user has asked to log out — but warn
+			// them so they can act (e.g. revoke from another device) if needed.
+			serverUnreachable = true;
 		}
 		clearToken();
 		clearAuth();
+		clearSharedOwner();
+		clearAllAccountFilters();
+		if (typeof localStorage !== 'undefined') {
+			localStorage.removeItem('lastUsedAccountId');
+		}
 		clearApiCache();
-		goto('/login');
+		if (serverUnreachable) {
+			addToast('Logged out locally — the server could not be reached. Your session may still be active.', 'error', 6000);
+		}
+		goto('/login', { replaceState: true });
 	}
 </script>
 

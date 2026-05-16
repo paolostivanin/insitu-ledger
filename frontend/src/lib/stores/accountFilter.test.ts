@@ -43,4 +43,22 @@ describe('accountFilter store', () => {
 		expect(get(currentAccountId)).toBeNull();
 		expect(localStorage.getItem('accountFilter:self')).toBeNull();
 	});
+
+	it('clearAllAccountFilters drops every per-owner key (logout hygiene)', async () => {
+		// Seed several owner-scoped filters left behind by a prior session.
+		localStorage.setItem('accountFilter:self', '1');
+		localStorage.setItem('accountFilter:owner:5', '2');
+		localStorage.setItem('accountFilter:owner:7', '3');
+		// Unrelated keys must be left alone — only accountFilter:* is namespaced.
+		localStorage.setItem('theme', 'dark');
+
+		const { currentAccountId, clearAllAccountFilters } = await import('./accountFilter');
+		clearAllAccountFilters();
+
+		expect(get(currentAccountId)).toBeNull();
+		expect(localStorage.getItem('accountFilter:self')).toBeNull();
+		expect(localStorage.getItem('accountFilter:owner:5')).toBeNull();
+		expect(localStorage.getItem('accountFilter:owner:7')).toBeNull();
+		expect(localStorage.getItem('theme')).toBe('dark');
+	});
 });
