@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { page } from '$app/stores';
 	import { transactions, categories, accounts, batch, csv, scheduled, type Transaction, type Category, type Account, type AutocompleteSuggestion } from '$lib/api/client';
 	import CategoryPicker from '$lib/components/CategoryPicker.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -130,6 +131,8 @@
 		prevOwnerId = $sharedOwnerUserId;
 		prevAccountId = $currentAccountId;
 		mounted = true;
+		const initialCat = $page.url.searchParams.get('category_id');
+		if (initialCat) filterCat = initialCat;
 		loadAll();
 		window.addEventListener('shortcut-new', onShortcutNew);
 		window.addEventListener('shortcut-close', onShortcutClose);

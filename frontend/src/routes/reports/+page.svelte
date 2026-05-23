@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { reports, type CategoryReport, type MonthReport, type TrendReport } from '$lib/api/client';
 	import { theme } from '$lib/stores/theme';
 	import { sharedOwnerUserId } from '$lib/stores/shared';
@@ -41,11 +42,18 @@
 		if (barChart) barChart.dispose();
 		if (trendChart) trendChart.dispose();
 		pieChart = echarts.init(pieChartEl, echartsTheme);
+		pieChart.on('click', handlePieClick);
 		barChart = echarts.init(barChartEl, echartsTheme);
 		trendChart = echarts.init(trendChartEl, echartsTheme);
 		renderPie();
 		renderBar();
 		renderTrend();
+	}
+
+	function handlePieClick(params: any) {
+		const cat = categoryData[params.dataIndex];
+		if (!cat) return;
+		void goto(`/transactions?category_id=${cat.category_id}`);
 	}
 
 	const unsubTheme = theme.subscribe(() => {
@@ -87,6 +95,7 @@
 
 		const echartsTheme = getEchartsTheme();
 		pieChart = echarts.init(pieChartEl, echartsTheme);
+		pieChart.on('click', handlePieClick);
 		barChart = echarts.init(barChartEl, echartsTheme);
 		trendChart = echarts.init(trendChartEl, echartsTheme);
 
@@ -128,6 +137,7 @@
 			series: [{
 				type: 'pie',
 				radius: ['40%', '70%'],
+				cursor: 'pointer',
 				itemStyle: { borderRadius: 6, borderColor: getCssVar('--bg-card'), borderWidth: 2 },
 				label: { color: getCssVar('--text') },
 				data: categoryData.map(c => ({
