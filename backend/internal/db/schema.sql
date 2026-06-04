@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS categories (
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,
-    sync_version INTEGER NOT NULL DEFAULT 0
+    sync_version INTEGER NOT NULL DEFAULT 0,
+    client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS accounts (
@@ -74,7 +75,12 @@ CREATE TABLE IF NOT EXISTS accounts (
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,
-    sync_version INTEGER NOT NULL DEFAULT 0
+    sync_version INTEGER NOT NULL DEFAULT 0,
+    -- Idempotency key for sync clients (Android pending-ops queue). When a
+    -- POST repeats with the same (user_id, client_id), the handler returns
+    -- the existing row instead of inserting a duplicate. NULL for rows
+    -- created by clients that don't generate keys (e.g. web frontend).
+    client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -97,7 +103,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,
-    sync_version INTEGER NOT NULL DEFAULT 0
+    sync_version INTEGER NOT NULL DEFAULT 0,
+    client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS scheduled_transactions (
@@ -120,7 +127,8 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,
-    sync_version INTEGER NOT NULL DEFAULT 0
+    sync_version INTEGER NOT NULL DEFAULT 0,
+    client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS shared_account_access (
@@ -163,6 +171,10 @@ CREATE INDEX IF NOT EXISTS idx_transactions_user_sync ON transactions(user_id, s
 CREATE INDEX IF NOT EXISTS idx_categories_user_sync ON categories(user_id, sync_version);
 CREATE INDEX IF NOT EXISTS idx_accounts_user_sync ON accounts(user_id, sync_version);
 CREATE INDEX IF NOT EXISTS idx_scheduled_user_sync ON scheduled_transactions(user_id, sync_version);
+
+-- Idempotency-key partial unique indexes are created in db.Open() after the
+-- ALTER TABLE migrations that add the client_id columns, so they don't fail
+-- against legacy databases on first boot. See idempotencyIndexes in db.go.
 
 -- Backup schedule settings (singleton row)
 CREATE TABLE IF NOT EXISTS backup_settings (

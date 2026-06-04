@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -73,7 +74,8 @@ class CategoryRepository @Inject constructor(
                 entityType = "category",
                 operation = "CREATE",
                 entityId = localId,
-                payloadJson = gson.toJson(input)
+                payloadJson = gson.toJson(input),
+                clientId = UUID.randomUUID().toString()
             ))
             syncManager.triggerImmediateSync()
         }

@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.16.4"
+  version: "1.17.0"
 
 servers:
   - url: /api
@@ -162,6 +162,13 @@ components:
         date:
           type: string
           format: date
+        client_id:
+          type: string
+          description: >-
+            Optional client-generated UUID. When non-empty, a repeat POST with
+            the same `(created_by_user_id, client_id)` returns the original row
+            (HTTP 200) instead of inserting a duplicate. Used by the Android
+            pending-operations queue to make sync retries safe.
 
     Category:
       type: object
@@ -214,6 +221,11 @@ components:
           type: string
         color:
           type: string
+        client_id:
+          type: string
+          description: >-
+            Optional client-generated UUID for idempotent CREATE. See
+            TransactionInput.client_id. Scoped by `(user_id, client_id)`.
 
     Account:
       type: object
@@ -267,6 +279,11 @@ components:
             Honored only on POST as the account's opening balance (defaults
             to 0 when omitted). Ignored on PUT — after creation, balance is
             derived from transactions.
+        client_id:
+          type: string
+          description: >-
+            Optional client-generated UUID for idempotent CREATE. See
+            TransactionInput.client_id. Scoped by `(user_id, client_id)`.
 
     ScheduledTransaction:
       type: object
@@ -362,6 +379,11 @@ components:
           description: >-
             Optional. Omit on create to default to true. On update, omit to keep
             the existing value, or send false/true to pause/resume.
+        client_id:
+          type: string
+          description: >-
+            Optional client-generated UUID for idempotent CREATE. Scoped by
+            `(created_by_user_id, client_id)` like TransactionInput.
 
     SharedAccess:
       type: object

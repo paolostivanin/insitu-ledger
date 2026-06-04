@@ -53,6 +53,10 @@ func Open(dataDir string) (*sql.DB, error) {
 		"ALTER TABLE users ADD COLUMN default_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
 		"ALTER TABLE transactions ADD COLUMN created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
 		"ALTER TABLE scheduled_transactions ADD COLUMN created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
+		"ALTER TABLE transactions ADD COLUMN client_id TEXT",
+		"ALTER TABLE accounts ADD COLUMN client_id TEXT",
+		"ALTER TABLE categories ADD COLUMN client_id TEXT",
+		"ALTER TABLE scheduled_transactions ADD COLUMN client_id TEXT",
 	}
 	for _, m := range migrations {
 		if _, err := conn.Exec(m); err != nil {
@@ -61,6 +65,27 @@ func Open(dataDir string) (*sql.DB, error) {
 				conn.Close()
 				return nil, fmt.Errorf("migration error: %w", err)
 			}
+		}
+	}
+
+	// Idempotency-key partial unique indexes. Created here (post-ALTER) so a
+	// legacy DB that didn't have client_id columns gets them added first.
+	// Scope = *creator* for transactions/scheduled (so two co-owners' UUIDs
+	// don't collide); user_id for accounts/categories (not shareable on create).
+	idempotencyIndexes := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_client_id
+		 ON transactions(created_by_user_id, client_id) WHERE client_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduled_client_id
+		 ON scheduled_transactions(created_by_user_id, client_id) WHERE client_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_client_id
+		 ON accounts(user_id, client_id) WHERE client_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_client_id
+		 ON categories(user_id, client_id) WHERE client_id IS NOT NULL`,
+	}
+	for _, idx := range idempotencyIndexes {
+		if _, err := conn.Exec(idx); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("idempotency index: %w", err)
 		}
 	}
 

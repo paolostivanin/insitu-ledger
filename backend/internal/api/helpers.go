@@ -271,6 +271,17 @@ func writeAuthError(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), http.StatusBadRequest)
 }
 
+// nullableString stores an empty string as SQL NULL. Used for optional
+// columns like client_id where the partial unique index on (..., client_id)
+// requires NULL (not "") for legacy/non-syncing clients so they don't all
+// collide on the empty string.
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // sqlInPlaceholders returns "?,?,?" for n>0 or "NULL" for n==0 (so a
 // resulting "id IN (NULL)" matches no rows without breaking SQL syntax).
 func sqlInPlaceholders(n int) string {

@@ -33,6 +33,9 @@ interface ScheduledTransactionDao {
     @Query("UPDATE scheduled_transactions SET id = :newId WHERE id = :oldId")
     suspend fun updateId(oldId: Long, newId: Long)
 
+    @Query("UPDATE scheduled_transactions SET is_local_only = 0 WHERE id = :id")
+    suspend fun clearLocalOnly(id: Long)
+
     @Query("UPDATE scheduled_transactions SET account_id = :newId WHERE account_id = :oldId")
     suspend fun updateAccountId(oldId: Long, newId: Long)
 

@@ -81,6 +81,9 @@ interface TransactionDao {
     @Query("UPDATE transactions SET id = :newId WHERE id = :oldId")
     suspend fun updateId(oldId: Long, newId: Long)
 
+    @Query("UPDATE transactions SET is_local_only = 0 WHERE id = :id")
+    suspend fun clearLocalOnly(id: Long)
+
     @Query("UPDATE transactions SET account_id = :newId WHERE account_id = :oldId")
     suspend fun updateAccountId(oldId: Long, newId: Long)
 

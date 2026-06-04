@@ -1,7 +1,9 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 )
@@ -19,6 +21,10 @@ type scheduledRequest struct {
 	MaxOccurrences *int64  `json:"max_occurrences"`
 	// Optional: omit on create (defaults true via DB), omit on update to keep existing value.
 	Active *bool `json:"active"`
+	// Optional client-generated UUID for idempotent CREATE; see
+	// createTransactionRequest.ClientID for the rationale. Scoped by
+	// created_by_user_id because schedules can land in shared accounts.
+	ClientID string `json:"client_id,omitempty"`
 }
 
 func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
@@ -132,10 +138,29 @@ func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 	if req.Active != nil && !*req.Active {
 		active = 0
 	}
+
+	if req.ClientID != "" {
+		var existingID int64
+		err := s.DB.QueryRow(
+			`SELECT id FROM scheduled_transactions WHERE created_by_user_id = ? AND client_id = ? LIMIT 1`,
+			userID, req.ClientID,
+		).Scan(&existingID)
+		if err == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{"id": existingID})
+			return
+		} else if err != sql.ErrNoRows {
+			log.Printf("idempotency lookup error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	result, err := s.DB.Exec(
-		`INSERT INTO scheduled_transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences, active)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences, active,
+		`INSERT INTO scheduled_transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences, active, client_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences, active, nullableString(req.ClientID),
 	)
 	if err != nil {
 		http.Error(w, "failed to create scheduled transaction", http.StatusInternalServerError)

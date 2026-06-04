@@ -16,7 +16,7 @@ import com.insituledger.app.data.local.db.entity.*
         ScheduledTransactionEntity::class,
         PendingOperationEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 @androidx.room.TypeConverters(Converters::class)
@@ -78,6 +78,15 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("UPDATE scheduled_transactions SET created_by_user_id = user_id WHERE created_by_user_id IS NULL")
                 db.execSQL("ALTER TABLE accounts ADD COLUMN owner_name TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE accounts ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        // v1.27.0 — client_id idempotency key on pending ops. Lets retries of
+        // the same CREATE dedupe server-side (backend v1.17.0+) so a re-login
+        // after a silent 401 doesn't multiply offline-created rows.
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_operations ADD COLUMN client_id TEXT")
             }
         }
     }

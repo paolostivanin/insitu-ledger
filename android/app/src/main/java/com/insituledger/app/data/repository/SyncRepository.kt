@@ -9,6 +9,7 @@ import com.insituledger.app.data.remote.api.*
 import com.insituledger.app.data.remote.dto.*
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.first
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -56,7 +57,8 @@ class SyncRepository @Inject constructor(
     private suspend fun pushAccountOp(op: PendingOperationEntity): Boolean {
         return when (op.operation) {
             "CREATE" -> {
-                val input = gson.fromJson(op.payloadJson, AccountInput::class.java)
+                val stored = gson.fromJson(op.payloadJson, AccountInput::class.java)
+                val input = stored.copy(clientId = op.clientId)
                 val response = accountApi.create(input)
                 if (response.isSuccessful) {
                     val serverId = response.body()?.id ?: return false
@@ -82,7 +84,8 @@ class SyncRepository @Inject constructor(
     private suspend fun pushCategoryOp(op: PendingOperationEntity): Boolean {
         return when (op.operation) {
             "CREATE" -> {
-                val input = gson.fromJson(op.payloadJson, CategoryInput::class.java)
+                val stored = gson.fromJson(op.payloadJson, CategoryInput::class.java)
+                val input = stored.copy(clientId = op.clientId)
                 val response = categoryApi.create(input)
                 if (response.isSuccessful) {
                     val serverId = response.body()?.id ?: return false
@@ -108,7 +111,8 @@ class SyncRepository @Inject constructor(
     private suspend fun pushTransactionOp(op: PendingOperationEntity): Boolean {
         return when (op.operation) {
             "CREATE" -> {
-                val input = gson.fromJson(op.payloadJson, TransactionInput::class.java)
+                val stored = gson.fromJson(op.payloadJson, TransactionInput::class.java)
+                val input = stored.copy(clientId = op.clientId)
                 val response = transactionApi.create(input)
                 if (response.isSuccessful) {
                     val serverId = response.body()?.id ?: return false
@@ -134,7 +138,8 @@ class SyncRepository @Inject constructor(
     private suspend fun pushScheduledOp(op: PendingOperationEntity): Boolean {
         return when (op.operation) {
             "CREATE" -> {
-                val input = gson.fromJson(op.payloadJson, ScheduledInput::class.java)
+                val stored = gson.fromJson(op.payloadJson, ScheduledInput::class.java)
+                val input = stored.copy(clientId = op.clientId)
                 val response = scheduledApi.create(input)
                 if (response.isSuccessful) {
                     val serverId = response.body()?.id ?: return false
@@ -157,9 +162,14 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    // After a successful push, swap the negative local ID for the server's
+    // positive ID AND clear is_local_only. Without the clearLocalOnly step,
+    // a future enqueueLocalDataForSync (called on every login) would re-enqueue
+    // every already-synced row, causing the duplicate-expense bug.
     private suspend fun remapAccountId(oldId: Long, newId: Long) {
         database.withTransaction {
             accountDao.updateId(oldId, newId)
+            accountDao.clearLocalOnly(newId)
             transactionDao.updateAccountId(oldId, newId)
             scheduledDao.updateAccountId(oldId, newId)
             pendingOpDao.updateEntityId(oldId, newId, "account")
@@ -169,6 +179,7 @@ class SyncRepository @Inject constructor(
     private suspend fun remapCategoryId(oldId: Long, newId: Long) {
         database.withTransaction {
             categoryDao.updateId(oldId, newId)
+            categoryDao.clearLocalOnly(newId)
             transactionDao.updateCategoryId(oldId, newId)
             scheduledDao.updateCategoryId(oldId, newId)
             pendingOpDao.updateEntityId(oldId, newId, "category")
@@ -178,6 +189,7 @@ class SyncRepository @Inject constructor(
     private suspend fun remapTransactionId(oldId: Long, newId: Long) {
         database.withTransaction {
             transactionDao.updateId(oldId, newId)
+            transactionDao.clearLocalOnly(newId)
             pendingOpDao.updateEntityId(oldId, newId, "transaction")
         }
     }
@@ -185,6 +197,7 @@ class SyncRepository @Inject constructor(
     private suspend fun remapScheduledId(oldId: Long, newId: Long) {
         database.withTransaction {
             scheduledDao.updateId(oldId, newId)
+            scheduledDao.clearLocalOnly(newId)
             pendingOpDao.updateEntityId(oldId, newId, "scheduled")
         }
     }
@@ -235,56 +248,65 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    // Called on every login to back-fill anything created while in local-only
+    // mode. Must be safe to call repeatedly: skip rows whose remap already
+    // cleared isLocalOnly, AND skip rows that already have a queued CREATE op
+    // (e.g. an offline expense that hasn't synced yet). Otherwise a re-login
+    // after a silent 401 enqueues every offline-created entity a second time.
     suspend fun enqueueLocalDataForSync() {
         // Enqueue accounts first (transactions/scheduled reference them)
-        val accounts = accountDao.getAllSync()
-        for (a in accounts) {
+        for (a in accountDao.getAllSync()) {
             if (!a.isLocalOnly) continue
+            if (pendingOpDao.findByEntity("account", "CREATE", a.id) != null) continue
             val input = AccountInput(a.name, a.currency, a.balance)
             pendingOpDao.insert(PendingOperationEntity(
                 entityType = "account",
                 operation = "CREATE",
                 entityId = a.id,
-                payloadJson = gson.toJson(input)
+                payloadJson = gson.toJson(input),
+                clientId = UUID.randomUUID().toString()
             ))
         }
 
         // Enqueue categories next (transactions/scheduled reference them)
-        val categories = categoryDao.getAllSync()
-        for (c in categories) {
+        for (c in categoryDao.getAllSync()) {
             if (!c.isLocalOnly) continue
+            if (pendingOpDao.findByEntity("category", "CREATE", c.id) != null) continue
             val input = CategoryInput(c.parentId, c.name, c.type, c.icon, c.color)
             pendingOpDao.insert(PendingOperationEntity(
                 entityType = "category",
                 operation = "CREATE",
                 entityId = c.id,
-                payloadJson = gson.toJson(input)
+                payloadJson = gson.toJson(input),
+                clientId = UUID.randomUUID().toString()
             ))
         }
 
         // Enqueue transactions
-        val transactions = transactionDao.getAllSync()
-        for (t in transactions) {
+        for (t in transactionDao.getAllSync()) {
             if (!t.isLocalOnly) continue
+            if (pendingOpDao.findByEntity("transaction", "CREATE", t.id) != null) continue
             val input = TransactionInput(t.accountId, t.categoryId, t.type, t.amount, t.currency, t.description, t.note, t.date)
             pendingOpDao.insert(PendingOperationEntity(
                 entityType = "transaction",
                 operation = "CREATE",
                 entityId = t.id,
-                payloadJson = gson.toJson(input)
+                payloadJson = gson.toJson(input),
+                clientId = UUID.randomUUID().toString()
             ))
         }
 
         // Enqueue scheduled transactions
-        val scheduled = scheduledDao.getAllSync()
-        for (s in scheduled) {
+        for (s in scheduledDao.getAllSync()) {
             if (!s.isLocalOnly) continue
+            if (pendingOpDao.findByEntity("scheduled", "CREATE", s.id) != null) continue
             val input = ScheduledInput(s.accountId, s.categoryId, s.type, s.amount, s.currency, s.description, s.note, s.rrule, s.nextOccurrence, s.maxOccurrences)
             pendingOpDao.insert(PendingOperationEntity(
                 entityType = "scheduled",
                 operation = "CREATE",
                 entityId = s.id,
-                payloadJson = gson.toJson(input)
+                payloadJson = gson.toJson(input),
+                clientId = UUID.randomUUID().toString()
             ))
         }
     }

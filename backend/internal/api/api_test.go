@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS categories (
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,
-    sync_version INTEGER NOT NULL DEFAULT 0
+    sync_version INTEGER NOT NULL DEFAULT 0,
+    client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS accounts (
@@ -89,7 +90,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,
-    sync_version INTEGER NOT NULL DEFAULT 0
+    sync_version INTEGER NOT NULL DEFAULT 0,
+    client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -107,7 +109,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,
-    sync_version INTEGER NOT NULL DEFAULT 0
+    sync_version INTEGER NOT NULL DEFAULT 0,
+    client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS scheduled_transactions (
@@ -129,7 +132,8 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,
-    sync_version INTEGER NOT NULL DEFAULT 0
+    sync_version INTEGER NOT NULL DEFAULT 0,
+    client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS shared_account_access (
@@ -152,6 +156,15 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     ip_address TEXT,
     created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_client_id
+    ON transactions(created_by_user_id, client_id) WHERE client_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduled_client_id
+    ON scheduled_transactions(created_by_user_id, client_id) WHERE client_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_client_id
+    ON accounts(user_id, client_id) WHERE client_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_client_id
+    ON categories(user_id, client_id) WHERE client_id IS NOT NULL;
 `
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("apply schema: %v", err)

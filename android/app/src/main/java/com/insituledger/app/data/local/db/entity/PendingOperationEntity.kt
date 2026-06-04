@@ -12,5 +12,10 @@ data class PendingOperationEntity(
     @ColumnInfo(name = "entity_id") val entityId: Long,
     @ColumnInfo(name = "server_id") val serverId: Long? = null,
     @ColumnInfo(name = "payload_json") val payloadJson: String? = null,
-    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+    // Client-generated UUID for idempotent CREATE. The same value is sent to
+    // the backend (TransactionInput.clientId etc.) so a retry after a
+    // transient failure dedupes server-side instead of inserting twice.
+    // Null for UPDATE/DELETE ops, which don't need idempotency.
+    @ColumnInfo(name = "client_id") val clientId: String? = null
 )

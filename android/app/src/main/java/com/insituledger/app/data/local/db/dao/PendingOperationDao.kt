@@ -23,4 +23,10 @@ interface PendingOperationDao {
 
     @Query("UPDATE pending_operations SET entity_id = :newId WHERE entity_id = :oldId AND entity_type = :entityType")
     suspend fun updateEntityId(oldId: Long, newId: Long, entityType: String)
+
+    // Used by SyncRepository.enqueueLocalDataForSync to skip entities that
+    // already have a pending CREATE — without this, an offline-created
+    // transaction would end up with two pending ops after re-login.
+    @Query("SELECT * FROM pending_operations WHERE entity_type = :entityType AND operation = :operation AND entity_id = :entityId LIMIT 1")
+    suspend fun findByEntity(entityType: String, operation: String, entityId: Long): PendingOperationEntity?
 }

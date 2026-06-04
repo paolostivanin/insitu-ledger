@@ -79,7 +79,10 @@ data class TransactionInput(
     val currency: String = "EUR",
     val description: String? = null,
     val note: String? = null,
-    val date: String
+    val date: String,
+    // Client-generated UUID. Backend uses it to dedupe retries of the same
+    // CREATE op (see PendingOperationEntity.clientId).
+    @SerializedName("client_id") val clientId: String? = null
 )
 
 data class CategoryDto(
@@ -101,7 +104,8 @@ data class CategoryInput(
     val name: String,
     val type: String,
     val icon: String? = null,
-    val color: String? = null
+    val color: String? = null,
+    @SerializedName("client_id") val clientId: String? = null
 )
 
 data class AccountDto(
@@ -122,7 +126,8 @@ data class AccountDto(
 data class AccountInput(
     val name: String,
     val currency: String = "EUR",
-    val balance: Double? = null
+    val balance: Double? = null,
+    @SerializedName("client_id") val clientId: String? = null
 )
 
 data class ScheduledTransactionDto(
@@ -161,7 +166,8 @@ data class ScheduledInput(
     @SerializedName("next_occurrence") val nextOccurrence: String,
     @SerializedName("max_occurrences") val maxOccurrences: Int? = null,
     // null = leave server-side default / existing value untouched.
-    val active: Boolean? = null
+    val active: Boolean? = null,
+    @SerializedName("client_id") val clientId: String? = null
 )
 
 data class SyncResponse(

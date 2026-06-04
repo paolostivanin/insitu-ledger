@@ -26,6 +26,18 @@ var (
 	ErrUnauthorized       = errors.New("unauthorized")
 )
 
+// TokenTTL is the lifetime of a freshly-issued or renewed session token.
+// ValidateToken slides the expiry forward by this amount when fewer than
+// renewalWindow remain, so an actively-used client never gets logged out for
+// idle reasons.
+const TokenTTL = 30 * 24 * time.Hour
+
+// renewalWindow is the "near-expiry" cutoff: validations inside this window
+// extend the token. 14 days gives a wide grace period — anyone who touches
+// the app even once every couple of weeks stays logged in indefinitely —
+// while still bounding the UPDATE frequency on the sessions table.
+const renewalWindow = 14 * 24 * time.Hour
+
 // Store persists session tokens in SQLite so they survive server restarts.
 type Store struct {
 	db *sql.DB
@@ -61,7 +73,7 @@ func (s *Store) CreateToken(userID int64) (string, error) {
 		return "", err
 	}
 	token := hex.EncodeToString(b)
-	expiresAt := time.Now().Add(30 * 24 * time.Hour) // 30 days
+	expiresAt := time.Now().Add(TokenTTL)
 
 	_, err := s.db.Exec(
 		"INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)",
@@ -97,9 +109,22 @@ func (s *Store) ValidateToken(token string) (int64, error) {
 		}
 	}
 
-	if time.Now().UTC().After(expiry) {
+	now := time.Now().UTC()
+	if now.After(expiry) {
 		s.RevokeToken(token)
 		return 0, ErrUnauthorized
+	}
+
+	// Slide the expiry forward when the token is near the end of its window
+	// so actively-used clients (Android sync every 15 min, browser usage) do
+	// not get a surprise 401 on day 30. The 7-day window means at most one
+	// UPDATE per ~3 weeks of continuous use.
+	if expiry.Sub(now) < renewalWindow {
+		newExpiry := now.Add(TokenTTL)
+		s.db.Exec(
+			"UPDATE sessions SET expires_at = ? WHERE token = ?",
+			newExpiry.Format(time.RFC3339), hashToken(token),
+		)
 	}
 
 	return userID, nil

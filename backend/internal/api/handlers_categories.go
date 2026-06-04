@@ -1,7 +1,9 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 )
@@ -12,6 +14,9 @@ type categoryRequest struct {
 	Type     string  `json:"type"`
 	Icon     *string `json:"icon"`
 	Color    *string `json:"color"`
+	// Optional client-generated UUID for idempotent CREATE; see
+	// createTransactionRequest.ClientID for the rationale.
+	ClientID string `json:"client_id,omitempty"`
 }
 
 func (s *Server) handleListCategories(w http.ResponseWriter, r *http.Request) {
@@ -112,10 +117,28 @@ func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.ClientID != "" {
+		var existingID int64
+		err := s.DB.QueryRow(
+			`SELECT id FROM categories WHERE user_id = ? AND client_id = ? LIMIT 1`,
+			targetUserID, req.ClientID,
+		).Scan(&existingID)
+		if err == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{"id": existingID})
+			return
+		} else if err != sql.ErrNoRows {
+			log.Printf("idempotency lookup error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	result, err := s.DB.Exec(
-		`INSERT INTO categories (user_id, parent_id, name, type, icon, color)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		targetUserID, req.ParentID, req.Name, req.Type, req.Icon, req.Color,
+		`INSERT INTO categories (user_id, parent_id, name, type, icon, color, client_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		targetUserID, req.ParentID, req.Name, req.Type, req.Icon, req.Color, nullableString(req.ClientID),
 	)
 	if err != nil {
 		http.Error(w, "failed to create category", http.StatusInternalServerError)

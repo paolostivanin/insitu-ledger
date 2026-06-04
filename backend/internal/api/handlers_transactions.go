@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -17,6 +18,10 @@ type createTransactionRequest struct {
 	Description *string `json:"description"`
 	Note        *string `json:"note"`
 	Date        string  `json:"date"`
+	// Optional client-generated UUID. When non-empty, a second POST with the
+	// same (created_by_user_id, client_id) returns the original row instead
+	// of inserting a duplicate. Used by the Android pending-ops queue.
+	ClientID string `json:"client_id,omitempty"`
 }
 
 func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +196,37 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 		req.Currency = "EUR"
 	}
 
+	// Idempotency: if the client supplied a key and we've already stored a
+	// row for it, return the original instead of inserting again. Catches
+	// retried POSTs from the Android sync queue after a transient failure.
+	if req.ClientID != "" {
+		var existingID int64
+		var existingScheduled bool
+		err := s.DB.QueryRow(
+			`SELECT id, 0 AS scheduled FROM transactions
+			   WHERE created_by_user_id = ? AND client_id = ?
+			 UNION ALL
+			 SELECT id, 1 AS scheduled FROM scheduled_transactions
+			   WHERE created_by_user_id = ? AND client_id = ?
+			 LIMIT 1`,
+			userID, req.ClientID, userID, req.ClientID,
+		).Scan(&existingID, &existingScheduled)
+		if err == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			resp := map[string]any{"id": existingID}
+			if existingScheduled {
+				resp["scheduled"] = true
+			}
+			json.NewEncoder(w).Encode(resp)
+			return
+		} else if err != sql.ErrNoRows {
+			log.Printf("idempotency lookup error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	// If the datetime is in the future, create a one-time scheduled transaction instead.
 	// Parse in local time to match the user's intent (frontend sends local times).
 	now := time.Now()
@@ -203,9 +239,9 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 	}
 	if isFuture {
 		result, err := s.DB.Exec(
-			`INSERT INTO scheduled_transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, "FREQ=DAILY", req.Date, 1,
+			`INSERT INTO scheduled_transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences, client_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, "FREQ=DAILY", req.Date, 1, nullableString(req.ClientID),
 		)
 		if err != nil {
 			http.Error(w, "failed to create scheduled transaction", http.StatusInternalServerError)
@@ -231,9 +267,9 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 	defer tx.Rollback()
 
 	result, err := tx.Exec(
-		`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.Date,
+		`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date, client_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.Date, nullableString(req.ClientID),
 	)
 	if err != nil {
 		http.Error(w, "failed to create transaction", http.StatusInternalServerError)

@@ -32,4 +32,7 @@ interface AccountDao {
 
     @Query("UPDATE accounts SET id = :newId WHERE id = :oldId")
     suspend fun updateId(oldId: Long, newId: Long)
+
+    @Query("UPDATE accounts SET is_local_only = 0 WHERE id = :id")
+    suspend fun clearLocalOnly(id: Long)
 }

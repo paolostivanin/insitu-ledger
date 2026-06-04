@@ -83,6 +83,11 @@ class SharedOwnerViewModel @Inject constructor(
     val accessibleOwners = sharedAccessState.accessibleOwners
     val ownerFilter = sharedAccessState.ownerFilter
     val syncMode = prefs.syncModeFlow
+    val autoLogoutPending = prefs.autoLogoutPendingFlow
+
+    suspend fun clearAutoLogoutPending() {
+        prefs.clearAutoLogoutPending()
+    }
 
     // Apply the server-side default account exactly once per process so that
     // an explicit user filter change isn't overridden.
@@ -158,6 +163,27 @@ fun AppNavigation(
                 launchSingleTop = true
             }
         }
+    }
+
+    // Surface silent 401 auto-logouts. The flag is set by the auth
+    // interceptor (UserPreferences.clearAuthSession) and persists across
+    // restarts, so a logout that happened while a background SyncWorker was
+    // running is still shown the next time the app is foregrounded.
+    LaunchedEffect(Unit) {
+        sharedOwnerViewModel.autoLogoutPending
+            .filter { it }
+            .collect {
+                val result = snackbarHostState.showSnackbar(
+                    message = "You've been signed out.",
+                    actionLabel = "Log in",
+                    duration = SnackbarDuration.Indefinite,
+                    withDismissAction = true,
+                )
+                sharedOwnerViewModel.clearAutoLogoutPending()
+                if (result == SnackbarResult.ActionPerformed) {
+                    navController.navigate(Screen.Login.route)
+                }
+            }
     }
 
     CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {

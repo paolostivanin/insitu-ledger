@@ -1,7 +1,9 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 )
@@ -10,6 +12,9 @@ type accountRequest struct {
 	Name     string   `json:"name"`
 	Currency string   `json:"currency"`
 	Balance  *float64 `json:"balance,omitempty"`
+	// Optional client-generated UUID for idempotent CREATE; see
+	// createTransactionRequest.ClientID for the rationale.
+	ClientID string `json:"client_id,omitempty"`
 }
 
 func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
@@ -106,9 +111,27 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		balance = *req.Balance
 	}
 
+	if req.ClientID != "" {
+		var existingID int64
+		err := s.DB.QueryRow(
+			`SELECT id FROM accounts WHERE user_id = ? AND client_id = ? LIMIT 1`,
+			targetUserID, req.ClientID,
+		).Scan(&existingID)
+		if err == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{"id": existingID})
+			return
+		} else if err != sql.ErrNoRows {
+			log.Printf("idempotency lookup error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	result, err := s.DB.Exec(
-		"INSERT INTO accounts (user_id, name, currency, balance) VALUES (?, ?, ?, ?)",
-		targetUserID, req.Name, req.Currency, balance,
+		"INSERT INTO accounts (user_id, name, currency, balance, client_id) VALUES (?, ?, ?, ?, ?)",
+		targetUserID, req.Name, req.Currency, balance, nullableString(req.ClientID),
 	)
 	if err != nil {
 		http.Error(w, "failed to create account", http.StatusInternalServerError)

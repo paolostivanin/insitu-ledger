@@ -52,6 +52,11 @@ class UserPreferences @Inject constructor(
         const val DEFAULT_CURRENCY_SYMBOL = "€"
         val ALLOW_CLEARTEXT_HTTP = booleanPreferencesKey("allow_cleartext_http")
         val DASHBOARD_HERO_MODE = stringPreferencesKey("dashboard_hero_mode") // "net_worth" (default) | "month_net"
+        // Set by clearAuthSession() (interceptor 401), cleared after the UI
+        // observer (AppNavigation) has shown the "you've been signed out"
+        // snackbar. Persisted so a 401 during background sync is still
+        // surfaced the next time the user opens the app.
+        val AUTO_LOGOUT_PENDING = booleanPreferencesKey("auto_logout_pending")
     }
 
     val tokenFlow: Flow<String?> = secureStore.stringFlow(SecureStore.KEY_TOKEN)
@@ -85,6 +90,7 @@ class UserPreferences @Inject constructor(
     val currencySymbolFlow: Flow<String> = context.dataStore.data.map { it[CURRENCY_SYMBOL] ?: DEFAULT_CURRENCY_SYMBOL }
     val allowCleartextHttpFlow: Flow<Boolean> = context.dataStore.data.map { it[ALLOW_CLEARTEXT_HTTP] ?: false }
     val dashboardHeroModeFlow: Flow<String> = context.dataStore.data.map { it[DASHBOARD_HERO_MODE] ?: "net_worth" }
+    val autoLogoutPendingFlow: Flow<Boolean> = context.dataStore.data.map { it[AUTO_LOGOUT_PENDING] ?: false }
 
     suspend fun saveToken(token: String) {
         secureStore.putString(SecureStore.KEY_TOKEN, token)
@@ -200,6 +206,10 @@ class UserPreferences @Inject constructor(
         context.dataStore.edit { it[DASHBOARD_HERO_MODE] = mode }
     }
 
+    suspend fun clearAutoLogoutPending() {
+        context.dataStore.edit { it.remove(AUTO_LOGOUT_PENDING) }
+    }
+
     suspend fun saveBackupPassphrase(passphrase: String?) {
         if (passphrase.isNullOrEmpty()) {
             secureStore.remove(SecureStore.KEY_BACKUP_PASSPHRASE)
@@ -281,6 +291,9 @@ class UserPreferences @Inject constructor(
     // NOT also reset the user's theme, biometric, sync mode, auto-backup
     // schedule, or any other install-wide preference. Use this on auth
     // interceptor 401; use clearAll() for an explicit user-initiated logout.
+    //
+    // AUTO_LOGOUT_PENDING is set here (and only here) so the UI observer can
+    // tell silent auto-logout apart from an explicit Settings → Disconnect.
     suspend fun clearAuthSession() {
         secureStore.remove(SecureStore.KEY_TOKEN)
         context.dataStore.edit { prefs ->
@@ -291,6 +304,7 @@ class UserPreferences @Inject constructor(
             prefs.remove(TOTP_ENABLED)
             prefs.remove(LAST_SYNC_VERSION)
             prefs.remove(SHARED_OWNER_ID)
+            prefs[AUTO_LOGOUT_PENDING] = true
         }
     }
 

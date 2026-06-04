@@ -13,6 +13,7 @@ import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -80,7 +81,8 @@ class ScheduledRepository @Inject constructor(
                 entityType = "scheduled",
                 operation = "CREATE",
                 entityId = localId,
-                payloadJson = gson.toJson(input)
+                payloadJson = gson.toJson(input),
+                clientId = UUID.randomUUID().toString()
             ))
             syncManager.triggerImmediateSync()
         }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -65,6 +66,78 @@ func TestCreateAndValidateToken(t *testing.T) {
 	}
 	if userID != 42 {
 		t.Errorf("userID = %d, want 42", userID)
+	}
+}
+
+func TestValidateToken_SlidingRenewal(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+
+	token, err := store.CreateToken(7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Backdate so only 3 days remain — inside the 7-day renewal window.
+	nearExpiry := time.Now().UTC().Add(3 * 24 * time.Hour)
+	if _, err := db.Exec("UPDATE sessions SET expires_at = ? WHERE token = ?",
+		nearExpiry.Format(time.RFC3339), hashToken(token)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.ValidateToken(token); err != nil {
+		t.Fatalf("ValidateToken failed: %v", err)
+	}
+
+	var got string
+	if err := db.QueryRow("SELECT expires_at FROM sessions WHERE token = ?",
+		hashToken(token)).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	newExpiry, err := time.Parse(time.RFC3339, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should now be ~30 days from now; allow generous slack for test wall time.
+	wantMin := time.Now().UTC().Add(29 * 24 * time.Hour)
+	if !newExpiry.After(wantMin) {
+		t.Errorf("expected sliding renewal to push expiry past %v, got %v", wantMin, newExpiry)
+	}
+}
+
+func TestValidateToken_NoRenewalWhenFresh(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+
+	token, err := store.CreateToken(8)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 20 days remaining — well outside the 7-day window; expiry must not move.
+	farExpiry := time.Now().UTC().Add(20 * 24 * time.Hour).Truncate(time.Second)
+	if _, err := db.Exec("UPDATE sessions SET expires_at = ? WHERE token = ?",
+		farExpiry.Format(time.RFC3339), hashToken(token)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.ValidateToken(token); err != nil {
+		t.Fatal(err)
+	}
+
+	var got string
+	if err := db.QueryRow("SELECT expires_at FROM sessions WHERE token = ?",
+		hashToken(token)).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	gotExpiry, err := time.Parse(time.RFC3339, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gotExpiry.Equal(farExpiry) {
+		t.Errorf("expiry moved unexpectedly: got %v, want %v", gotExpiry, farExpiry)
 	}
 }
 
