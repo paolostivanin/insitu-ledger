@@ -9,9 +9,14 @@ import com.insituledger.app.data.remote.api.*
 import com.insituledger.app.data.remote.dto.*
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.first
+import retrofit2.Response
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+
+// DELETE is idempotent — 404 (entity already gone) reaches the desired end state.
+private fun Response<*>.isSuccessOrAlreadyGone(): Boolean =
+    isSuccessful || code() == 404
 
 @Singleton
 class SyncRepository @Inject constructor(
@@ -75,7 +80,7 @@ class SyncRepository @Inject constructor(
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return true
-                accountApi.delete(id).isSuccessful
+                accountApi.delete(id).isSuccessOrAlreadyGone()
             }
             else -> true
         }
@@ -102,7 +107,7 @@ class SyncRepository @Inject constructor(
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return true
-                categoryApi.delete(id).isSuccessful
+                categoryApi.delete(id).isSuccessOrAlreadyGone()
             }
             else -> true
         }
@@ -129,7 +134,7 @@ class SyncRepository @Inject constructor(
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return true
-                transactionApi.delete(id).isSuccessful
+                transactionApi.delete(id).isSuccessOrAlreadyGone()
             }
             else -> true
         }
@@ -156,7 +161,7 @@ class SyncRepository @Inject constructor(
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return true
-                scheduledApi.delete(id).isSuccessful
+                scheduledApi.delete(id).isSuccessOrAlreadyGone()
             }
             else -> true
         }
