@@ -273,6 +273,16 @@ func (s *Server) handleImportTransactions(w http.ResponseWriter, r *http.Request
 			return
 		}
 
+		// Validate + canonicalize date so post-1.18 imports don't reintroduce
+		// naive strings the migration just normalized away. Date-only inputs
+		// (the common export shape) stay date-only per the TZ-agnostic rule.
+		parsedDate, perr := parseClientDate(date)
+		if perr != nil {
+			http.Error(w, fmt.Sprintf("row %d: invalid date '%s'", rowNum, date), http.StatusBadRequest)
+			return
+		}
+		date = canonicalizeClientDate(date, parsedDate)
+
 		amount, err := strconv.ParseFloat(amountStr, 64)
 		if err != nil || amount <= 0 {
 			http.Error(w, fmt.Sprintf("row %d: invalid amount", rowNum), http.StatusBadRequest)

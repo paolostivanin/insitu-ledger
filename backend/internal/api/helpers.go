@@ -25,15 +25,14 @@ func validateDate(s string) error {
 	return nil
 }
 
-// validateDatetime checks that a string is a valid YYYY-MM-DD or YYYY-MM-DDTHH:MM datetime.
+// validateDatetime checks that a string is a parseable date or datetime.
+// Accepts RFC3339 with offset (post-1.18 clients), naive datetime, and
+// date-only forms — see parseClientDate for the full list.
 func validateDatetime(s string) error {
-	if _, err := time.Parse("2006-01-02", s); err == nil {
-		return nil
+	if _, err := parseClientDate(s); err != nil {
+		return fmt.Errorf("invalid date/datetime format: %s", s)
 	}
-	if _, err := time.Parse("2006-01-02T15:04", s); err == nil {
-		return nil
-	}
-	return fmt.Errorf("invalid format, expected YYYY-MM-DD or YYYY-MM-DDTHH:MM: %s", s)
+	return nil
 }
 
 // parsePagination parses limit/offset query params with bounds checking.

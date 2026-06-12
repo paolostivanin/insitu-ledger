@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func mustCreateAccount(t *testing.T, handler http.Handler, token, body string) int64 {
@@ -237,6 +239,92 @@ func TestCreateScheduled_IdempotentClientID(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &second)
 	if int64(second["id"].(float64)) != firstID {
 		t.Errorf("returned id %v, want %d", second["id"], firstID)
+	}
+}
+
+// Cross-TZ regression: a client in UTC+3 submits its own local time. Server
+// (whose time.Local may be anything) must decide future/past on the absolute
+// instant carried by the offset string, not by re-interpreting "08:41" as
+// server-local. The actual scenario that birthed this whole patch.
+//
+// Strategy: build the date relative to time.Now() so the test is correct on
+// any host TZ. "now - 30min" with a +03:00 offset is unambiguously in the
+// past — must route to transactions (NOT scheduled).
+func TestCreateTransaction_CrossTZ_PastIsTransaction(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+
+	acctID := mustCreateAccount(t, handler, token, `{"name":"Wallet"}`)
+	catID := mustCreateCategory(t, handler, token, `{"name":"Food","type":"expense"}`)
+
+	// (now - 30min) projected into UTC+3 — wall-clock string but unambiguous instant.
+	loc := time.FixedZone("EEST", 3*3600)
+	pastIso := time.Now().In(loc).Add(-30 * time.Minute).Format(time.RFC3339)
+
+	body := fmt.Sprintf(
+		`{"account_id":%d,"category_id":%d,"type":"expense","amount":4.15,"date":%q,"client_id":"tz-past"}`,
+		acctID, catID, pastIso,
+	)
+	req := authedRequest("POST", "/api/transactions", body, token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("POST: got %d: %s", w.Code, w.Body.String())
+	}
+	var got map[string]any
+	json.Unmarshal(w.Body.Bytes(), &got)
+	if got["scheduled"] == true {
+		t.Errorf("scheduled=true on a past-dated entry — the cross-TZ bug is back")
+	}
+
+	// Idempotency check across the same TZ-aware request.
+	req = authedRequest("POST", "/api/transactions", body, token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("second POST: got %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	// Storage canonicalization: the row must carry an offset (not be naive).
+	var stored string
+	if err := s.DB.QueryRow("SELECT date FROM transactions WHERE client_id = 'tz-past'").Scan(&stored); err != nil {
+		t.Fatalf("scan stored: %v", err)
+	}
+	if !strings.Contains(stored, "+03:00") && !strings.HasSuffix(stored, "Z") {
+		t.Errorf("stored date %q lacks offset — canonicalize did not run", stored)
+	}
+}
+
+// Counter-case: same call shape but the instant is genuinely in the future
+// (in any TZ). Must route to scheduled.
+func TestCreateTransaction_CrossTZ_FutureIsScheduled(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+
+	acctID := mustCreateAccount(t, handler, token, `{"name":"Wallet"}`)
+	catID := mustCreateCategory(t, handler, token, `{"name":"Food","type":"expense"}`)
+
+	loc := time.FixedZone("EEST", 3*3600)
+	futureIso := time.Now().In(loc).Add(2 * time.Hour).Format(time.RFC3339)
+
+	body := fmt.Sprintf(
+		`{"account_id":%d,"category_id":%d,"type":"expense","amount":4.15,"date":%q,"client_id":"tz-future"}`,
+		acctID, catID, futureIso,
+	)
+	req := authedRequest("POST", "/api/transactions", body, token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("POST: got %d: %s", w.Code, w.Body.String())
+	}
+	var got map[string]any
+	json.Unmarshal(w.Body.Bytes(), &got)
+	if got["scheduled"] != true {
+		t.Errorf("scheduled=%v, want true on a +2h future-dated entry", got["scheduled"])
 	}
 }
 

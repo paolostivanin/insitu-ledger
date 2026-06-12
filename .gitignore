@@ -53,3 +53,7 @@ husband.csv
 wife.csv
 husband_for_insitu.csv
 wife_for_insitu.csv
+
+# Working docs / personal scripts (not part of the app)
+PLAN.md
+scripts/

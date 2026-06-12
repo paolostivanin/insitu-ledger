@@ -136,9 +136,11 @@ private fun ScheduledRow(
                         }
                     }
                 }
+                // .take(5) bounds the displayed time to "HH:mm" so post-1.18
+                // strings like "08:41:00+02:00" don't leak as raw chip text.
                 val (nextDate, nextTime) = if (item.nextOccurrence.contains("T")) {
                     val parts = item.nextOccurrence.split("T", limit = 2)
-                    parts[0] to parts[1]
+                    parts[0] to parts[1].take(5)
                 } else {
                     item.nextOccurrence to null
                 }

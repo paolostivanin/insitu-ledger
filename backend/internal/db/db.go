@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
@@ -86,6 +87,38 @@ func Open(dataDir string) (*sql.DB, error) {
 		if _, err := conn.Exec(idx); err != nil {
 			conn.Close()
 			return nil, fmt.Errorf("idempotency index: %w", err)
+		}
+	}
+
+	// TZ backfill (v1.18.0): normalize naive *datetime* strings to RFC3339
+	// with the server's current UTC offset. Shape-gated:
+	//   - 16-char "YYYY-MM-DDTHH:MM"      → append ":00" + offset (Go's RFC3339
+	//                                       parser requires seconds)
+	//   - 19-char "YYYY-MM-DDTHH:MM:SS"   → append just the offset
+	//   - bare YYYY-MM-DD                 → LEFT VERBATIM (date-only is
+	//                                       TZ-agnostic; appending an offset
+	//                                       would break both Go and SQLite's
+	//                                       datetime() parsers)
+	// Idempotent: migrated values are 25 chars and match neither WHERE clause.
+	// Garbage strings of other shapes are left untouched.
+	offset := time.Now().Format("-07:00") // e.g. "+02:00"
+	tzMigrations := []struct {
+		stmt string
+		arg  string
+	}{
+		{`UPDATE transactions SET date = date || ?
+		   WHERE LENGTH(date) = 16 AND SUBSTR(date, 11, 1) = 'T'`, ":00" + offset},
+		{`UPDATE transactions SET date = date || ?
+		   WHERE LENGTH(date) = 19 AND SUBSTR(date, 11, 1) = 'T'`, offset},
+		{`UPDATE scheduled_transactions SET next_occurrence = next_occurrence || ?
+		   WHERE LENGTH(next_occurrence) = 16 AND SUBSTR(next_occurrence, 11, 1) = 'T'`, ":00" + offset},
+		{`UPDATE scheduled_transactions SET next_occurrence = next_occurrence || ?
+		   WHERE LENGTH(next_occurrence) = 19 AND SUBSTR(next_occurrence, 11, 1) = 'T'`, offset},
+	}
+	for _, m := range tzMigrations {
+		if _, err := conn.Exec(m.stmt, m.arg); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("tz migration: %w", err)
 		}
 	}
 

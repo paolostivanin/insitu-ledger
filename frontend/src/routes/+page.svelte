@@ -7,6 +7,7 @@
 	import { sharedOwnerUserId } from '$lib/stores/shared';
 	import { currentAccountId } from '$lib/stores/accountFilter';
 	import AccountFilterPill from '$lib/components/AccountFilterPill.svelte';
+	import { extractTime } from '$lib/datetime';
 
 	let accts = $state<Account[]>([]);
 	let recentTxns = $state<Transaction[]>([]);
@@ -88,11 +89,6 @@
 
 	function fmt(n: number): string {
 		return formatMoney(n, $currencySymbol);
-	}
-
-	function extractTime(dt: string): string {
-		if (!dt.includes('T')) return '';
-		return dt.slice(11, 16);
 	}
 
 	function isSharedAcct(accountId: number): boolean {

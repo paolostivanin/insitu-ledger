@@ -10,6 +10,7 @@
 	import { currentAccountId } from '$lib/stores/accountFilter';
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
+	import { extractTime, toIsoOffset } from '$lib/datetime';
 
 	let txns = $state<Transaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -235,11 +236,6 @@
 		return formatMoney(n, $currencySymbol);
 	}
 
-	function extractTime(dt: string): string {
-		if (!dt.includes('T')) return '';
-		return dt.slice(11, 16);
-	}
-
 	function getDefaultAccountId(): number {
 		const lastUsed = localStorage.getItem('lastUsedAccountId');
 		if (lastUsed) {
@@ -285,6 +281,7 @@
 		e.preventDefault();
 		error = '';
 		submitting = true;
+		const isoDate = toIsoOffset(`${fDate}T${fTime}`);
 		const data = {
 			account_id: fAccountId,
 			category_id: fCategoryId,
@@ -293,14 +290,14 @@
 			currency: fCurrency,
 			description: fDescription || undefined,
 			note: fNote || undefined,
-			date: `${fDate}T${fTime}`
+			date: isoDate
 		};
 		try {
 			localStorage.setItem('lastUsedAccountId', fAccountId.toString());
 			if (editId) {
 				await transactions.update(editId, data);
 			} else {
-				const isFuture = new Date(`${fDate}T${fTime}`) > new Date();
+				const isFuture = new Date(isoDate) > new Date();
 				if (isFuture) {
 					await scheduled.create({
 						account_id: fAccountId,
@@ -311,7 +308,7 @@
 						description: fDescription || undefined,
 						note: fNote || undefined,
 						rrule: 'FREQ=DAILY',
-						next_occurrence: `${fDate}T${fTime}`,
+						next_occurrence: isoDate,
 						max_occurrences: 1
 					});
 					addToast('Future-dated transaction scheduled — it will be created automatically on ' + fDate);

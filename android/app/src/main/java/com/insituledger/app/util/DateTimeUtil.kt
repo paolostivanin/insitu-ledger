@@ -32,6 +32,62 @@ object DateTimeUtil {
         return parseLenientLocal(trimmed)
     }
 
+    // Parse a form/entity date string of ANY legacy or new shape into an
+    // OffsetDateTime, preserving the value's own wall-clock. Legacy naive
+    // strings get the system zone's offset FOR THAT DATETIME (DST-correct) —
+    // they NEVER fall back to "now", which would silently reset the date of a
+    // pre-1.28 local-mode row when the user edits it. Only truly unparseable
+    // garbage falls back to now (never throws — this is called from Compose
+    // picker callbacks where an exception would crash the UI).
+    fun parseFormDate(s: String): OffsetDateTime =
+        try {
+            OffsetDateTime.parse(s)
+        } catch (_: Exception) {
+            try {
+                parseFlexibleLocalDateTime(s)
+                    .atZone(ZoneId.systemDefault())
+                    .toOffsetDateTime()
+            } catch (_: Exception) {
+                OffsetDateTime.now(ZoneId.systemDefault())
+                    .truncatedTo(java.time.temporal.ChronoUnit.MINUTES)
+            }
+        }
+
+    // Render an ISO-8601 string as "YYYY-MM-DD HH:mm" using the local-time
+    // portion only (strips any TZ offset or Z suffix, with or without seconds).
+    // Falls back to input for date-only / unrecognized formats.
+    fun displayDate(iso: String): String {
+        if (iso.isEmpty()) return ""
+        val t = iso.indexOf('T')
+        if (t < 0) return iso // date-only
+        var end = iso.length
+        for (i in 11 until iso.length) {
+            val c = iso[i]
+            if (c == '+' || c == 'Z' || c == '-') {
+                end = i
+                break
+            }
+        }
+        val core = iso.substring(0, end).replace('T', ' ')
+        return if (core.length > 16) core.substring(0, 16) else core
+    }
+
+    // Extract just the "HH:mm" portion. Returns empty string for date-only inputs.
+    fun extractTime(iso: String): String {
+        if (iso.isEmpty() || !iso.contains('T')) return ""
+        val afterT = iso.substring(11)
+        var end = afterT.length
+        for (i in afterT.indices) {
+            val c = afterT[i]
+            if (c == '+' || c == 'Z' || c == '-') {
+                end = i
+                break
+            }
+        }
+        val time = afterT.substring(0, end)
+        return if (time.length >= 5) time.substring(0, 5) else time
+    }
+
     private fun parseLenientLocal(value: String): LocalDateTime {
         // Date-only fallback (e.g. 2026-04-20) → start of day.
         if (!value.contains('T') && !value.contains(' ')) {

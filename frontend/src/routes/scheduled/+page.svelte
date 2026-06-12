@@ -6,6 +6,7 @@
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
 	import { sharedOwnerUserId } from '$lib/stores/shared';
+	import { extractTime, toIsoOffset } from '$lib/datetime';
 
 	let items = $state<ScheduledTransaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -109,11 +110,6 @@
 		return rruleLabels[rrule] || rrule;
 	}
 
-	function extractTime(dt: string): string {
-		if (!dt.includes('T')) return '';
-		return dt.split('T')[1].slice(0, 5);
-	}
-
 	// Strip optional ;UNTIL=... from an rrule and return the base + the YYYY-MM-DD UNTIL date (if any).
 	function splitRrule(rrule: string): { base: string; until: string } {
 		const parts = rrule.split(';');
@@ -168,11 +164,13 @@
 		fCurrency = item.currency;
 		fDescription = item.description || '';
 		fNote = item.note || '';
-		// Split next_occurrence into date and time parts
+		// Split next_occurrence into date and time parts. Slice (not split) to
+		// strip any TZ offset / seconds tail that arrives in post-1.18 strings —
+		// a raw "08:41:00+02:00" in fNextTime would render an empty time input
+		// and submit garbage.
 		if (item.next_occurrence.includes('T')) {
-			const [d, t] = item.next_occurrence.split('T');
-			fNextDate = d;
-			fNextTime = t;
+			fNextDate = item.next_occurrence.slice(0, 10);
+			fNextTime = item.next_occurrence.slice(11, 16);
 		} else {
 			fNextDate = item.next_occurrence;
 			fNextTime = '09:00';
@@ -215,7 +213,7 @@
 			description: fDescription || undefined,
 			note: fNote || undefined,
 			rrule: buildRrule(fFrequency, fEndMode, fEndDate),
-			next_occurrence: `${fNextDate}T${fNextTime}`,
+			next_occurrence: toIsoOffset(`${fNextDate}T${fNextTime}`),
 			max_occurrences: maxOcc && maxOcc > 0 ? maxOcc : null
 		};
 		try {

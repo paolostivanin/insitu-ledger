@@ -288,8 +288,11 @@ private fun DrillDownView(uiState: ReportsUiState, onBack: () -> Unit) {
             )
         }
     ) { padding ->
+        // Group by date prefix only — every minute-stamped row would otherwise
+        // be its own "day" group, and post-1.18 offset suffixes would make
+        // the header text ugly.
         val grouped = remember(uiState.selectedCategoryTransactions) {
-            uiState.selectedCategoryTransactions.groupBy { it.date }
+            uiState.selectedCategoryTransactions.groupBy { it.date.take(10) }
         }
 
         LazyColumn(

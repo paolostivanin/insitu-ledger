@@ -176,10 +176,12 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "amount must be positive", http.StatusBadRequest)
 		return
 	}
-	if err := validateDatetime(req.Date); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	parsed, err := parseClientDate(req.Date)
+	if err != nil {
+		http.Error(w, "invalid date/datetime format: "+req.Date, http.StatusBadRequest)
 		return
 	}
+	canonicalDate := canonicalizeClientDate(req.Date, parsed)
 	if req.Description != nil {
 		if err := validateLength("description", *req.Description, 500); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -228,20 +230,15 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 	}
 
 	// If the datetime is in the future, create a one-time scheduled transaction instead.
-	// Parse in local time to match the user's intent (frontend sends local times).
-	now := time.Now()
-	isFuture := false
-	if t, err := time.ParseInLocation("2006-01-02T15:04", req.Date, time.Local); err == nil {
-		isFuture = t.After(now)
-	} else if t, err := time.ParseInLocation("2006-01-02", req.Date, time.Local); err == nil {
-		// Date-only: treat as start of day, future only if the entire day is tomorrow+
-		isFuture = t.After(now.Truncate(24 * time.Hour))
-	}
+	// Compare in absolute time: parsed already carries the client's offset (if
+	// any), so this is correct cross-TZ. Date-only inputs parse to local
+	// midnight, so After(now) is false for "today" and true from "tomorrow" on.
+	isFuture := parsed.After(time.Now())
 	if isFuture {
 		result, err := s.DB.Exec(
 			`INSERT INTO scheduled_transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences, client_id)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, "FREQ=DAILY", req.Date, 1, nullableString(req.ClientID),
+			req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, "FREQ=DAILY", canonicalDate, 1, nullableString(req.ClientID),
 		)
 		if err != nil {
 			http.Error(w, "failed to create scheduled transaction", http.StatusInternalServerError)
@@ -269,7 +266,7 @@ func (s *Server) handleCreateTransaction(w http.ResponseWriter, r *http.Request)
 	result, err := tx.Exec(
 		`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date, client_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.Date, nullableString(req.ClientID),
+		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, canonicalDate, nullableString(req.ClientID),
 	)
 	if err != nil {
 		http.Error(w, "failed to create transaction", http.StatusInternalServerError)
@@ -317,10 +314,12 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := validateDatetime(req.Date); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	parsed, err := parseClientDate(req.Date)
+	if err != nil {
+		http.Error(w, "invalid date/datetime format: "+req.Date, http.StatusBadRequest)
 		return
 	}
+	canonicalDate := canonicalizeClientDate(req.Date, parsed)
 	if req.Description != nil {
 		if err := validateLength("description", *req.Description, 500); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -385,7 +384,7 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 	if _, err := tx.Exec(
 		`UPDATE transactions SET account_id=?, category_id=?, type=?, amount=?, currency=?, description=?, note=?, date=?
 		 WHERE id=? AND user_id=?`,
-		req.AccountID, req.CategoryID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.Date, id, targetUserID,
+		req.AccountID, req.CategoryID, req.Type, req.Amount, req.Currency, req.Description, req.Note, canonicalDate, id, targetUserID,
 	); err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
 		return

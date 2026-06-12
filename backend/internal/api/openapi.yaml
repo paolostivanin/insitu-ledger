@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.17.0"
+  version: "1.18.0"
 
 servers:
   - url: /api
@@ -113,7 +113,11 @@ components:
           maxLength: 2000
         date:
           type: string
-          format: date
+          description: >-
+            Since v1.18.0, RFC3339 with offset (e.g. `2026-06-11T08:41:00+02:00`),
+            or bare `YYYY-MM-DD` for date-only entries. Legacy naive datetime
+            strings (`2026-06-11T08:41`) are accepted for backward compatibility
+            but discouraged.
         created_at:
           type: string
           format: date-time
@@ -161,7 +165,11 @@ components:
           maxLength: 2000
         date:
           type: string
-          format: date
+          description: >-
+            Since v1.18.0, RFC3339 with offset (e.g. `2026-06-11T08:41:00+02:00`),
+            or bare `YYYY-MM-DD` for date-only entries. Legacy naive datetime
+            strings (`2026-06-11T08:41`) are accepted for backward compatibility
+            but discouraged.
         client_id:
           type: string
           description: >-
@@ -318,7 +326,10 @@ components:
           type: string
         next_occurrence:
           type: string
-          format: date
+          description: >-
+            Since v1.18.0, RFC3339 with offset (e.g. `2026-06-11T08:41:00+02:00`),
+            or bare `YYYY-MM-DD` for date-only schedules. Legacy naive datetime
+            strings are accepted for backward compatibility.
         active:
           type: boolean
         created_at:
@@ -368,7 +379,10 @@ components:
             end date (the scheduler deactivates the schedule once next > UNTIL).
         next_occurrence:
           type: string
-          format: date
+          description: >-
+            Since v1.18.0, RFC3339 with offset (e.g. `2026-06-11T08:41:00+02:00`),
+            or bare `YYYY-MM-DD` for date-only schedules. Legacy naive datetime
+            strings are accepted for backward compatibility.
         max_occurrences:
           type: integer
           nullable: true

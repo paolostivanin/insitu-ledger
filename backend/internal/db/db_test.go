@@ -3,7 +3,9 @@ package db
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -127,6 +129,117 @@ func TestMigrateLegacySharedAccess(t *testing.T) {
 	again, err := Open(dir)
 	if err != nil {
 		t.Fatalf("re-open: %v", err)
+	}
+	again.Close()
+}
+
+// TestTZMigration verifies the shape-gated TZ backfill:
+//   - 16-char naive datetime → ":00" + server offset appended
+//   - 19-char naive datetime → server offset appended
+//   - date-only → left verbatim (TZ-agnostic by design)
+//   - already-offset → left verbatim
+//   - already-Z → left verbatim
+//   - the migration is idempotent (second Open() touches zero rows)
+func TestTZMigration(t *testing.T) {
+	dir := t.TempDir()
+
+	// First Open: lets schema.sql build everything cleanly. Migration runs on
+	// empty data — no-op.
+	conn, err := Open(dir)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+
+	// Seed user/account/category, then insert rows of each date shape.
+	if _, err := conn.Exec(`
+		INSERT INTO users (username, email, name, password_hash) VALUES ('u', 'u@x', 'U', 'h');
+		INSERT INTO accounts (user_id, name) VALUES (1, 'W');
+		INSERT INTO categories (user_id, name, type) VALUES (1, 'C', 'expense');
+		INSERT INTO transactions (account_id, category_id, user_id, type, amount, date) VALUES
+		    (1, 1, 1, 'expense', 1, '2026-06-11T08:41'),
+		    (1, 1, 1, 'expense', 2, '2026-06-11T08:41:05'),
+		    (1, 1, 1, 'expense', 3, '2026-06-11'),
+		    (1, 1, 1, 'expense', 4, '2026-06-11T08:41:00+03:00'),
+		    (1, 1, 1, 'expense', 5, '2026-06-11T08:41:00Z');
+		INSERT INTO scheduled_transactions (account_id, category_id, user_id, type, amount, rrule, next_occurrence) VALUES
+		    (1, 1, 1, 'expense', 1, 'FREQ=DAILY', '2026-06-11T08:41'),
+		    (1, 1, 1, 'expense', 2, 'FREQ=DAILY', '2026-06-11');
+	`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	conn.Close()
+
+	// Second Open: the TZ migration runs against the seeded rows.
+	migrated, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	wantOffset := time.Now().Format("-07:00") // server's current offset
+
+	checks := []struct {
+		id   int
+		want string
+	}{
+		{1, "2026-06-11T08:41:00" + wantOffset},  // 16-char → +seconds +offset
+		{2, "2026-06-11T08:41:05" + wantOffset},  // 19-char → +offset only
+		{3, "2026-06-11"},                        // date-only → verbatim
+		{4, "2026-06-11T08:41:00+03:00"},         // offset-bearing → verbatim
+		{5, "2026-06-11T08:41:00Z"},              // Z → verbatim
+	}
+	for _, c := range checks {
+		var got string
+		if err := migrated.QueryRow(`SELECT date FROM transactions WHERE id = ?`, c.id).Scan(&got); err != nil {
+			t.Fatalf("scan id %d: %v", c.id, err)
+		}
+		if got != c.want {
+			t.Errorf("id %d: date = %q, want %q", c.id, got, c.want)
+		}
+	}
+
+	// scheduled_transactions: 16-char gets normalized, date-only stays.
+	var nextOcc string
+	if err := migrated.QueryRow(`SELECT next_occurrence FROM scheduled_transactions WHERE id = 1`).Scan(&nextOcc); err != nil {
+		t.Fatalf("scan scheduled 1: %v", err)
+	}
+	if !strings.HasPrefix(nextOcc, "2026-06-11T08:41:00") || !strings.HasSuffix(nextOcc, wantOffset) {
+		t.Errorf("scheduled 1 next_occurrence = %q, want 2026-06-11T08:41:00%s", nextOcc, wantOffset)
+	}
+	if err := migrated.QueryRow(`SELECT next_occurrence FROM scheduled_transactions WHERE id = 2`).Scan(&nextOcc); err != nil {
+		t.Fatalf("scan scheduled 2: %v", err)
+	}
+	if nextOcc != "2026-06-11" {
+		t.Errorf("scheduled 2 next_occurrence = %q, want %q (date-only verbatim)", nextOcc, "2026-06-11")
+	}
+
+	// Re-open: migration must be a no-op. Snapshot all dates first; assert
+	// they're identical after the third Open.
+	snap := map[int]string{}
+	rows, err := migrated.Query(`SELECT id, date FROM transactions ORDER BY id`)
+	if err != nil {
+		t.Fatalf("snapshot query: %v", err)
+	}
+	for rows.Next() {
+		var id int
+		var d string
+		rows.Scan(&id, &d)
+		snap[id] = d
+	}
+	rows.Close()
+	migrated.Close()
+
+	again, err := Open(dir)
+	if err != nil {
+		t.Fatalf("re-open: %v", err)
+	}
+	for id, want := range snap {
+		var got string
+		if err := again.QueryRow(`SELECT date FROM transactions WHERE id = ?`, id).Scan(&got); err != nil {
+			t.Fatalf("re-scan id %d: %v", id, err)
+		}
+		if got != want {
+			t.Errorf("re-open id %d: date drifted from %q to %q (migration not idempotent)", id, want, got)
+		}
 	}
 	again.Close()
 }

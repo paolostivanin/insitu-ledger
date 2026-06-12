@@ -24,7 +24,12 @@ interface ScheduledTransactionDao {
     @Query("DELETE FROM scheduled_transactions WHERE deleted_at IS NOT NULL")
     suspend fun purgeDeleted()
 
-    @Query("SELECT * FROM scheduled_transactions WHERE active = 1 AND deleted_at IS NULL AND next_occurrence <= :now")
+    // SUBSTR(...,1,16) yields "YYYY-MM-DDTHH:MM" for any datetime shape
+    // (strips seconds and any TZ offset / Z suffix) and the bare date for
+    // date-only rows. Both compare correctly against a naive "now" string —
+    // unlike raw `next_occurrence`, which would sort an offset-bearing
+    // due-this-minute row AFTER the naive now and miss the tick.
+    @Query("SELECT * FROM scheduled_transactions WHERE active = 1 AND deleted_at IS NULL AND SUBSTR(next_occurrence, 1, 16) <= :now")
     suspend fun getDue(now: String): List<ScheduledTransactionEntity>
 
     @Query("SELECT MIN(id) FROM scheduled_transactions")

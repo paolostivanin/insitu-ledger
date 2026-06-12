@@ -62,15 +62,15 @@ type scheduled struct {
 
 func processDue(db *sql.DB) {
 	now := time.Now()
-	// Use datetime format so time-based scheduling works.
-	// Old date-only values (YYYY-MM-DD) sort before any YYYY-MM-DDTHH:MM on the same day,
-	// so they are treated as due at midnight.
-	nowStr := now.Format("2006-01-02T15:04")
 
+	// datetime(next_occurrence) parses TZ-aware ISO strings (post-1.18) and
+	// naive ones (legacy), normalizing both to UTC. datetime('now') is UTC
+	// too. Date-only values parse as UTC midnight — accepted shift from
+	// server-local midnight for date-only schedules (TZ-agnostic per design).
 	rows, err := db.Query(
 		`SELECT id, account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences, occurrence_count
 		 FROM scheduled_transactions
-		 WHERE active = 1 AND deleted_at IS NULL AND next_occurrence <= ?`, nowStr,
+		 WHERE active = 1 AND deleted_at IS NULL AND datetime(next_occurrence) <= datetime('now')`,
 	)
 	if err != nil {
 		log.Printf("scheduler: query error: %v", err)
@@ -117,13 +117,19 @@ func processOne(db *sql.DB, s scheduled, now time.Time) error {
 		return fmt.Errorf("begin: %w", err)
 	}
 
+	// Deterministic client_id per (scheduled, occurrence): if this exact
+	// occurrence was already materialized (e.g. multi-instance race, or a
+	// crafted collision), the partial UNIQUE index on
+	// (created_by_user_id, client_id) rejects the INSERT, the transaction
+	// rolls back, and the schedule's next_occurrence is NOT re-advanced.
+	clientID := fmt.Sprintf("sched-%d-%s", s.id, s.nextOccurrence)
 	if _, err := tx.Exec(
-		`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.accountID, s.categoryID, s.userID, s.createdByUserID, s.typ, s.amount, s.currency, s.description, s.note, s.nextOccurrence,
+		`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date, client_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.accountID, s.categoryID, s.userID, s.createdByUserID, s.typ, s.amount, s.currency, s.description, s.note, s.nextOccurrence, clientID,
 	); err != nil {
 		tx.Rollback()
-		return fmt.Errorf("insert transaction: %w", err)
+		return fmt.Errorf("insert transaction (client_id=%s): %w", clientID, err)
 	}
 
 	sign := 1.0
@@ -180,19 +186,35 @@ func isLockedError(err error) bool {
 // advanceDate calculates the next occurrence from the current date and rrule.
 // Supports simplified RRULE: FREQ=DAILY, FREQ=WEEKLY, FREQ=MONTHLY, FREQ=YEARLY
 // with optional INTERVAL=n and UNTIL=YYYYMMDD[THHMMSSZ].
-// Preserves time component if present (e.g. 2026-03-18T09:00 -> 2026-04-18T09:00).
+// Preserves time component AND offset if present (e.g.
+// 2026-03-18T09:00:00+02:00 -> 2026-04-18T09:00:00+02:00).
 // Returns (next, pastUntil) where pastUntil is true if the new occurrence falls
 // after the rrule's UNTIL value (caller should deactivate the schedule).
 func advanceDate(current string, rrule string) (string, bool) {
-	// Try datetime first, then date-only
-	format := "2006-01-02T15:04"
-	t, err := time.Parse(format, current)
-	if err != nil {
-		format = "2006-01-02"
-		t, err = time.Parse(format, current)
-		if err != nil {
-			return current, false
-		}
+	// Format preference for emit, in order of input shape:
+	//   RFC3339 (with offset) → RFC3339         (preserves client's offset)
+	//   no-seconds offset     → RFC3339         (canonicalized + seconds)
+	//   naive datetime        → "2006-01-02T15:04"  (legacy-compat)
+	//   date-only             → "2006-01-02"
+	var t time.Time
+	var emitFormat string
+	if parsed, err := time.Parse(time.RFC3339, current); err == nil {
+		t = parsed
+		emitFormat = time.RFC3339
+	} else if parsed, err := time.Parse("2006-01-02T15:04Z07:00", current); err == nil {
+		t = parsed
+		emitFormat = time.RFC3339
+	} else if parsed, err := time.ParseInLocation("2006-01-02T15:04", current, time.Local); err == nil {
+		t = parsed
+		emitFormat = "2006-01-02T15:04"
+	} else if parsed, err := time.ParseInLocation("2006-01-02", current, time.Local); err == nil {
+		t = parsed
+		emitFormat = "2006-01-02"
+	} else {
+		// Unparseable — return verbatim with pastUntil=false so the caller
+		// doesn't loop on this row every tick (it'd still appear due, but
+		// processOne would error and log).
+		return current, false
 	}
 
 	freq := ""
@@ -242,7 +264,7 @@ func advanceDate(current string, rrule string) (string, bool) {
 		}
 	}
 
-	return t.Format(format), pastUntil
+	return t.Format(emitFormat), pastUntil
 }
 
 // parseUntil accepts the common RFC 5545 UNTIL forms:

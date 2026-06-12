@@ -75,6 +75,12 @@ interface TransactionDao {
     @Query("DELETE FROM transactions WHERE deleted_at IS NOT NULL")
     suspend fun purgeDeleted()
 
+    // Hard-delete by id. Used by SyncRepository when the backend tells us a
+    // CREATE we sent was actually a scheduled_transactions row — we drop the
+    // local optimistic transactions row so it can't render as a phantom.
+    @Query("DELETE FROM transactions WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
     @Query("SELECT MIN(id) FROM transactions")
     suspend fun getMinId(): Long?
 

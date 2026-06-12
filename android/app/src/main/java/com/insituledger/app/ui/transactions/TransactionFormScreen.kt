@@ -75,8 +75,11 @@ fun TransactionFormScreen(
     var showTimePicker by remember { mutableStateOf(false) }
     var showCalculator by remember { mutableStateOf(false) }
 
+    // .take(5) bounds the time portion to "HH:mm" so the picker prefill and
+    // the chip render correctly even when uiState.date carries an offset/
+    // seconds tail like "08:41:00+02:00".
     val datePart = if (uiState.date.contains("T")) uiState.date.substringBefore("T") else uiState.date
-    val timePart = if (uiState.date.contains("T")) uiState.date.substringAfter("T") else "00:00"
+    val timePart = if (uiState.date.contains("T")) uiState.date.substringAfter("T").take(5) else "00:00"
     val formattedDate = try {
         LocalDate.parse(datePart, DateTimeFormatter.ISO_LOCAL_DATE)
             .format(DateTimeFormatter.ofPattern("d MMM yyyy"))
@@ -278,11 +281,15 @@ fun TransactionFormScreen(
             confirmButton = {
                 TextButton(onClick = {
                     datePickerState.selectedDateMillis?.let { millis ->
-                        val selectedDate = Instant.ofEpochMilli(millis)
+                        val selected = Instant.ofEpochMilli(millis)
                             .atZone(ZoneId.of("UTC"))
                             .toLocalDate()
-                            .format(DateTimeFormatter.ISO_LOCAL_DATE)
-                        viewModel.updateDate("${selectedDate}T${timePart}")
+                        // Rebuild through parseFormDate so we preserve the
+                        // existing offset on the rest of the string (the prior
+                        // string-concat would downgrade RFC3339 to naive).
+                        val base = com.insituledger.app.util.DateTimeUtil.parseFormDate(uiState.date)
+                        val updated = base.with(selected)
+                        viewModel.updateDate(updated.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
                     }
                     showDatePicker = false
                 }) { Text("OK") }
@@ -314,8 +321,13 @@ fun TransactionFormScreen(
             text = { TimePicker(state = timePickerState) },
             confirmButton = {
                 TextButton(onClick = {
-                    val newTime = "%02d:%02d".format(timePickerState.hour, timePickerState.minute)
-                    viewModel.updateDate("${datePart}T${newTime}")
+                    // Preserve the existing offset by rebuilding through parseFormDate.
+                    val base = com.insituledger.app.util.DateTimeUtil.parseFormDate(uiState.date)
+                    val updated = base
+                        .withHour(timePickerState.hour)
+                        .withMinute(timePickerState.minute)
+                        .truncatedTo(java.time.temporal.ChronoUnit.MINUTES)
+                    viewModel.updateDate(updated.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
                     showTimePicker = false
                 }) { Text("OK") }
             },

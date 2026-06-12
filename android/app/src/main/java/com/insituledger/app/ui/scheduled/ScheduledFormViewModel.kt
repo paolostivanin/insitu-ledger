@@ -12,6 +12,7 @@ import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
 import com.insituledger.app.ui.transactions.AccountDisplay
 import com.insituledger.app.ui.transactions.DescriptionSuggestion
+import com.insituledger.app.util.DateTimeUtil
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
@@ -78,7 +80,19 @@ data class ScheduledFormUiState(
             } else base
         }
 
-    val nextOccurrence: String get() = "${nextDate}T${nextTime}"
+    // Emit RFC3339 with the system zone's offset for the chosen date, so the
+    // backend's cross-TZ comparison is correct (no more silent re-routing to
+    // scheduled when a traveling user types "now").
+    val nextOccurrence: String
+        get() = try {
+            LocalDateTime.parse("${nextDate}T${nextTime}")
+                .atZone(ZoneId.systemDefault())
+                .toOffsetDateTime()
+                .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+        } catch (_: Exception) {
+            // Defensive fallback: emit naive (legacy) form. Backend accepts it.
+            "${nextDate}T${nextTime}"
+        }
 }
 
 @HiltViewModel
@@ -130,8 +144,11 @@ class ScheduledFormViewModel @Inject constructor(
                             ?.removePrefix("UNTIL=")
                             ?.let { extractIsoDate(it) }
                             ?: ""
+                        // .take(5) bounds the time to "HH:mm" so the picker
+                        // prefill works even when item.nextOccurrence carries
+                        // an offset/seconds tail like "08:41:00+02:00".
                         val (date, time) = if (item.nextOccurrence.contains("T")) {
-                            item.nextOccurrence.split("T", limit = 2).let { it[0] to it[1] }
+                            item.nextOccurrence.split("T", limit = 2).let { it[0] to it[1].take(5) }
                         } else {
                             item.nextOccurrence to "09:00"
                         }
@@ -342,8 +359,11 @@ class ScheduledFormViewModel @Inject constructor(
     }
 
     private fun computeUpcoming(state: ScheduledFormUiState, max: Int): List<String> {
+        // parseFlexibleLocalDateTime handles every shape (offset, seconds,
+        // naive) without throwing — the strict ofPattern parse silently
+        // dropped the preview in edit mode for post-1.18 rows.
         val start = try {
-            LocalDateTime.parse("${state.nextDate}T${state.nextTime}", DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
+            DateTimeUtil.parseFlexibleLocalDateTime("${state.nextDate}T${state.nextTime}")
         } catch (_: Exception) { return emptyList() }
         val until = if (state.endMode == "date" && state.endDate.isNotBlank()) {
             try { LocalDate.parse(state.endDate).atTime(23, 59, 59) } catch (_: Exception) { null }

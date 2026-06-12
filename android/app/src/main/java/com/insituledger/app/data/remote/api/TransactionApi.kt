@@ -18,7 +18,7 @@ interface TransactionApi {
     ): Response<List<TransactionDto>>
 
     @POST("transactions")
-    suspend fun create(@Body input: TransactionInput, @Query("owner_id") ownerId: Long? = null): Response<IdResponse>
+    suspend fun create(@Body input: TransactionInput, @Query("owner_id") ownerId: Long? = null): Response<CreateTransactionResponse>
 
     @PUT("transactions/{id}")
     suspend fun update(@Path("id") id: Long, @Body input: TransactionInput, @Query("owner_id") ownerId: Long? = null): Response<Unit>

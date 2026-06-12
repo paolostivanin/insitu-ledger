@@ -11,6 +11,7 @@ import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
+import com.insituledger.app.util.DateTimeUtil
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -18,10 +19,10 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 
 data class DescriptionSuggestion(
@@ -43,7 +44,11 @@ data class TransactionFormUiState(
     val currency: String = "EUR",
     val description: String = "",
     val note: String = "",
-    val date: String = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")),
+    // Initial value carries the device's TZ offset so the backend's
+    // future-vs-past check is correct cross-TZ from the very first save.
+    val date: String = OffsetDateTime.now(ZoneId.systemDefault())
+        .truncatedTo(ChronoUnit.MINUTES)
+        .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
     val accounts: List<Account> = emptyList(),
     val accountDisplays: List<AccountDisplay> = emptyList(),
     val categories: List<Category> = emptyList(),
@@ -247,12 +252,7 @@ class TransactionFormViewModel @Inject constructor(
                     )
                 } else {
                     val isFuture = try {
-                        if (state.date.contains("T")) {
-                            LocalDateTime.parse(state.date, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
-                                .isAfter(LocalDateTime.now())
-                        } else {
-                            LocalDate.parse(state.date).isAfter(LocalDate.now())
-                        }
+                        DateTimeUtil.parseFormDate(state.date).isAfter(OffsetDateTime.now())
                     } catch (_: Exception) { false }
 
                     if (isFuture) {
@@ -262,15 +262,18 @@ class TransactionFormViewModel @Inject constructor(
                             state.note.ifBlank { null },
                             rrule = "FREQ=DAILY", nextOccurrence = state.date, maxOccurrences = 1
                         )
-                        // Schedule a check at the exact future time
-                        val targetTime = if (state.date.contains("T")) {
-                            LocalDateTime.parse(state.date, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
-                        } else {
-                            LocalDate.parse(state.date).atStartOfDay()
-                        }
-                        val delayMs = targetTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() - System.currentTimeMillis()
-                        if (delayMs > 0) {
-                            syncManager.scheduleDelayedScheduledCheck(delayMs)
+                        // Schedule a check at the exact future time. parseFormDate
+                        // handles every shape (RFC3339 with offset, naive, date-only)
+                        // without throwing on the offset form — v1.27.x's
+                        // ofPattern("yyyy-MM-dd'T'HH:mm") parse would crash the save.
+                        val targetTime = try {
+                            DateTimeUtil.parseFormDate(state.date).toLocalDateTime()
+                        } catch (_: Exception) { null }
+                        if (targetTime != null) {
+                            val delayMs = targetTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() - System.currentTimeMillis()
+                            if (delayMs > 0) {
+                                syncManager.scheduleDelayedScheduledCheck(delayMs)
+                            }
                         }
                     } else {
                         transactionRepository.create(

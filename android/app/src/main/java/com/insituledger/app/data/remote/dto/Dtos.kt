@@ -185,6 +185,16 @@ data class AutocompleteSuggestion(
 
 data class IdResponse(val id: Long)
 
+// Response for POST /api/transactions specifically — backend may silently
+// route to scheduled_transactions when the date is in the future (handler
+// returns {"id": N, "scheduled": true}). Caller MUST check `scheduled` and
+// avoid remapping the local transactions row when true, or it ends up
+// pointing at a scheduled_transactions id (the v1.27.x phantom bug).
+data class CreateTransactionResponse(
+    val id: Long,
+    val scheduled: Boolean = false,
+)
+
 data class AccessibleOwnerDto(
     @SerializedName("owner_user_id") val ownerUserId: Long,
     val name: String,

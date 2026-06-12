@@ -15,24 +15,16 @@
 #   3. Drop the indexes that reference user_id, then drop the column.
 
 # ============================================================================
-# Scheduled-tx idempotency — defense-in-depth
+# Scheduled-tx idempotency — done (v1.18.0) at the practical level
 # ============================================================================
-# v1.16.1 fixed the duplicate-materialization race by gating the Android local
-# scheduler on sync mode (backend is the sole materializer in webapp mode).
-# That closes the dual-execution path, but the schema still has no safeguard
-# if a third actor (a future client, a manual API call, a retry) re-materializes
-# the same occurrence.
+# v1.18.0 makes the scheduler write a deterministic client_id of the form
+# "sched-<scheduled_id>-<next_occurrence>" on every materialization. The
+# existing UNIQUE partial index on (created_by_user_id, client_id) rejects
+# any re-fire as a UNIQUE constraint violation; the wrapping transaction
+# rolls back, no balance double-count, no next_occurrence re-advance.
 #
-# Add a second gate at the schema layer:
-#   1. Add scheduled_transaction_id (nullable INTEGER, FK to scheduled_transactions)
-#      to the transactions table. Backfill is unnecessary — only new rows set it.
-#   2. Add UNIQUE(scheduled_transaction_id, date) WHERE scheduled_transaction_id
-#      IS NOT NULL (partial index — SQLite supports it).
-#   3. Backend scheduler (scheduler.go) sets the FK on insert.
-#   4. Android worker sets the FK on its local insert; sync push includes it.
-#   5. POST /api/transactions accepts an optional scheduled_transaction_id and
-#      relies on the unique index to reject duplicates with a clear 409.
-#   6. Bonus: the scheduled-tx UI can then show "X/Y" derived from
-#      COUNT(transactions WHERE scheduled_transaction_id = ?) instead of the
-#      brittle counter field, which would self-heal after any past duplication.
+# A schema-level scheduled_transaction_id FK + UNIQUE(FK, date) partial
+# index would be strictly stronger (lets the scheduled-tx UI derive
+# "X/Y occurrences" from COUNT() instead of the brittle counter field).
+# File as a fresh ticket if/when wanted.
 

@@ -120,8 +120,13 @@ class ScheduledTransactionWorker @AssistedInject constructor(
 
         val pastUntil = untilStr?.let { parseUntil(it) }?.let { next.isAfter(it) } ?: false
 
+        // Datetime inputs emit RFC3339 with the system zone's offset so the
+        // backend's TZ-aware comparison stays correct after a local sync push.
+        // Date-only inputs stay date-only (TZ-agnostic by design).
         val nextStr = if (hasTime) {
-            DateTimeUtil.formatLocalDateTime(next)
+            next.atZone(java.time.ZoneId.systemDefault())
+                .toOffsetDateTime()
+                .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME)
         } else {
             next.toLocalDate().toString()
         }

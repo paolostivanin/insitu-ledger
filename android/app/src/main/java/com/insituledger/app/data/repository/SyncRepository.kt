@@ -119,11 +119,19 @@ class SyncRepository @Inject constructor(
                 val stored = gson.fromJson(op.payloadJson, TransactionInput::class.java)
                 val input = stored.copy(clientId = op.clientId)
                 val response = transactionApi.create(input)
-                if (response.isSuccessful) {
-                    val serverId = response.body()?.id ?: return false
-                    remapTransactionId(op.entityId, serverId)
-                    true
-                } else false
+                if (!response.isSuccessful) return false
+                val body = response.body() ?: return false
+                if (body.scheduled) {
+                    // Server converted our transaction CREATE into a scheduled
+                    // tx (shouldn't happen post-1.18 backend, but be defensive
+                    // — pre-1.18 this caused the phantom-id duplicate bug).
+                    // Drop the local optimistic transactions row; the next
+                    // pull will bring back the scheduled_transactions row.
+                    transactionDao.deleteById(op.entityId)
+                    return true
+                }
+                remapTransactionId(op.entityId, body.id)
+                true
             }
             "UPDATE" -> {
                 val id = op.serverId ?: op.entityId

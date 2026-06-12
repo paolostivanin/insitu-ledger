@@ -478,8 +478,9 @@ private fun BrandFab(onClick: () -> Unit) {
 }
 
 private fun formatDateLabel(date: String): String {
-	// Input is "yyyy-MM-dd" or "yyyy-MM-ddTHH:mm"; surface a friendly label with time when present.
+	// Input may be "yyyy-MM-dd", "yyyy-MM-ddTHH:mm", or RFC3339-with-offset
+	// "yyyy-MM-ddTHH:mm:ss+02:00". Strip any seconds + offset tail with take(5).
 	val datePart = if (date.contains("T")) date.substringBefore("T") else date
-	val timePart = if (date.contains("T")) date.substringAfter("T") else null
+	val timePart = if (date.contains("T")) date.substringAfter("T").take(5) else null
 	return if (timePart != null) "$datePart  $timePart" else datePart
 }

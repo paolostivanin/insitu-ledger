@@ -117,10 +117,12 @@ func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 		req.Currency = "EUR"
 	}
 
-	if err := validateDatetime(req.NextOccurrence); err != nil {
-		http.Error(w, "invalid next_occurrence: "+err.Error(), http.StatusBadRequest)
+	parsedNext, err := parseClientDate(req.NextOccurrence)
+	if err != nil {
+		http.Error(w, "invalid next_occurrence: "+req.NextOccurrence, http.StatusBadRequest)
 		return
 	}
+	canonicalNext := canonicalizeClientDate(req.NextOccurrence, parsedNext)
 	if req.Description != nil {
 		if err := validateLength("description", *req.Description, 500); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -160,7 +162,7 @@ func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 	result, err := s.DB.Exec(
 		`INSERT INTO scheduled_transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, next_occurrence, max_occurrences, active, client_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences, active, nullableString(req.ClientID),
+		req.AccountID, req.CategoryID, targetUserID, userID, req.Type, req.Amount, req.Currency, req.Description, req.Note, req.RRule, canonicalNext, req.MaxOccurrences, active, nullableString(req.ClientID),
 	)
 	if err != nil {
 		http.Error(w, "failed to create scheduled transaction", http.StatusInternalServerError)
@@ -213,10 +215,12 @@ func (s *Server) handleUpdateScheduled(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := validateDatetime(req.NextOccurrence); err != nil {
-		http.Error(w, "invalid next_occurrence: "+err.Error(), http.StatusBadRequest)
+	parsedNext, err := parseClientDate(req.NextOccurrence)
+	if err != nil {
+		http.Error(w, "invalid next_occurrence: "+req.NextOccurrence, http.StatusBadRequest)
 		return
 	}
+	canonicalNext := canonicalizeClientDate(req.NextOccurrence, parsedNext)
 	if req.Description != nil {
 		if err := validateLength("description", *req.Description, 500); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -239,14 +243,14 @@ func (s *Server) handleUpdateScheduled(w http.ResponseWriter, r *http.Request) {
 			`UPDATE scheduled_transactions SET account_id=?, category_id=?, type=?, amount=?, currency=?,
 			 description=?, note=?, rrule=?, next_occurrence=?, max_occurrences=?, active=? WHERE id=? AND user_id=?`,
 			req.AccountID, req.CategoryID, req.Type, req.Amount, req.Currency,
-			req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences, activeVal, id, targetUserID,
+			req.Description, req.Note, req.RRule, canonicalNext, req.MaxOccurrences, activeVal, id, targetUserID,
 		)
 	} else {
 		_, err = s.DB.Exec(
 			`UPDATE scheduled_transactions SET account_id=?, category_id=?, type=?, amount=?, currency=?,
 			 description=?, note=?, rrule=?, next_occurrence=?, max_occurrences=? WHERE id=? AND user_id=?`,
 			req.AccountID, req.CategoryID, req.Type, req.Amount, req.Currency,
-			req.Description, req.Note, req.RRule, req.NextOccurrence, req.MaxOccurrences, id, targetUserID,
+			req.Description, req.Note, req.RRule, canonicalNext, req.MaxOccurrences, id, targetUserID,
 		)
 	}
 	if err != nil {

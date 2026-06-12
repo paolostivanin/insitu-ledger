@@ -87,14 +87,18 @@ func (s *Server) handleReportByMonth(w http.ResponseWriter, r *http.Request) {
 
 	year := r.URL.Query().Get("year")
 
-	query := `SELECT strftime('%Y-%m', date) as month, type, SUM(amount) as total
+	// SUBSTR (not strftime) — SQLite's strftime treats a trailing "+02:00" as
+	// a UTC-offset modifier and would re-bucket offset-bearing rows by UTC,
+	// shifting month/year for rows near midnight. SUBSTR on the typed prefix
+	// matches the display philosophy (typed wall-clock).
+	query := `SELECT SUBSTR(date, 1, 7) as month, type, SUM(amount) as total
 	          FROM transactions
 	          WHERE deleted_at IS NULL
 	            AND account_id IN (` + sqlInPlaceholders(len(accIDs)) + `)`
 	args := idsToArgs(accIDs)
 
 	if year != "" {
-		query += " AND strftime('%Y', date) = ?"
+		query += " AND SUBSTR(date, 1, 4) = ?"
 		args = append(args, year)
 	}
 
@@ -145,17 +149,20 @@ func (s *Server) handleReportTrend(w http.ResponseWriter, r *http.Request) {
 	to := r.URL.Query().Get("to")
 	groupBy := r.URL.Query().Get("group_by") // "day", "week", "month"
 
-	// strftimeFmts is a strict whitelist — never add user-controlled values here.
-	strftimeFmts := map[string]string{
-		"day":  "%Y-%m-%d",
-		"week": "%Y-W%W",
-	}
-	strftimeFmt, ok := strftimeFmts[groupBy]
-	if !ok {
-		strftimeFmt = "%Y-%m"
+	// Bucket on the SUBSTR'd date prefix instead of raw strftime(date) — see
+	// handleReportByMonth above for why. Weekly stays on strftime, but applied
+	// to the offset-stripped date so it can't be mis-normalized.
+	var periodExpr string
+	switch groupBy {
+	case "day":
+		periodExpr = "SUBSTR(date, 1, 10)"
+	case "week":
+		periodExpr = "strftime('%Y-W%W', SUBSTR(date, 1, 10))"
+	default:
+		periodExpr = "SUBSTR(date, 1, 7)"
 	}
 
-	query := `SELECT strftime('` + strftimeFmt + `', date) as period, type, SUM(amount) as total
+	query := `SELECT ` + periodExpr + ` as period, type, SUM(amount) as total
 	          FROM transactions
 	          WHERE deleted_at IS NULL
 	            AND account_id IN (` + sqlInPlaceholders(len(accIDs)) + `)`

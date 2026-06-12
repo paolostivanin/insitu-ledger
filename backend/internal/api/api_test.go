@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS scheduled_transactions (
     description TEXT,
     note TEXT,
     rrule TEXT NOT NULL,
-    next_occurrence DATE NOT NULL,
+    next_occurrence TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
     max_occurrences INTEGER,
     occurrence_count INTEGER NOT NULL DEFAULT 0,
