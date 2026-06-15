@@ -32,6 +32,10 @@ data class SettingsUiState(
     val pendingOps: Int = 0,
     val lastSyncVersion: Long = 0,
     val isSyncing: Boolean = false,
+    // Populated when the most recent sync attempt failed (push HTTP error,
+    // thrown exception, or pull failure). Cleared at the start of the next
+    // sync or when the user dismisses the banner.
+    val syncError: String? = null,
     val isChangingPassword: Boolean = false,
     val passwordError: String? = null,
     val passwordChanged: Boolean = false,
@@ -240,10 +244,16 @@ class SettingsViewModel @Inject constructor(
 
     fun forceSync() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isSyncing = true) }
-            syncManager.syncNow()
-            _uiState.update { it.copy(isSyncing = false) }
+            _uiState.update { it.copy(isSyncing = true, syncError = null) }
+            val result = syncManager.syncNow()
+            val errorMsg = if (result.isSuccess) null
+                else result.exceptionOrNull()?.message ?: "Sync failed"
+            _uiState.update { it.copy(isSyncing = false, syncError = errorMsg) }
         }
+    }
+
+    fun clearSyncError() {
+        _uiState.update { it.copy(syncError = null) }
     }
 
     fun changePassword(currentPassword: String, newPassword: String) {

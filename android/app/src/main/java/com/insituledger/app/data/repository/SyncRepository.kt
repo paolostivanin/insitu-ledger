@@ -18,6 +18,13 @@ import javax.inject.Singleton
 private fun Response<*>.isSuccessOrAlreadyGone(): Boolean =
     isSuccessful || code() == 404
 
+// Thrown by pushPendingOperations / sync when at least one queued op failed to
+// push (HTTP error or thrown exception). SettingsViewModel surfaces the message
+// to the user; SyncWorker treats it as a retryable failure subject to its own
+// MAX_ATTEMPTS cap so a permanent 4xx doesn't keep WorkManager alive forever.
+class SyncPushException(val failedCount: Int, val firstFailure: String) :
+    Exception("$failedCount sync operation(s) failed. First: $firstFailure")
+
 @Singleton
 class SyncRepository @Inject constructor(
     private val database: AppDatabase,
@@ -34,30 +41,94 @@ class SyncRepository @Inject constructor(
     private val prefs: UserPreferences,
     private val gson: Gson
 ) {
+    // Process the pending-op queue with re-read between rounds so that ID
+    // remaps performed by a successful CREATE become visible to dependent
+    // UPDATE/DELETE/CREATE ops in the same drain. A UPDATE/DELETE that still
+    // carries a negative ID is deferred (the CREATE it depends on may run
+    // later this round). The loop terminates when no op succeeded in a full
+    // pass — at that point any still-deferred op is reported as failed
+    // ("blocked by unsynced CREATE") because the CREATE it depends on either
+    // failed permanently or was never enqueued.
     suspend fun pushPendingOperations(): Result<Unit> {
         return try {
-            val ops = pendingOpDao.getAll()
-            for (op in ops) {
-                try {
-                    val success = when (op.entityType) {
-                        "account" -> pushAccountOp(op)
-                        "category" -> pushCategoryOp(op)
-                        "transaction" -> pushTransactionOp(op)
-                        "scheduled" -> pushScheduledOp(op)
-                        else -> true
+            val processedIds = mutableSetOf<Long>()
+            val failedIds = mutableSetOf<Long>()
+            val failureMessages = mutableListOf<String>()
+
+            while (true) {
+                val ops = pendingOpDao.getAll().filter {
+                    it.id !in processedIds && it.id !in failedIds
+                }
+                if (ops.isEmpty()) break
+
+                var anySucceeded = false
+                var anyDeferred = false
+
+                for (snapshot in ops) {
+                    // Re-read each op just before sending: a prior op in this
+                    // round may have rewritten its payload_json (FK remap) or
+                    // bumped its entity_id away from the negative placeholder.
+                    val op = pendingOpDao.getById(snapshot.id) ?: continue
+                    if (op.operation != "CREATE" && (op.serverId ?: op.entityId) < 0) {
+                        anyDeferred = true
+                        continue
                     }
-                    if (success) {
+
+                    val ok = try {
+                        when (op.entityType) {
+                            "account" -> pushAccountOp(op)
+                            "category" -> pushCategoryOp(op)
+                            "transaction" -> pushTransactionOp(op)
+                            "scheduled" -> pushScheduledOp(op)
+                            else -> true
+                        }
+                    } catch (e: Exception) {
+                        failedIds.add(op.id)
+                        failureMessages.add(opSummary(op) + ": " + (e.message ?: "exception"))
+                        continue
+                    }
+
+                    if (ok) {
                         pendingOpDao.delete(op)
+                        processedIds.add(op.id)
+                        anySucceeded = true
+                    } else {
+                        failedIds.add(op.id)
+                        failureMessages.add(opSummary(op) + ": server rejected")
                     }
-                } catch (_: Exception) {
-                    // Continue processing remaining operations
+                }
+
+                if (!anySucceeded) {
+                    if (anyDeferred) {
+                        // No CREATE progressed this round, so the CREATE every
+                        // remaining deferred op depends on will never produce
+                        // a positive ID. Surface them as failures.
+                        val stuck = pendingOpDao.getAll().filter {
+                            it.id !in processedIds &&
+                                it.id !in failedIds &&
+                                it.operation != "CREATE" &&
+                                (it.serverId ?: it.entityId) < 0
+                        }
+                        for (op in stuck) {
+                            failureMessages.add(opSummary(op) + ": blocked by unsynced CREATE")
+                        }
+                    }
+                    break
                 }
             }
-            Result.success(Unit)
+
+            if (failureMessages.isEmpty()) {
+                Result.success(Unit)
+            } else {
+                Result.failure(SyncPushException(failureMessages.size, failureMessages.first()))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
+
+    private fun opSummary(op: PendingOperationEntity): String =
+        "${op.entityType} ${op.operation} #${op.entityId}"
 
     private suspend fun pushAccountOp(op: PendingOperationEntity): Boolean {
         return when (op.operation) {
@@ -73,13 +144,13 @@ class SyncRepository @Inject constructor(
             }
             "UPDATE" -> {
                 val id = op.serverId ?: op.entityId
-                if (id < 0) return true
+                if (id < 0) return false
                 val input = gson.fromJson(op.payloadJson, AccountInput::class.java)
                 accountApi.update(id, input).isSuccessful
             }
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
-                if (id < 0) return true
+                if (id < 0) return false
                 accountApi.delete(id).isSuccessOrAlreadyGone()
             }
             else -> true
@@ -100,13 +171,13 @@ class SyncRepository @Inject constructor(
             }
             "UPDATE" -> {
                 val id = op.serverId ?: op.entityId
-                if (id < 0) return true
+                if (id < 0) return false
                 val input = gson.fromJson(op.payloadJson, CategoryInput::class.java)
                 categoryApi.update(id, input).isSuccessful
             }
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
-                if (id < 0) return true
+                if (id < 0) return false
                 categoryApi.delete(id).isSuccessOrAlreadyGone()
             }
             else -> true
@@ -135,13 +206,13 @@ class SyncRepository @Inject constructor(
             }
             "UPDATE" -> {
                 val id = op.serverId ?: op.entityId
-                if (id < 0) return true
+                if (id < 0) return false
                 val input = gson.fromJson(op.payloadJson, TransactionInput::class.java)
                 transactionApi.update(id, input).isSuccessful
             }
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
-                if (id < 0) return true
+                if (id < 0) return false
                 transactionApi.delete(id).isSuccessOrAlreadyGone()
             }
             else -> true
@@ -162,13 +233,13 @@ class SyncRepository @Inject constructor(
             }
             "UPDATE" -> {
                 val id = op.serverId ?: op.entityId
-                if (id < 0) return true
+                if (id < 0) return false
                 val input = gson.fromJson(op.payloadJson, ScheduledInput::class.java)
                 scheduledApi.update(id, input).isSuccessful
             }
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
-                if (id < 0) return true
+                if (id < 0) return false
                 scheduledApi.delete(id).isSuccessOrAlreadyGone()
             }
             else -> true
@@ -178,7 +249,10 @@ class SyncRepository @Inject constructor(
     // After a successful push, swap the negative local ID for the server's
     // positive ID AND clear is_local_only. Without the clearLocalOnly step,
     // a future enqueueLocalDataForSync (called on every login) would re-enqueue
-    // every already-synced row, causing the duplicate-expense bug.
+    // every already-synced row, causing the duplicate-expense bug. Also rewrite
+    // the account_id embedded inside payload_json of dependent pending CREATEs
+    // (transaction, scheduled) — otherwise the backend keeps rejecting them on
+    // every retry because the FK is still the negative placeholder.
     private suspend fun remapAccountId(oldId: Long, newId: Long) {
         database.withTransaction {
             accountDao.updateId(oldId, newId)
@@ -186,6 +260,7 @@ class SyncRepository @Inject constructor(
             transactionDao.updateAccountId(oldId, newId)
             scheduledDao.updateAccountId(oldId, newId)
             pendingOpDao.updateEntityId(oldId, newId, "account")
+            rewriteAccountIdInPendingCreates(oldId, newId)
         }
     }
 
@@ -196,6 +271,8 @@ class SyncRepository @Inject constructor(
             transactionDao.updateCategoryId(oldId, newId)
             scheduledDao.updateCategoryId(oldId, newId)
             pendingOpDao.updateEntityId(oldId, newId, "category")
+            rewriteCategoryIdInPendingCreates(oldId, newId)
+            rewriteParentIdInPendingCategoryCreates(oldId, newId)
         }
     }
 
@@ -212,6 +289,65 @@ class SyncRepository @Inject constructor(
             scheduledDao.updateId(oldId, newId)
             scheduledDao.clearLocalOnly(newId)
             pendingOpDao.updateEntityId(oldId, newId, "scheduled")
+        }
+    }
+
+    // CREATE and UPDATE payloads both carry FK columns. TransactionRepository.update
+    // (and the scheduled / category equivalents) serialize whatever account/category
+    // id the form was holding at the time, which is the still-negative placeholder
+    // when the user edits an offline-created entity before its parent has synced.
+    private suspend fun rewriteAccountIdInPendingCreates(oldId: Long, newId: Long) {
+        rewriteTransactionFk(oldId, newId, "CREATE", isAccount = true)
+        rewriteTransactionFk(oldId, newId, "UPDATE", isAccount = true)
+        rewriteScheduledFk(oldId, newId, "CREATE", isAccount = true)
+        rewriteScheduledFk(oldId, newId, "UPDATE", isAccount = true)
+    }
+
+    private suspend fun rewriteCategoryIdInPendingCreates(oldId: Long, newId: Long) {
+        rewriteTransactionFk(oldId, newId, "CREATE", isAccount = false)
+        rewriteTransactionFk(oldId, newId, "UPDATE", isAccount = false)
+        rewriteScheduledFk(oldId, newId, "CREATE", isAccount = false)
+        rewriteScheduledFk(oldId, newId, "UPDATE", isAccount = false)
+    }
+
+    private suspend fun rewriteParentIdInPendingCategoryCreates(oldId: Long, newId: Long) {
+        for (operation in listOf("CREATE", "UPDATE")) {
+            for (op in pendingOpDao.findByEntityTypeAndOperation("category", operation)) {
+                val payload = op.payloadJson ?: continue
+                val input = runCatching { gson.fromJson(payload, CategoryInput::class.java) }.getOrNull() ?: continue
+                if (input.parentId != oldId) continue
+                pendingOpDao.updatePayloadJson(op.id, gson.toJson(input.copy(parentId = newId)))
+            }
+        }
+    }
+
+    private suspend fun rewriteTransactionFk(oldId: Long, newId: Long, operation: String, isAccount: Boolean) {
+        for (op in pendingOpDao.findByEntityTypeAndOperation("transaction", operation)) {
+            val payload = op.payloadJson ?: continue
+            val input = runCatching { gson.fromJson(payload, TransactionInput::class.java) }.getOrNull() ?: continue
+            val rewritten = if (isAccount) {
+                if (input.accountId != oldId) continue
+                input.copy(accountId = newId)
+            } else {
+                if (input.categoryId != oldId) continue
+                input.copy(categoryId = newId)
+            }
+            pendingOpDao.updatePayloadJson(op.id, gson.toJson(rewritten))
+        }
+    }
+
+    private suspend fun rewriteScheduledFk(oldId: Long, newId: Long, operation: String, isAccount: Boolean) {
+        for (op in pendingOpDao.findByEntityTypeAndOperation("scheduled", operation)) {
+            val payload = op.payloadJson ?: continue
+            val input = runCatching { gson.fromJson(payload, ScheduledInput::class.java) }.getOrNull() ?: continue
+            val rewritten = if (isAccount) {
+                if (input.accountId != oldId) continue
+                input.copy(accountId = newId)
+            } else {
+                if (input.categoryId != oldId) continue
+                input.copy(categoryId = newId)
+            }
+            pendingOpDao.updatePayloadJson(op.id, gson.toJson(rewritten))
         }
     }
 
@@ -324,6 +460,9 @@ class SyncRepository @Inject constructor(
         }
     }
 
+    // Skip pull when push reported failures: pulling while local writes are
+    // unresolved can overwrite a row whose update or delete is still pending
+    // (silent reversion from the user's perspective).
     suspend fun sync(): Result<Unit> {
         val pushResult = pushPendingOperations()
         if (pushResult.isFailure) return pushResult

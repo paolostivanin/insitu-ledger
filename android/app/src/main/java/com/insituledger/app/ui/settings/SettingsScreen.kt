@@ -473,6 +473,30 @@ fun SettingsScreen(
                                 Text("Disconnect")
                             }
                         }
+                        uiState.syncError?.let { msg ->
+                            Spacer(modifier = Modifier.height(AppSpacing.sm))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(AppSpacing.sm))
+                                Text(
+                                    msg,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(
+                                    onClick = viewModel::clearSyncError,
+                                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                                ) {
+                                    Text("Dismiss")
+                                }
+                            }
+                        }
                     } else {
                         // Not connected
                         Button(onClick = {
