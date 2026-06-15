@@ -506,6 +506,14 @@
 			{/if}
 		</div>
 	{/if}
+
+	<div class="card section about-card">
+		<h2>About</h2>
+		<div class="about-row">
+			<span>InSitu Ledger</span>
+			<span class="version">v{__APP_VERSION__}</span>
+		</div>
+	</div>
 </div>
 
 <ConfirmDialog bind:open={confirmOpen} message={confirmMessage} confirmText="Revoke" onconfirm={confirmAction} />
@@ -573,5 +581,19 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+	.about-card {
+		margin-top: 1.5rem;
+	}
+	.about-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		color: var(--text-muted);
+		font-size: 0.9rem;
+	}
+	.version {
+		font-family: monospace;
+		user-select: all;
 	}
 </style>
