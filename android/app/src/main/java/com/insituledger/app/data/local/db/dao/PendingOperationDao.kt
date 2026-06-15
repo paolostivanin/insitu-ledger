@@ -29,4 +29,20 @@ interface PendingOperationDao {
     // transaction would end up with two pending ops after re-login.
     @Query("SELECT * FROM pending_operations WHERE entity_type = :entityType AND operation = :operation AND entity_id = :entityId LIMIT 1")
     suspend fun findByEntity(entityType: String, operation: String, entityId: Long): PendingOperationEntity?
+
+    // Used by SyncRepository.remapAccountId / remapCategoryId to find queued
+    // CREATEs whose payload_json still references a freshly-remapped negative
+    // foreign key. Without rewriting those payloads the backend keeps rejecting
+    // them on every retry.
+    @Query("SELECT * FROM pending_operations WHERE entity_type = :entityType AND operation = :operation ORDER BY created_at ASC")
+    suspend fun findByEntityTypeAndOperation(entityType: String, operation: String): List<PendingOperationEntity>
+
+    // Used by SyncRepository.pushPendingOperations to re-read an op just
+    // before sending it: a prior op in the same round may have rewritten
+    // this op's payload_json (FK remap).
+    @Query("SELECT * FROM pending_operations WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): PendingOperationEntity?
+
+    @Query("UPDATE pending_operations SET payload_json = :payloadJson WHERE id = :id")
+    suspend fun updatePayloadJson(id: Long, payloadJson: String)
 }
