@@ -194,7 +194,25 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.DB.Exec("UPDATE accounts SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, userID)
+	// Soft-delete the account AND its dependents (transactions, scheduled,
+	// shared_account_access) in one transaction. Each UPDATE fires the
+	// existing sync_version trigger so guests/clients see the tombstones via
+	// normal incremental sync. Without cascading shared_account_access, the
+	// share row pointed at a deleted account silently — guests would see the
+	// account-deleted tombstone via the account stream but no revocation
+	// event, and B1's revoked_account_ids ride-along never fired.
+	tx, err := s.DB.Begin()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(
+		`UPDATE accounts SET deleted_at = datetime('now')
+		 WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+		id, userID,
+	)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -206,6 +224,33 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	if rows == 0 {
 		http.Error(w, "account not found", http.StatusNotFound)
+		return
+	}
+
+	if _, err := tx.Exec(
+		`UPDATE transactions SET deleted_at = datetime('now')
+		 WHERE account_id = ? AND deleted_at IS NULL`, id,
+	); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if _, err := tx.Exec(
+		`UPDATE scheduled_transactions SET deleted_at = datetime('now')
+		 WHERE account_id = ? AND deleted_at IS NULL`, id,
+	); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if _, err := tx.Exec(
+		`UPDATE shared_account_access SET deleted_at = datetime('now')
+		 WHERE account_id = ? AND deleted_at IS NULL`, id,
+	); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

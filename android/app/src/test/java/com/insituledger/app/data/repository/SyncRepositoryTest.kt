@@ -502,4 +502,127 @@ class SyncRepositoryTest {
         coVerify(exactly = 0) { accountDao.deleteById(any()) }
         coVerify(exactly = 0) { pendingOpDao.deleteByEntity(any(), any()) }
     }
+
+    // ====================
+    // v1.20 F3: account tombstones in the synced payload (deleted_at IS NOT
+    // NULL) must trigger the same purge as revoked_account_ids.
+    // ====================
+
+    @Test
+    fun pullPurgesDependentsForSoftDeletedAccountTombstone() = runTest {
+        coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(0L)
+        // The server returns the account row with deleted_at set (owner soft-
+        // deleted it). No revoked_account_ids — this is the owner's own data,
+        // not a share revocation. The local purge must still run.
+        val deletedAccount = com.insituledger.app.data.remote.dto.AccountDto(
+            id = 77L, userId = 1L, name = "Wallet", currency = "EUR", balance = 0.0,
+            createdAt = "2025-01-01T00:00:00Z", updatedAt = "2026-06-15T00:00:00Z",
+            deletedAt = "2026-06-15T00:00:00Z", syncVersion = 10L,
+            ownerUserId = 1L, ownerName = "Admin", isShared = false
+        )
+        coEvery { syncApi.sync(any()) } returns Response.success(
+            com.insituledger.app.data.remote.dto.SyncResponse(
+                currentVersion = 10,
+                transactions = emptyList(),
+                categories = emptyList(),
+                accounts = listOf(deletedAccount),
+                scheduledTransactions = emptyList(),
+                revokedAccountIds = null
+            )
+        )
+        coEvery { transactionDao.selectIdsByAccountId(77L) } returns listOf(200L)
+        coEvery { scheduledDao.selectIdsByAccountId(77L) } returns listOf(600L)
+
+        val result = newRepository().pull()
+
+        assertTrue("pull should succeed; got ${result.exceptionOrNull()?.message}", result.isSuccess)
+        coVerify(exactly = 1) { pendingOpDao.deleteByEntity("transaction", 200L) }
+        coVerify(exactly = 1) { pendingOpDao.deleteByEntity("scheduled", 600L) }
+        coVerify(exactly = 1) { transactionDao.deleteByAccountId(77L) }
+        coVerify(exactly = 1) { scheduledDao.deleteByAccountId(77L) }
+        coVerify(exactly = 1) { accountDao.deleteById(77L) }
+    }
+
+    // ====================
+    // v1.20 F1+F4: 403/404 on push is LostAccess — drop the op locally and
+    // let push report success so pull() runs and delivers the tombstone.
+    // ====================
+
+    @Test
+    fun pushTransactionUpdateReturning403IsDroppedAndPushSucceeds() = runTest {
+        // Transaction was created online (entityId = 42, serverId = 42), edited
+        // offline, then the account was revoked. Server returns 403.
+        val op = txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns errorBody<Unit>(403)
+
+        val result = newRepository().pushPendingOperations()
+
+        // Push reports success (no transient/permanent failures) so sync() runs
+        // pull() — which is the only path that delivers revoked_account_ids.
+        assertTrue("push should succeed (LostAccess only); got ${result.exceptionOrNull()?.message}", result.isSuccess)
+        // Op is dropped locally.
+        assertTrue("queue should be empty", queue.isEmpty())
+        coVerify(exactly = 1) { pendingOpDao.delete(op) }
+    }
+
+    @Test
+    fun push404OnUpdateIsAlsoLostAccess() = runTest {
+        // UPDATE 404 = entity (or parent account) is gone — same outcome as 403.
+        val op = txUpdate(entityId = 99L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.update(eq(99L), any(), isNull()) } returns errorBody<Unit>(404)
+
+        val result = newRepository().pushPendingOperations()
+
+        assertTrue(result.isSuccess)
+        assertTrue(queue.isEmpty())
+        coVerify(exactly = 1) { pendingOpDao.delete(op) }
+    }
+
+    // ====================
+    // v1.20 F4: 5xx is transient (retry); other 4xx is permanent (no retry).
+    // ====================
+
+    @Test
+    fun push500MarksTransientAndRetainsOp() = runTest {
+        val op = txCreate(localId = -7L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.create(any(), isNull()) } returns errorBody<CreateTransactionResponse>(503)
+
+        val result = newRepository().pushPendingOperations()
+
+        assertTrue(result.isFailure)
+        val ex = result.exceptionOrNull() as SyncPushException
+        assertEquals(1, ex.transientCount)
+        assertEquals(0, ex.permanentCount)
+        assertTrue("canRetry should be true for transient failures", ex.canRetry)
+        assertEquals(1, queue.size)
+        coVerify(exactly = 0) { pendingOpDao.delete(op) }
+    }
+
+    @Test
+    fun push400MarksPermanentAndBlocksRetry() = runTest {
+        val op = txCreate(localId = -7L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.create(any(), isNull()) } returns errorBody<CreateTransactionResponse>(400)
+
+        val result = newRepository().pushPendingOperations()
+
+        assertTrue(result.isFailure)
+        val ex = result.exceptionOrNull() as SyncPushException
+        assertEquals(0, ex.transientCount)
+        assertEquals(1, ex.permanentCount)
+        assertFalse("canRetry should be false when only permanent failures", ex.canRetry)
+        assertEquals(1, queue.size)
+        coVerify(exactly = 0) { pendingOpDao.delete(op) }
+    }
+
+    @Test
+    fun pushNetworkExceptionIsTransient() = runTest {
+        txCreate(localId = -7L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.create(any(), isNull()) } throws java.io.IOException("network down")
+
+        val result = newRepository().pushPendingOperations()
+
+        val ex = result.exceptionOrNull() as SyncPushException
+        assertEquals(1, ex.transientCount)
+        assertTrue(ex.canRetry)
+    }
 }

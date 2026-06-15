@@ -147,6 +147,106 @@ func TestSharedAccessSyncIdempotent(t *testing.T) {
 	}
 }
 
+// v1.20 (post-Tier-B F3): when an owner soft-deletes a shared account, the
+// share row must also be tombstoned so the guest's next incremental sync
+// surfaces the revocation via revoked_account_ids. The account itself is no
+// longer in the guest's sync scope (the share is gone), so the cleanup path
+// is the revoked_account_ids ride-along, not the account-tombstone stream.
+func TestAccountDeleteCascadesShareRevocationForGuest(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	adminToken, guestToken, _ := setupTwoUsers(t, handler)
+
+	walletID := mustCreateAccount(t, handler, adminToken, `{"name":"Wallet"}`)
+	mustShare(t, handler, adminToken, "guest@test.com", walletID)
+
+	// Guest catches up — sees the wallet.
+	initial := doSync(t, handler, guestToken, 0)
+	if accs := initial["accounts"].([]any); len(accs) != 1 {
+		t.Fatalf("guest should see 1 account, got %d", len(accs))
+	}
+	v := int64(initial["current_version"].(float64))
+
+	// Owner deletes the account.
+	req := authedRequest("DELETE", fmt.Sprintf("/api/accounts/%d", walletID), "", adminToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 204 {
+		t.Fatalf("delete account: got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Guest's next sync surfaces the revocation as revoked_account_ids.
+	syncAfter := doSync(t, handler, guestToken, v)
+	rev := syncAfter["revoked_account_ids"].([]any)
+	if len(rev) != 1 || int64(rev[0].(float64)) != walletID {
+		t.Fatalf("expected revoked_account_ids=[%d], got %v", walletID, rev)
+	}
+}
+
+// v1.20 (post-Tier-B F3): for the OWNER's own incremental sync, deleting an
+// account must produce tombstones for the account itself AND its dependent
+// transactions / scheduled. Without the cascade, transactions and schedules
+// remained un-tombstoned locally on the owner's other devices.
+func TestAccountDeleteCascadesTransactionTombstonesForOwner(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	adminToken := loginAdmin(t, handler)
+
+	walletID := mustCreateAccount(t, handler, adminToken, `{"name":"Wallet"}`)
+	catID := mustCreateCategory(t, handler, adminToken, `{"name":"Food","type":"expense"}`)
+	txBody := fmt.Sprintf(
+		`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"date":"2025-01-01"}`,
+		walletID, catID,
+	)
+	req := authedRequest("POST", "/api/transactions", txBody, adminToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("seed transaction: got %d: %s", w.Code, w.Body.String())
+	}
+	schedBody := fmt.Sprintf(
+		`{"account_id":%d,"category_id":%d,"type":"expense","amount":50,"rrule":"FREQ=MONTHLY","next_occurrence":"2026-07-01"}`,
+		walletID, catID,
+	)
+	req = authedRequest("POST", "/api/scheduled", schedBody, adminToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("seed scheduled: got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Owner catches up.
+	initial := doSync(t, handler, adminToken, 0)
+	v := int64(initial["current_version"].(float64))
+
+	// Owner deletes the account.
+	req = authedRequest("DELETE", fmt.Sprintf("/api/accounts/%d", walletID), "", adminToken)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 204 {
+		t.Fatalf("delete account: got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Owner's incremental sync from previous version must include the
+	// account, transaction, and scheduled rows all with deleted_at set.
+	syncAfter := doSync(t, handler, adminToken, v)
+
+	accs := syncAfter["accounts"].([]any)
+	if len(accs) != 1 || accs[0].(map[string]any)["deleted_at"] == nil {
+		t.Fatalf("expected account tombstone, got %v", accs)
+	}
+	txns := syncAfter["transactions"].([]any)
+	if len(txns) != 1 || txns[0].(map[string]any)["deleted_at"] == nil {
+		t.Fatalf("expected transaction tombstone, got %v", txns)
+	}
+	scheds := syncAfter["scheduled_transactions"].([]any)
+	if len(scheds) != 1 || scheds[0].(map[string]any)["deleted_at"] == nil {
+		t.Fatalf("expected scheduled tombstone, got %v", scheds)
+	}
+}
+
 // Tier B B4: category delete must be rejected when an undeleted scheduled
 // transaction references it.
 func TestCategoryDeleteBlockedByScheduledTransaction(t *testing.T) {

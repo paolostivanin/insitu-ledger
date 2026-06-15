@@ -160,6 +160,54 @@ BEGIN
     UPDATE shared_account_access SET sync_version = (SELECT version FROM sync_meta WHERE id = 1) WHERE id = NEW.id;
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_transactions_version AFTER INSERT ON transactions
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE transactions SET sync_version = (SELECT version FROM sync_meta WHERE id = 1) WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_transactions_update_version AFTER UPDATE ON transactions
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE transactions SET sync_version = (SELECT version FROM sync_meta WHERE id = 1), updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_categories_version AFTER INSERT ON categories
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE categories SET sync_version = (SELECT version FROM sync_meta WHERE id = 1) WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_categories_update_version AFTER UPDATE ON categories
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE categories SET sync_version = (SELECT version FROM sync_meta WHERE id = 1), updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_accounts_version AFTER INSERT ON accounts
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE accounts SET sync_version = (SELECT version FROM sync_meta WHERE id = 1) WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_accounts_update_version AFTER UPDATE ON accounts
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE accounts SET sync_version = (SELECT version FROM sync_meta WHERE id = 1), updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_scheduled_version AFTER INSERT ON scheduled_transactions
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE scheduled_transactions SET sync_version = (SELECT version FROM sync_meta WHERE id = 1) WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_scheduled_update_version AFTER UPDATE ON scheduled_transactions
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE scheduled_transactions SET sync_version = (SELECT version FROM sync_meta WHERE id = 1), updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     admin_user_id INTEGER NOT NULL REFERENCES users(id),
