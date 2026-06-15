@@ -10,7 +10,7 @@
 	import { currentAccountId } from '$lib/stores/accountFilter';
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
-	import { extractTime, toIsoOffset } from '$lib/datetime';
+	import { extractTime, localDateInputValue, toIsoOffset } from '$lib/datetime';
 
 	let txns = $state<Transaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -42,7 +42,7 @@
 	let fAmount = $state(0);
 	let fDescription = $state('');
 	let fNote = $state('');
-	let fDate = $state(new Date().toISOString().slice(0, 10));
+	let fDate = $state(localDateInputValue());
 	let fTime = $state(new Date().toTimeString().slice(0, 5));
 	let fCurrency = $state('EUR');
 
@@ -251,7 +251,7 @@
 		fAmount = 0;
 		fDescription = '';
 		fNote = '';
-		fDate = new Date().toISOString().slice(0, 10);
+		fDate = localDateInputValue();
 		fTime = new Date().toTimeString().slice(0, 5);
 		fCurrency = 'EUR';
 		if (accts.length) fAccountId = getDefaultAccountId();

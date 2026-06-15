@@ -92,4 +92,25 @@ class ValidateBackupTest {
         val child = cat(id = 2, parentId = 1)
         assertNull(validateBackup(backup(categories = listOf(parent, child))))
     }
+
+    // Tier B B3: dup-ID rejection extended to transactions and scheduled.
+    // Without these, two rows with the same id would silently collapse to a
+    // single upsert and lose the second payload's data.
+    @Test fun `duplicate transaction id is rejected`() {
+        val result = validateBackup(backup(transactions = listOf(tx(id = 1), tx(id = 1))))
+        assertNotNull(result)
+        assertTrue(result!!, result.contains("duplicate"))
+    }
+
+    @Test fun `duplicate scheduled id is rejected`() {
+        val result = validateBackup(backup(scheduled = listOf(sched(id = 1), sched(id = 1))))
+        assertNotNull(result)
+        assertTrue(result!!, result.contains("duplicate"))
+    }
+
+    @Test fun `duplicate category id remains rejected`() {
+        val result = validateBackup(backup(categories = listOf(cat(1), cat(1))))
+        assertNotNull(result)
+        assertTrue(result!!, result.contains("duplicate"))
+    }
 }

@@ -143,9 +143,22 @@ CREATE TABLE IF NOT EXISTS shared_account_access (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     permission TEXT NOT NULL DEFAULT 'write' CHECK (permission = 'write'),
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    deleted_at DATETIME,
     sync_version INTEGER NOT NULL DEFAULT 0,
     UNIQUE(owner_user_id, guest_user_id, account_id)
 );
+
+CREATE TRIGGER IF NOT EXISTS trg_shared_access_version AFTER INSERT ON shared_account_access
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE shared_account_access SET sync_version = (SELECT version FROM sync_meta WHERE id = 1) WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_shared_access_update_version AFTER UPDATE ON shared_account_access
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE shared_account_access SET sync_version = (SELECT version FROM sync_meta WHERE id = 1) WHERE id = NEW.id;
+END;
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

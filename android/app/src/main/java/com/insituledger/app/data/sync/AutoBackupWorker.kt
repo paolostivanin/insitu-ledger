@@ -70,42 +70,95 @@ class AutoBackupWorker @AssistedInject constructor(
 
         val today = LocalDate.now()
 
+        // Each class is independent: a write failure of the daily backup must
+        // not block the weekly or skip retention of the others. Any failure
+        // bubbles up to a retry so the user's last-good copy is preserved.
+        var anyFailed = false
+
         if (prefs.getAutoBackupDailyEnabledImmediate()) {
             val fileName = "insitu-backup-daily-$today.$ext"
-            writeBackup(folder, fileName, payload, mime)
-            cleanupOldBackups(folder, "insitu-backup-daily-", prefs.getAutoBackupDailyRetentionImmediate())
+            if (writeBackup(folder, fileName, payload, mime)) {
+                cleanupOldBackups(folder, "insitu-backup-daily-", prefs.getAutoBackupDailyRetentionImmediate())
+            } else {
+                anyFailed = true
+            }
         }
 
         if (prefs.getAutoBackupWeeklyEnabledImmediate() && today.dayOfWeek == DayOfWeek.MONDAY) {
             val weekNumber = today.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
             val fileName = "insitu-backup-weekly-${today.year}-W${weekNumber.toString().padStart(2, '0')}.$ext"
-            writeBackup(folder, fileName, payload, mime)
-            cleanupOldBackups(folder, "insitu-backup-weekly-", prefs.getAutoBackupWeeklyRetentionImmediate())
+            if (writeBackup(folder, fileName, payload, mime)) {
+                cleanupOldBackups(folder, "insitu-backup-weekly-", prefs.getAutoBackupWeeklyRetentionImmediate())
+            } else {
+                anyFailed = true
+            }
         }
 
         if (prefs.getAutoBackupMonthlyEnabledImmediate() && today.dayOfMonth == 1) {
             val fileName = "insitu-backup-monthly-${today.format(DateTimeFormatter.ofPattern("yyyy-MM"))}.$ext"
-            writeBackup(folder, fileName, payload, mime)
-            cleanupOldBackups(folder, "insitu-backup-monthly-", prefs.getAutoBackupMonthlyRetentionImmediate())
+            if (writeBackup(folder, fileName, payload, mime)) {
+                cleanupOldBackups(folder, "insitu-backup-monthly-", prefs.getAutoBackupMonthlyRetentionImmediate())
+            } else {
+                anyFailed = true
+            }
         }
 
-        return Result.success()
+        return if (anyFailed) Result.retry() else Result.success()
     }
 
-    private fun writeBackup(folder: DocumentFile, fileName: String, payload: ByteArray, mime: String) {
-        try {
-            folder.findFile(fileName)?.delete()
-            val file = folder.createFile(mime, fileName)
-            if (file == null) {
-                Log.e(TAG, "Failed to create file: $fileName")
-                return
+    // Write-then-swap: stage payload in a .tmp sibling, fsync, and only then
+    // remove the existing target so a storage failure can't destroy the last
+    // good copy. SAF has no atomic rename, so a rename failure after the
+    // delete leaves the .tmp file in place — still better than nothing.
+    // Returns true on success; the caller skips retention cleanup on false
+    // so a transient error doesn't quietly evict older known-good backups.
+    private fun writeBackup(folder: DocumentFile, fileName: String, payload: ByteArray, mime: String): Boolean {
+        val tmpName = "$fileName.tmp"
+        // Sweep any orphan from a prior failed run before staging again.
+        folder.findFile(tmpName)?.delete()
+
+        val tmpFile = try {
+            folder.createFile(mime, tmpName)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create temp file: $tmpName", e)
+            return false
+        } ?: run {
+            Log.e(TAG, "Failed to create temp file: $tmpName")
+            return false
+        }
+
+        val wrote = try {
+            applicationContext.contentResolver.openOutputStream(tmpFile.uri).use { out ->
+                if (out == null) {
+                    Log.e(TAG, "Failed to open output stream for: $tmpName")
+                    false
+                } else {
+                    out.write(payload)
+                    out.flush()
+                    true
+                }
             }
-            applicationContext.contentResolver.openOutputStream(file.uri)?.use { out ->
-                out.write(payload)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write temp backup: $tmpName", e)
+            false
+        }
+
+        if (!wrote) {
+            try { tmpFile.delete() } catch (_: Exception) {}
+            return false
+        }
+
+        return try {
+            folder.findFile(fileName)?.delete()
+            if (!tmpFile.renameTo(fileName)) {
+                Log.e(TAG, "Failed to rename $tmpName -> $fileName (left in place)")
+                return false
             }
             Log.d(TAG, "Wrote backup: $fileName")
+            true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to write backup: $fileName", e)
+            Log.e(TAG, "Failed to finalize backup: $fileName", e)
+            false
         }
     }
 

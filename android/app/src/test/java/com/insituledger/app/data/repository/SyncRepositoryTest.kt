@@ -447,4 +447,59 @@ class SyncRepositoryTest {
         coVerify(exactly = 0) { pendingOpDao.delete(op) }
         assertEquals(1, queue.size)
     }
+
+    // ====================
+    // Tier B B1: pull() must transactionally purge revoked accounts plus
+    // their transactions/schedules/pending ops.
+    // ====================
+
+    @Test
+    fun pullPurgesRevokedAccountAndItsRows() = runTest {
+        coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(0L)
+        coEvery { syncApi.sync(any()) } returns Response.success(
+            com.insituledger.app.data.remote.dto.SyncResponse(
+                currentVersion = 7,
+                transactions = emptyList(),
+                categories = emptyList(),
+                accounts = emptyList(),
+                scheduledTransactions = emptyList(),
+                revokedAccountIds = listOf(42L)
+            )
+        )
+        coEvery { transactionDao.selectIdsByAccountId(42L) } returns listOf(100L, 101L)
+        coEvery { scheduledDao.selectIdsByAccountId(42L) } returns listOf(500L)
+
+        val result = newRepository().pull()
+
+        assertTrue("pull should succeed; got ${result.exceptionOrNull()?.message}", result.isSuccess)
+        coVerify(exactly = 1) { pendingOpDao.deleteByEntity("transaction", 100L) }
+        coVerify(exactly = 1) { pendingOpDao.deleteByEntity("transaction", 101L) }
+        coVerify(exactly = 1) { pendingOpDao.deleteByEntity("scheduled", 500L) }
+        coVerify(exactly = 1) { transactionDao.deleteByAccountId(42L) }
+        coVerify(exactly = 1) { scheduledDao.deleteByAccountId(42L) }
+        coVerify(exactly = 1) { pendingOpDao.deleteByEntity("account", 42L) }
+        coVerify(exactly = 1) { accountDao.deleteById(42L) }
+    }
+
+    @Test
+    fun pullWithoutRevokedAccountIdsTouchesNoDeletes() = runTest {
+        coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(0L)
+        coEvery { syncApi.sync(any()) } returns Response.success(
+            com.insituledger.app.data.remote.dto.SyncResponse(
+                currentVersion = 1,
+                transactions = emptyList(),
+                categories = emptyList(),
+                accounts = emptyList(),
+                scheduledTransactions = emptyList(),
+                revokedAccountIds = null  // pre-1.19 backend
+            )
+        )
+
+        val result = newRepository().pull()
+
+        assertTrue(result.isSuccess)
+        coVerify(exactly = 0) { transactionDao.deleteByAccountId(any()) }
+        coVerify(exactly = 0) { accountDao.deleteById(any()) }
+        coVerify(exactly = 0) { pendingOpDao.deleteByEntity(any(), any()) }
+    }
 }

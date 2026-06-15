@@ -212,31 +212,48 @@ func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if category has transactions
-	var count int
+	// Confirm the category exists and belongs to the caller BEFORE any
+	// dependency check. Otherwise a non-owner could probe for the existence
+	// of someone else's category via the 409-vs-404 timing.
+	var owns int
 	if err := s.DB.QueryRow(
-		"SELECT COUNT(*) FROM transactions WHERE category_id = ? AND deleted_at IS NULL", id,
-	).Scan(&count); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	if count > 0 {
-		http.Error(w, "cannot delete category with existing transactions", http.StatusConflict)
+		`SELECT 1 FROM categories WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+		id, targetUserID,
+	).Scan(&owns); err != nil {
+		http.Error(w, "category not found", http.StatusNotFound)
 		return
 	}
 
-	result, err := s.DB.Exec("UPDATE categories SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL", id, targetUserID)
-	if err != nil {
+	// Block deletion when live transactions OR undeleted scheduled
+	// transactions still reference the category. Materialized scheduled
+	// occurrences would otherwise point at a soft-deleted FK.
+	var txnCount, schedCount int
+	if err := s.DB.QueryRow(
+		`SELECT COUNT(*) FROM transactions WHERE category_id = ? AND deleted_at IS NULL`, id,
+	).Scan(&txnCount); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
+	if txnCount > 0 {
+		http.Error(w, "cannot delete category with existing transactions", http.StatusConflict)
+		return
+	}
+	if err := s.DB.QueryRow(
+		`SELECT COUNT(*) FROM scheduled_transactions WHERE category_id = ? AND deleted_at IS NULL`, id,
+	).Scan(&schedCount); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if rows == 0 {
-		http.Error(w, "category not found", http.StatusNotFound)
+	if schedCount > 0 {
+		http.Error(w, "cannot delete category with scheduled transactions", http.StatusConflict)
+		return
+	}
+
+	if _, err := s.DB.Exec(
+		`UPDATE categories SET deleted_at = datetime('now') WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+		id, targetUserID,
+	); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

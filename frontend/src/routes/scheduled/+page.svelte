@@ -6,7 +6,7 @@
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
 	import { sharedOwnerUserId } from '$lib/stores/shared';
-	import { extractTime, toIsoOffset } from '$lib/datetime';
+	import { extractTime, localDateInputValue, toIsoOffset } from '$lib/datetime';
 
 	let items = $state<ScheduledTransaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -30,7 +30,7 @@
 	let fDescription = $state('');
 	let fNote = $state('');
 	let fFrequency = $state('monthly');
-	let fNextDate = $state(new Date().toISOString().slice(0, 10));
+	let fNextDate = $state(localDateInputValue());
 	let fNextTime = $state('09:00');
 	let fEndMode = $state<'never' | 'count' | 'date'>('never');
 	let fMaxOccurrences = $state<string>('');
@@ -145,7 +145,7 @@
 		fDescription = '';
 		fNote = '';
 		fFrequency = 'monthly';
-		fNextDate = new Date().toISOString().slice(0, 10);
+		fNextDate = localDateInputValue();
 		fNextTime = '09:00';
 		fEndMode = 'never';
 		fMaxOccurrences = '';

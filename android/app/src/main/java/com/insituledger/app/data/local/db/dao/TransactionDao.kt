@@ -81,6 +81,22 @@ interface TransactionDao {
     @Query("DELETE FROM transactions WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    // Hard-delete every transaction belonging to the given account. Used by
+    // SyncRepository.pull when the server tombstones a shared-account grant
+    // (revoked_account_ids).
+    @Query("DELETE FROM transactions WHERE account_id = :accountId")
+    suspend fun deleteByAccountId(accountId: Long)
+
+    // Used by SyncRepository.pull to find transaction IDs whose pending ops
+    // need to be purged before the rows are deleted.
+    @Query("SELECT id FROM transactions WHERE account_id = :accountId")
+    suspend fun selectIdsByAccountId(accountId: Long): List<Long>
+
+    // Used by Tier B B4: pre-check before allowing a category soft-delete on
+    // Android. Mirrors the server-side transactions check.
+    @Query("SELECT COUNT(*) FROM transactions WHERE category_id = :categoryId AND deleted_at IS NULL")
+    suspend fun countByCategoryId(categoryId: Long): Int
+
     @Query("SELECT MIN(id) FROM transactions")
     suspend fun getMinId(): Long?
 

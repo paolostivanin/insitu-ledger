@@ -3,6 +3,8 @@ package com.insituledger.app.data.repository
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.dao.CategoryDao
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
+import com.insituledger.app.data.local.db.dao.ScheduledTransactionDao
+import com.insituledger.app.data.local.db.dao.TransactionDao
 import com.insituledger.app.data.local.db.entity.CategoryEntity
 import com.insituledger.app.data.local.db.entity.PendingOperationEntity
 import com.insituledger.app.data.remote.api.CategoryApi
@@ -19,9 +21,22 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
+// v1.19.0 (Tier B B4): mirror the server-side delete check on the client so
+// the failure is visible at the moment the user taps delete — the optimistic
+// offline-first flow would otherwise show "Category deleted" and then have
+// the row resurrected by the next pull.
+sealed class CategoryDeleteResult {
+    object Success : CategoryDeleteResult()
+    object NotFound : CategoryDeleteResult()
+    object HasTransactions : CategoryDeleteResult()
+    object HasScheduled : CategoryDeleteResult()
+}
+
 @Singleton
 class CategoryRepository @Inject constructor(
     private val categoryDao: CategoryDao,
+    private val transactionDao: TransactionDao,
+    private val scheduledDao: ScheduledTransactionDao,
     private val pendingOpDao: PendingOperationDao,
     private val categoryApi: CategoryApi,
     private val gson: Gson,
@@ -99,8 +114,15 @@ class CategoryRepository @Inject constructor(
         }
     }
 
-    suspend fun delete(id: Long) {
-        val existing = categoryDao.getById(id) ?: return
+    suspend fun delete(id: Long): CategoryDeleteResult {
+        val existing = categoryDao.getById(id) ?: return CategoryDeleteResult.NotFound
+        // Pre-check the dependents the backend will reject on (Tier B B4).
+        // Optimistic local soft-delete would otherwise be reversed by the
+        // next pull when the server returns 409, plus the queued DELETE op
+        // would grind in the queue with no surfaced error.
+        if (transactionDao.countByCategoryId(id) > 0) return CategoryDeleteResult.HasTransactions
+        if (scheduledDao.countByCategoryId(id) > 0) return CategoryDeleteResult.HasScheduled
+
         categoryDao.upsert(existing.copy(deletedAt = "deleted"))
 
         if (isSyncEnabled()) {
@@ -112,6 +134,7 @@ class CategoryRepository @Inject constructor(
             ))
             syncManager.triggerImmediateSync()
         }
+        return CategoryDeleteResult.Success
     }
 
     private fun CategoryEntity.toDomain() = Category(

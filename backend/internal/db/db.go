@@ -58,6 +58,7 @@ func Open(dataDir string) (*sql.DB, error) {
 		"ALTER TABLE accounts ADD COLUMN client_id TEXT",
 		"ALTER TABLE categories ADD COLUMN client_id TEXT",
 		"ALTER TABLE scheduled_transactions ADD COLUMN client_id TEXT",
+		"ALTER TABLE shared_account_access ADD COLUMN deleted_at DATETIME",
 	}
 	for _, m := range migrations {
 		if _, err := conn.Exec(m); err != nil {

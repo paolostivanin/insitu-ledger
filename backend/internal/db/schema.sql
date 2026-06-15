@@ -141,6 +141,11 @@ CREATE TABLE IF NOT EXISTS shared_account_access (
     -- kept (not dropped) so old clients/sync payloads continue to validate.
     permission TEXT NOT NULL DEFAULT 'write' CHECK (permission = 'write'),
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    -- v1.19.0: revocations are soft-deletes so incremental sync can ship a
+    -- tombstone to guests. Re-grant after revoke clears deleted_at on the
+    -- same row (see handleCreateSharedAccess) — the unique constraint
+    -- prevents two rows for the same triple from ever existing.
+    deleted_at DATETIME,
     sync_version INTEGER NOT NULL DEFAULT 0,
     UNIQUE(owner_user_id, guest_user_id, account_id)
 );
@@ -156,6 +161,8 @@ CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_active ON scheduled_transactions(active, next_occurrence);
 CREATE INDEX IF NOT EXISTS idx_shared_account_access_guest ON shared_account_access(guest_user_id);
 CREATE INDEX IF NOT EXISTS idx_shared_account_access_account ON shared_account_access(account_id);
+CREATE INDEX IF NOT EXISTS idx_shared_account_access_sync ON shared_account_access(sync_version);
+CREATE INDEX IF NOT EXISTS idx_shared_account_access_guest_sync ON shared_account_access(guest_user_id, sync_version);
 CREATE INDEX IF NOT EXISTS idx_transactions_description ON transactions(description COLLATE NOCASE);
 -- idx_transactions_created_by is created by migrateSharedAccessAttribution after
 -- the column is added (legacy DBs need the ALTER first).
@@ -246,4 +253,19 @@ CREATE TRIGGER IF NOT EXISTS trg_scheduled_update_version AFTER UPDATE ON schedu
 BEGIN
     UPDATE sync_meta SET version = version + 1 WHERE id = 1;
     UPDATE scheduled_transactions SET sync_version = (SELECT version FROM sync_meta WHERE id = 1), updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- v1.19.0: share grants and revocations are now versioned sync events so
+-- incremental clients can pick up newly accessible accounts and emit
+-- tombstones for revoked ones.
+CREATE TRIGGER IF NOT EXISTS trg_shared_access_version AFTER INSERT ON shared_account_access
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE shared_account_access SET sync_version = (SELECT version FROM sync_meta WHERE id = 1) WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_shared_access_update_version AFTER UPDATE ON shared_account_access
+BEGIN
+    UPDATE sync_meta SET version = version + 1 WHERE id = 1;
+    UPDATE shared_account_access SET sync_version = (SELECT version FROM sync_meta WHERE id = 1) WHERE id = NEW.id;
 END;

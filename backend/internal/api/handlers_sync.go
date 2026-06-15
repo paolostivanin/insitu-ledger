@@ -48,7 +48,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		ownAccts.Close()
 
 		sharedAccts, err := tx.Query(
-			`SELECT account_id FROM shared_account_access WHERE guest_user_id = ?`,
+			`SELECT account_id FROM shared_account_access WHERE guest_user_id = ? AND deleted_at IS NULL`,
 			userID,
 		)
 		if err != nil {
@@ -92,7 +92,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		} else {
 			idRows, err := tx.Query(
 				`SELECT account_id FROM shared_account_access
-				 WHERE owner_user_id = ? AND guest_user_id = ?`,
+				 WHERE owner_user_id = ? AND guest_user_id = ? AND deleted_at IS NULL`,
 				targetUserID, userID,
 			)
 			if err != nil {
@@ -111,6 +111,71 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	accInClause := sqlInPlaceholders(len(syncAccIDs))
 	catUIDClause := sqlInPlaceholders(len(categoryUIDs))
 
+	// v1.19.0: track accounts the user can newly read since `since` (share
+	// just granted, or re-granted after revoke) and accounts whose grant was
+	// revoked. The former trigger a full-snapshot ride-along of account +
+	// transactions + scheduled (their sync_version may predate `since`); the
+	// latter become tombstones the client purges locally.
+	var (
+		freshlyAccessibleAccIDs []int64
+		freshlyAccessibleOwners []int64
+		revokedAccountIDs       []int64
+	)
+	if ownerStr == "" {
+		freshRows, err := tx.Query(
+			`SELECT account_id FROM shared_account_access
+			 WHERE guest_user_id = ? AND deleted_at IS NULL AND sync_version > ?`,
+			userID, since,
+		)
+		if err != nil {
+			http.Error(w, "query error", http.StatusInternalServerError)
+			return
+		}
+		for freshRows.Next() {
+			var id int64
+			if err := freshRows.Scan(&id); err == nil {
+				freshlyAccessibleAccIDs = append(freshlyAccessibleAccIDs, id)
+			}
+		}
+		freshRows.Close()
+
+		ownerRows, err := tx.Query(
+			`SELECT DISTINCT owner_user_id FROM shared_account_access
+			 WHERE guest_user_id = ? AND deleted_at IS NULL AND sync_version > ?`,
+			userID, since,
+		)
+		if err != nil {
+			http.Error(w, "query error", http.StatusInternalServerError)
+			return
+		}
+		for ownerRows.Next() {
+			var id int64
+			if err := ownerRows.Scan(&id); err == nil {
+				freshlyAccessibleOwners = append(freshlyAccessibleOwners, id)
+			}
+		}
+		ownerRows.Close()
+
+		revRows, err := tx.Query(
+			`SELECT account_id FROM shared_account_access
+			 WHERE guest_user_id = ? AND deleted_at IS NOT NULL AND sync_version > ?`,
+			userID, since,
+		)
+		if err != nil {
+			http.Error(w, "query error", http.StatusInternalServerError)
+			return
+		}
+		for revRows.Next() {
+			var id int64
+			if err := revRows.Scan(&id); err == nil {
+				revokedAccountIDs = append(revokedAccountIDs, id)
+			}
+		}
+		revRows.Close()
+	}
+	freshAccClause := sqlInPlaceholders(len(freshlyAccessibleAccIDs))
+	freshOwnerClause := sqlInPlaceholders(len(freshlyAccessibleOwners))
+
 	var currentVersion int64
 	tx.QueryRow("SELECT version FROM sync_meta WHERE id = 1").Scan(&currentVersion)
 
@@ -122,23 +187,35 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			"categories":             []any{},
 			"accounts":               []any{},
 			"scheduled_transactions": []any{},
+			"revoked_account_ids":    []any{},
 		})
 		return
 	}
 
 	resp := map[string]any{"current_version": currentVersion}
+	if revokedAccountIDs == nil {
+		resp["revoked_account_ids"] = []int64{}
+	} else {
+		resp["revoked_account_ids"] = revokedAccountIDs
+	}
 
 	// Fetch changed transactions (including soft-deleted ones so mobile can remove them).
 	// Includes created_by_user_id and the creator's display name for the "Added by" UI.
-	txnArgs := append([]any{since}, idsToArgs(syncAccIDs)...)
+	// Freshly-accessible accounts (just-granted shares) get their full
+	// transaction history shipped even when each transaction's own
+	// sync_version predates `since`.
+	txnArgs := make([]any, 0, len(syncAccIDs)+len(freshlyAccessibleAccIDs)+1)
+	txnArgs = append(txnArgs, idsToArgs(syncAccIDs)...)
+	txnArgs = append(txnArgs, since)
+	txnArgs = append(txnArgs, idsToArgs(freshlyAccessibleAccIDs)...)
 	txnRows, err := tx.Query(
 		`SELECT t.id, t.account_id, t.category_id, t.user_id, t.type, t.amount, t.currency,
 		        t.description, t.note, t.date, t.created_at, t.updated_at, t.deleted_at, t.sync_version,
 		        t.created_by_user_id, cu.name
 		 FROM transactions t
 		 LEFT JOIN users cu ON cu.id = t.created_by_user_id
-		 WHERE t.sync_version > ?
-		   AND t.account_id IN (`+accInClause+`)`, txnArgs...,
+		 WHERE t.account_id IN (`+accInClause+`)
+		   AND (t.sync_version > ? OR t.account_id IN (`+freshAccClause+`))`, txnArgs...,
 	)
 	if err != nil {
 		log.Printf("sync: transaction query error: %v", err)
@@ -177,11 +254,19 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	resp["transactions"] = txns
 
-	// Fetch changed categories from every accessible owner.
-	catArgs := append([]any{since}, idsToArgs(categoryUIDs)...)
+	// Fetch changed categories from every accessible owner. Owners that became
+	// freshly accessible (their first share or a re-share since `since`) get
+	// their full category set re-shipped — over-fetching for owners who were
+	// already accessible via other accounts is harmless (client upserts dedup).
+	catArgs := make([]any, 0, len(categoryUIDs)+len(freshlyAccessibleOwners)+1)
+	catArgs = append(catArgs, idsToArgs(categoryUIDs)...)
+	catArgs = append(catArgs, since)
+	catArgs = append(catArgs, idsToArgs(freshlyAccessibleOwners)...)
 	catRows, err := tx.Query(
 		`SELECT id, user_id, parent_id, name, type, icon, color, created_at, updated_at, deleted_at, sync_version
-		 FROM categories WHERE sync_version > ? AND user_id IN (`+catUIDClause+`)`, catArgs...,
+		 FROM categories
+		 WHERE user_id IN (`+catUIDClause+`)
+		   AND (sync_version > ? OR user_id IN (`+freshOwnerClause+`))`, catArgs...,
 	)
 	if err != nil {
 		log.Printf("sync: category query error: %v", err)
@@ -217,16 +302,21 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// Fetch changed accounts (only those in scope for this user). The owner
 	// display name + is_shared flag travel with each account so Android can
 	// render the "Shared by [name]" badge offline from its local cache.
-	acctArgs := append([]any{since}, idsToArgs(syncAccIDs)...)
+	// Freshly-accessible accounts are sent regardless of their own
+	// sync_version so the guest's first sync after a grant gets the snapshot.
+	acctArgs := make([]any, 0, len(syncAccIDs)+len(freshlyAccessibleAccIDs)+1)
+	acctArgs = append(acctArgs, idsToArgs(syncAccIDs)...)
+	acctArgs = append(acctArgs, since)
+	acctArgs = append(acctArgs, idsToArgs(freshlyAccessibleAccIDs)...)
 	acctRows, err := tx.Query(
 		`SELECT a.id, a.user_id, a.name, a.currency, a.balance,
 		        a.created_at, a.updated_at, a.deleted_at, a.sync_version,
 		        u.name AS owner_name,
-		        EXISTS(SELECT 1 FROM shared_account_access s WHERE s.account_id = a.id) AS is_shared
+		        EXISTS(SELECT 1 FROM shared_account_access s WHERE s.account_id = a.id AND s.deleted_at IS NULL) AS is_shared
 		 FROM accounts a
 		 JOIN users u ON u.id = a.user_id
-		 WHERE a.sync_version > ?
-		   AND a.id IN (`+accInClause+`)`, acctArgs...,
+		 WHERE a.id IN (`+accInClause+`)
+		   AND (a.sync_version > ? OR a.id IN (`+freshAccClause+`))`, acctArgs...,
 	)
 	if err != nil {
 		log.Printf("sync: account query error: %v", err)
@@ -263,8 +353,12 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	resp["accounts"] = accts
 
-	// Fetch changed scheduled transactions
-	schedArgs := append([]any{since}, idsToArgs(syncAccIDs)...)
+	// Fetch changed scheduled transactions. Same freshly-accessible ride-along
+	// as transactions above.
+	schedArgs := make([]any, 0, len(syncAccIDs)+len(freshlyAccessibleAccIDs)+1)
+	schedArgs = append(schedArgs, idsToArgs(syncAccIDs)...)
+	schedArgs = append(schedArgs, since)
+	schedArgs = append(schedArgs, idsToArgs(freshlyAccessibleAccIDs)...)
 	schedRows, err := tx.Query(
 		`SELECT s.id, s.account_id, s.category_id, s.user_id, s.type, s.amount, s.currency,
 		        s.description, s.note, s.rrule, s.next_occurrence, s.active,
@@ -273,8 +367,8 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		        s.created_by_user_id, cu.name
 		 FROM scheduled_transactions s
 		 LEFT JOIN users cu ON cu.id = s.created_by_user_id
-		 WHERE s.sync_version > ?
-		   AND s.account_id IN (`+accInClause+`)`, schedArgs...,
+		 WHERE s.account_id IN (`+accInClause+`)
+		   AND (s.sync_version > ? OR s.account_id IN (`+freshAccClause+`))`, schedArgs...,
 	)
 	if err != nil {
 		log.Printf("sync: scheduled query error: %v", err)

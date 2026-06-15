@@ -46,4 +46,15 @@ interface ScheduledTransactionDao {
 
     @Query("UPDATE scheduled_transactions SET category_id = :newId WHERE category_id = :oldId")
     suspend fun updateCategoryId(oldId: Long, newId: Long)
+
+    @Query("DELETE FROM scheduled_transactions WHERE account_id = :accountId")
+    suspend fun deleteByAccountId(accountId: Long)
+
+    @Query("SELECT id FROM scheduled_transactions WHERE account_id = :accountId")
+    suspend fun selectIdsByAccountId(accountId: Long): List<Long>
+
+    // Used by Tier B B4: pre-check before allowing a category soft-delete on
+    // Android. Mirrors the server-side scheduled-transactions check.
+    @Query("SELECT COUNT(*) FROM scheduled_transactions WHERE category_id = :categoryId AND deleted_at IS NULL")
+    suspend fun countByCategoryId(categoryId: Long): Int
 }

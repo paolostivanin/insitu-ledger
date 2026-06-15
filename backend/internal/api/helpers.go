@@ -109,7 +109,7 @@ func resolveTargetOwner(r *http.Request, authUserID int64, db dbQuerier) (int64,
 	var hasShare int
 	err = db.QueryRow(
 		`SELECT 1 FROM shared_account_access
-		 WHERE owner_user_id = ? AND guest_user_id = ? LIMIT 1`,
+		 WHERE owner_user_id = ? AND guest_user_id = ? AND deleted_at IS NULL LIMIT 1`,
 		ownerID, authUserID,
 	).Scan(&hasShare)
 	if err != nil {
@@ -127,7 +127,7 @@ func listAllAccessibleAccountIDs(authUserID int64, db dbQuerier) ([]int64, error
 		 UNION
 		 SELECT a.id FROM accounts a
 		 JOIN shared_account_access s ON s.account_id = a.id
-		 WHERE s.guest_user_id = ? AND a.deleted_at IS NULL`,
+		 WHERE s.guest_user_id = ? AND a.deleted_at IS NULL AND s.deleted_at IS NULL`,
 		authUserID, authUserID,
 	)
 	if err != nil {
@@ -151,7 +151,7 @@ func listAllAccessibleAccountIDs(authUserID int64, db dbQuerier) ([]int64, error
 // sync endpoint to compose owner-keyed UNION queries.
 func listAccessibleOwnerIDs(authUserID int64, db dbQuerier) ([]int64, error) {
 	rows, err := db.Query(
-		`SELECT DISTINCT owner_user_id FROM shared_account_access WHERE guest_user_id = ?`,
+		`SELECT DISTINCT owner_user_id FROM shared_account_access WHERE guest_user_id = ? AND deleted_at IS NULL`,
 		authUserID,
 	)
 	if err != nil {
@@ -192,7 +192,7 @@ func listAccessibleAccountIDs(authUserID, targetOwnerID int64, db dbQuerier) ([]
 			`SELECT a.id FROM accounts a
 			 JOIN shared_account_access s ON s.account_id = a.id
 			 WHERE a.user_id = ? AND a.deleted_at IS NULL
-			   AND s.owner_user_id = ? AND s.guest_user_id = ?`,
+			   AND s.owner_user_id = ? AND s.guest_user_id = ? AND s.deleted_at IS NULL`,
 			targetOwnerID, targetOwnerID, authUserID,
 		)
 	}
@@ -232,7 +232,7 @@ func checkAccountAccess(authUserID, accountID int64, db dbQuerier) (int64, error
 	var hasShare int
 	err = db.QueryRow(
 		`SELECT 1 FROM shared_account_access
-		 WHERE owner_user_id = ? AND guest_user_id = ? AND account_id = ?`,
+		 WHERE owner_user_id = ? AND guest_user_id = ? AND account_id = ? AND deleted_at IS NULL`,
 		ownerID, authUserID, accountID,
 	).Scan(&hasShare)
 	if err != nil {

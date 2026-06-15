@@ -7,7 +7,7 @@
 	import { sharedOwnerUserId } from '$lib/stores/shared';
 	import { currentAccountId } from '$lib/stores/accountFilter';
 	import AccountFilterPill from '$lib/components/AccountFilterPill.svelte';
-	import { extractTime } from '$lib/datetime';
+	import { extractTime, localMonthKey } from '$lib/datetime';
 
 	let accts = $state<Account[]>([]);
 	let recentTxns = $state<Transaction[]>([]);
@@ -78,12 +78,12 @@
 	}
 
 	function thisMonthExpenses(): number {
-		const key = new Date().toISOString().slice(0, 7);
+		const key = localMonthKey();
 		return monthData.filter(m => m.month === key && m.type === 'expense').reduce((s, m) => s + m.total, 0);
 	}
 
 	function thisMonthIncome(): number {
-		const key = new Date().toISOString().slice(0, 7);
+		const key = localMonthKey();
 		return monthData.filter(m => m.month === key && m.type === 'income').reduce((s, m) => s + m.total, 0);
 	}
 
