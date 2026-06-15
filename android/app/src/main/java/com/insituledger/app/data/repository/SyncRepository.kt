@@ -19,26 +19,34 @@ private fun Response<*>.isSuccessOrAlreadyGone(): Boolean =
     isSuccessful || code() == 404
 
 // Per-op result. Lets pushPendingOperations distinguish a "you no longer have
-// access" failure (drop the op, let the next pull deliver the tombstone) from
+// access" failure (dead-letter the op, let the next pull confirm a tombstone) from
 // a transient 5xx (retry later) from a permanent 4xx (needs user attention).
 // Without this, every HTTP error reduced to the same opaque "server rejected"
 // and SyncWorker retried 5x regardless of whether retry could possibly help.
 sealed class PushOutcome {
     object Success : PushOutcome()
-    // 403/404 on UPDATE/DELETE/CREATE — guest lost access to the parent
-    // resource. The op cannot apply; drop it locally. sync() still runs pull()
-    // afterwards so the tombstone (revoked_account_ids or deleted_at on the
-    // synced account row) arrives and cleans up the dependent local rows.
+    // 403/404 on an account-scoped mutation may mean the guest lost access to
+    // the parent resource. Keep the op visible as failed until a pull confirms
+    // the tombstone; purgeAccountLocally then removes it automatically.
     object LostAccess : PushOutcome()
-    // Other 4xx (400 validation, 409 conflict). Op stays queued for visibility
-    // but SyncWorker does NOT retry — backoff can't help, the user has to act.
+    // Other 4xx (400 validation, 409 conflict). Op moves to the visible failed
+    // queue and SyncWorker does NOT retry — backoff can't help.
     data class Permanent(val code: Int, val message: String) : PushOutcome()
     // 5xx, IOException, network timeout. Op stays queued and SyncWorker
     // returns retry() up to MAX_ATTEMPTS.
     data class Transient(val message: String) : PushOutcome()
 }
 
-private fun outcomeForNonIdempotent(response: Response<*>): PushOutcome {
+private fun outcomeForCreateOrOwnedCategoryMutation(response: Response<*>): PushOutcome {
+    if (response.isSuccessful) return PushOutcome.Success
+    val code = response.code()
+    return when {
+        code in 400..499 -> PushOutcome.Permanent(code, "HTTP $code")
+        else -> PushOutcome.Transient("HTTP $code")
+    }
+}
+
+private fun outcomeForAccessScopedMutation(response: Response<*>): PushOutcome {
     if (response.isSuccessful) return PushOutcome.Success
     val code = response.code()
     return when {
@@ -48,12 +56,15 @@ private fun outcomeForNonIdempotent(response: Response<*>): PushOutcome {
     }
 }
 
-private fun outcomeForIdempotentDelete(response: Response<*>): PushOutcome {
+private fun outcomeForIdempotentDelete(
+    response: Response<*>,
+    forbiddenMeansLostAccess: Boolean
+): PushOutcome {
     // 404 on DELETE means already gone — desired end state.
     if (response.isSuccessOrAlreadyGone()) return PushOutcome.Success
     val code = response.code()
     return when {
-        code == 403 -> PushOutcome.LostAccess
+        code == 403 && forbiddenMeansLostAccess -> PushOutcome.LostAccess
         code in 400..499 -> PushOutcome.Permanent(code, "HTTP $code")
         else -> PushOutcome.Transient("HTTP $code")
     }
@@ -66,7 +77,8 @@ class SyncPushException(
     val failedCount: Int,
     val transientCount: Int,
     val permanentCount: Int,
-    val firstFailure: String
+    val firstFailure: String,
+    val lostAccessCount: Int = 0
 ) : Exception(
     "$failedCount sync operation(s) failed " +
         "($transientCount transient, $permanentCount permanent). First: $firstFailure"
@@ -101,15 +113,15 @@ class SyncRepository @Inject constructor(
     suspend fun pushPendingOperations(): Result<Unit> {
         return try {
             val processedIds = mutableSetOf<Long>()
-            val droppedIds = mutableSetOf<Long>()
             val failedIds = mutableSetOf<Long>()
             val failureMessages = mutableListOf<String>()
             var transientCount = 0
             var permanentCount = 0
+            var lostAccessCount = 0
 
             while (true) {
                 val ops = pendingOpDao.getAll().filter {
-                    it.id !in processedIds && it.id !in failedIds && it.id !in droppedIds
+                    it.id !in processedIds && it.id !in failedIds
                 }
                 if (ops.isEmpty()) break
 
@@ -147,20 +159,23 @@ class SyncRepository @Inject constructor(
                             anySucceeded = true
                         }
                         is PushOutcome.LostAccess -> {
-                            // Guest lost access to the parent resource. The
-                            // op cannot apply; drop it locally so sync() can
-                            // proceed to pull(), which delivers the tombstone
-                            // (revoked_account_ids or deleted_at) that cleans
-                            // up dependent local rows. Without dropping, a
-                            // queued offline edit on a revoked account would
-                            // wedge sync forever — push 403 → skip pull →
-                            // tombstone never arrives → next sync 403, repeat.
-                            pendingOpDao.delete(op)
-                            droppedIds.add(op.id)
+                            // Do not silently drop ambiguous 403/404 responses:
+                            // they can also be policy/validation failures. Move
+                            // the op out of the active queue, then pull access
+                            // tombstones. A confirmed account purge removes it;
+                            // otherwise Settings exposes retry/discard.
+                            val message = "${opSummary(op)}: possible lost access"
+                            pendingOpDao.markFailed(op.id, message)
+                            failedIds.add(op.id)
+                            failureMessages.add(message)
+                            lostAccessCount++
+                            permanentCount++
                         }
                         is PushOutcome.Permanent -> {
                             failedIds.add(op.id)
-                            failureMessages.add("${opSummary(op)}: ${outcome.message}")
+                            val message = "${opSummary(op)}: ${outcome.message}"
+                            pendingOpDao.markFailed(op.id, message)
+                            failureMessages.add(message)
                             permanentCount++
                         }
                         is PushOutcome.Transient -> {
@@ -172,7 +187,7 @@ class SyncRepository @Inject constructor(
                 }
 
                 if (!anySucceeded) {
-                    if (anyDeferred) {
+                    if (anyDeferred && transientCount == 0) {
                         // No CREATE progressed this round, so the CREATE every
                         // remaining deferred op depends on will never produce
                         // a positive ID this drain. Surface them as permanent
@@ -182,12 +197,13 @@ class SyncRepository @Inject constructor(
                         val stuck = pendingOpDao.getAll().filter {
                             it.id !in processedIds &&
                                 it.id !in failedIds &&
-                                it.id !in droppedIds &&
                                 it.operation != "CREATE" &&
                                 (it.serverId ?: it.entityId) < 0
                         }
                         for (op in stuck) {
-                            failureMessages.add(opSummary(op) + ": blocked by unsynced CREATE")
+                            val message = opSummary(op) + ": blocked by unsynced CREATE"
+                            pendingOpDao.markFailed(op.id, message)
+                            failureMessages.add(message)
                             permanentCount++
                             failedIds.add(op.id)
                         }
@@ -198,16 +214,13 @@ class SyncRepository @Inject constructor(
 
             val realFailures = transientCount + permanentCount
             if (realFailures == 0) {
-                // Either everything succeeded, or only LostAccess ops were
-                // dropped. Either way sync() should run pull() — the
-                // dropped-LostAccess case is exactly when we need pull to
-                // deliver the matching tombstone.
                 Result.success(Unit)
             } else {
                 Result.failure(SyncPushException(
                     failedCount = realFailures,
                     transientCount = transientCount,
                     permanentCount = permanentCount,
+                    lostAccessCount = lostAccessCount,
                     firstFailure = failureMessages.first()
                 ))
             }
@@ -229,18 +242,18 @@ class SyncRepository @Inject constructor(
                     val serverId = response.body()?.id ?: return PushOutcome.Transient("empty body")
                     remapAccountId(op.entityId, serverId)
                     PushOutcome.Success
-                } else outcomeForNonIdempotent(response)
+                } else outcomeForCreateOrOwnedCategoryMutation(response)
             }
             "UPDATE" -> {
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return PushOutcome.Permanent(0, "unsynced parent")
                 val input = gson.fromJson(op.payloadJson, AccountInput::class.java)
-                outcomeForNonIdempotent(accountApi.update(id, input))
+                outcomeForAccessScopedMutation(accountApi.update(id, input))
             }
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return PushOutcome.Permanent(0, "unsynced parent")
-                outcomeForIdempotentDelete(accountApi.delete(id))
+                outcomeForIdempotentDelete(accountApi.delete(id), forbiddenMeansLostAccess = true)
             }
             else -> PushOutcome.Success
         }
@@ -256,18 +269,18 @@ class SyncRepository @Inject constructor(
                     val serverId = response.body()?.id ?: return PushOutcome.Transient("empty body")
                     remapCategoryId(op.entityId, serverId)
                     PushOutcome.Success
-                } else outcomeForNonIdempotent(response)
+                } else outcomeForCreateOrOwnedCategoryMutation(response)
             }
             "UPDATE" -> {
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return PushOutcome.Permanent(0, "unsynced parent")
                 val input = gson.fromJson(op.payloadJson, CategoryInput::class.java)
-                outcomeForNonIdempotent(categoryApi.update(id, input))
+                outcomeForCreateOrOwnedCategoryMutation(categoryApi.update(id, input))
             }
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return PushOutcome.Permanent(0, "unsynced parent")
-                outcomeForIdempotentDelete(categoryApi.delete(id))
+                outcomeForIdempotentDelete(categoryApi.delete(id), forbiddenMeansLostAccess = false)
             }
             else -> PushOutcome.Success
         }
@@ -279,7 +292,7 @@ class SyncRepository @Inject constructor(
                 val stored = gson.fromJson(op.payloadJson, TransactionInput::class.java)
                 val input = stored.copy(clientId = op.clientId)
                 val response = transactionApi.create(input)
-                if (!response.isSuccessful) return outcomeForNonIdempotent(response)
+                if (!response.isSuccessful) return outcomeForCreateOrOwnedCategoryMutation(response)
                 val body = response.body() ?: return PushOutcome.Transient("empty body")
                 if (body.scheduled) {
                     // Server converted our transaction CREATE into a scheduled
@@ -297,12 +310,12 @@ class SyncRepository @Inject constructor(
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return PushOutcome.Permanent(0, "unsynced parent")
                 val input = gson.fromJson(op.payloadJson, TransactionInput::class.java)
-                outcomeForNonIdempotent(transactionApi.update(id, input))
+                outcomeForAccessScopedMutation(transactionApi.update(id, input))
             }
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return PushOutcome.Permanent(0, "unsynced parent")
-                outcomeForIdempotentDelete(transactionApi.delete(id))
+                outcomeForIdempotentDelete(transactionApi.delete(id), forbiddenMeansLostAccess = true)
             }
             else -> PushOutcome.Success
         }
@@ -318,18 +331,18 @@ class SyncRepository @Inject constructor(
                     val serverId = response.body()?.id ?: return PushOutcome.Transient("empty body")
                     remapScheduledId(op.entityId, serverId)
                     PushOutcome.Success
-                } else outcomeForNonIdempotent(response)
+                } else outcomeForCreateOrOwnedCategoryMutation(response)
             }
             "UPDATE" -> {
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return PushOutcome.Permanent(0, "unsynced parent")
                 val input = gson.fromJson(op.payloadJson, ScheduledInput::class.java)
-                outcomeForNonIdempotent(scheduledApi.update(id, input))
+                outcomeForAccessScopedMutation(scheduledApi.update(id, input))
             }
             "DELETE" -> {
                 val id = op.serverId ?: op.entityId
                 if (id < 0) return PushOutcome.Permanent(0, "unsynced parent")
-                outcomeForIdempotentDelete(scheduledApi.delete(id))
+                outcomeForIdempotentDelete(scheduledApi.delete(id), forbiddenMeansLostAccess = true)
             }
             else -> PushOutcome.Success
         }
@@ -440,29 +453,13 @@ class SyncRepository @Inject constructor(
         }
     }
 
-    suspend fun pull(): Result<Unit> {
-        return try {
-            val lastVersion = prefs.lastSyncVersionFlow.first()
-            val response = syncApi.sync(lastVersion)
-            if (!response.isSuccessful) {
-                return Result.failure(Exception("Sync failed: ${response.code()}"))
-            }
-
-            val data = response.body()
-                ?: return Result.failure(Exception("Empty sync response body"))
-
-            // Collect account IDs that arrive tombstoned in this payload BEFORE
-            // upsert+purgeDeleted runs, so we can also purge their dependent
-            // transactions / schedules / pending ops. Without this the account
-            // row goes away (via purgeDeleted) but transactions for it leak in
-            // the local DB until they get their own tombstones — and for
-            // owner-delete-account those tombstones now do flow through
-            // handleDeleteAccount's cascade (v1.20), but the symmetric local
-            // cleanup keeps the two access-loss paths (revoked share +
-            // deleted account) on one code path.
-            val tombstonedAccountIds = data.accounts
-                .filter { it.deletedAt != null }
-                .map { it.id }
+    suspend fun pull(): Result<Unit> = try {
+        val data = fetchSyncData()
+        database.withTransaction {
+            // Purge access-lost accounts before generic tombstone cleanup. The
+            // dependent rows still exist here, so their queued operations can
+            // be found and deleted before purgeDeleted removes their IDs.
+            purgeAccessLostAccounts(data)
 
             val accountEntities = data.accounts.map { it.toEntity() }
             if (accountEntities.isNotEmpty()) {
@@ -487,23 +484,44 @@ class SyncRepository @Inject constructor(
                 scheduledDao.upsertAll(scheduledEntities)
                 scheduledDao.purgeDeleted()
             }
+        }
 
-            // Unified access-loss cleanup. revoked_account_ids (v1.19) and
-            // account tombstones (v1.20 cascade) both call into the same
-            // purgeAccountLocally so dependent rows can't leak.
-            val accountsToPurge = (data.revokedAccountIds.orEmpty() + tombstonedAccountIds).distinct()
-            if (accountsToPurge.isNotEmpty()) {
-                database.withTransaction {
-                    for (accountId in accountsToPurge) {
-                        purgeAccountLocally(accountId)
-                    }
-                }
-            }
+        prefs.saveLastSyncVersion(data.currentVersion)
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
 
-            prefs.saveLastSyncVersion(data.currentVersion)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
+    // When a batch contains LostAccess plus an unrelated transient failure,
+    // applying the full pull could overwrite a still-pending local edit. Fetch
+    // the same incremental response but apply only account-access tombstones;
+    // do not advance the cursor, so the next clean pull replays all other rows.
+    private suspend fun pullAccessLossOnly(): Result<Unit> = try {
+        val data = fetchSyncData()
+        database.withTransaction {
+            purgeAccessLostAccounts(data)
+        }
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    private suspend fun fetchSyncData(): SyncResponse {
+        val lastVersion = prefs.lastSyncVersionFlow.first()
+        val response = syncApi.sync(lastVersion)
+        if (!response.isSuccessful) {
+            throw Exception("Sync failed: ${response.code()}")
+        }
+        return response.body() ?: throw Exception("Empty sync response body")
+    }
+
+    private suspend fun purgeAccessLostAccounts(data: SyncResponse) {
+        val tombstonedAccountIds = data.accounts
+            .filter { it.deletedAt != null }
+            .map { it.id }
+        val accountsToPurge = (data.revokedAccountIds.orEmpty() + tombstonedAccountIds).distinct()
+        for (accountId in accountsToPurge) {
+            purgeAccountLocally(accountId)
         }
     }
 
@@ -512,8 +530,8 @@ class SyncRepository @Inject constructor(
     // wipes can't leave a dangling-FK state. Shared by:
     //   - revoked_account_ids (share revocation, v1.19)
     //   - account tombstones (owner-soft-delete cascade, v1.20)
-    // Both reach this point through pull() — push() never deletes a foreign
-    // entity, it just drops its own LostAccess ops and lets pull() do this.
+    // Both reach this point through pull() — push() marks suspected
+    // LostAccess ops failed, and this confirmed tombstone purge removes them.
     private suspend fun purgeAccountLocally(accountId: Long) {
         for (txnId in transactionDao.selectIdsByAccountId(accountId)) {
             pendingOpDao.deleteByEntity("transaction", txnId)
@@ -590,13 +608,22 @@ class SyncRepository @Inject constructor(
         }
     }
 
-    // Skip pull when push reported failures: pulling while local writes are
-    // unresolved can overwrite a row whose update or delete is still pending
-    // (silent reversion from the user's perspective).
     suspend fun sync(): Result<Unit> {
         val pushResult = pushPendingOperations()
-        if (pushResult.isFailure) return pushResult
-        return pull()
+        if (pushResult.isSuccess) return pull()
+
+        val pushError = pushResult.exceptionOrNull() as? SyncPushException
+            ?: return pushResult
+        val pullResult = when {
+            // Permanent operations have left the active queue, so server truth
+            // can be applied immediately and future syncs are not wedged.
+            pushError.transientCount == 0 -> pull()
+            // Preserve active transient edits, but never let them retain data
+            // from an account whose access was revoked in the same batch.
+            pushError.lostAccessCount > 0 -> pullAccessLossOnly()
+            else -> null
+        }
+        return if (pullResult?.isFailure == true) pullResult else pushResult
     }
 
     private fun AccountDto.toEntity() = AccountEntity(

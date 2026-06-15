@@ -229,7 +229,8 @@ func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 	// occurrences would otherwise point at a soft-deleted FK.
 	var txnCount, schedCount int
 	if err := s.DB.QueryRow(
-		`SELECT COUNT(*) FROM transactions WHERE category_id = ? AND deleted_at IS NULL`, id,
+		`SELECT COUNT(*) FROM transactions
+		 WHERE category_id = ? AND user_id = ? AND deleted_at IS NULL`, id, targetUserID,
 	).Scan(&txnCount); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -239,7 +240,8 @@ func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.DB.QueryRow(
-		`SELECT COUNT(*) FROM scheduled_transactions WHERE category_id = ? AND deleted_at IS NULL`, id,
+		`SELECT COUNT(*) FROM scheduled_transactions
+		 WHERE category_id = ? AND user_id = ? AND deleted_at IS NULL`, id, targetUserID,
 	).Scan(&schedCount); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

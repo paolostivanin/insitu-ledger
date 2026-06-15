@@ -16,7 +16,7 @@ import com.insituledger.app.data.local.db.entity.*
         ScheduledTransactionEntity::class,
         PendingOperationEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 @androidx.room.TypeConverters(Converters::class)
@@ -87,6 +87,15 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE pending_operations ADD COLUMN client_id TEXT")
+            }
+        }
+
+        // Permanent sync failures become visible dead-letter operations
+        // instead of remaining in the active queue forever.
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_operations ADD COLUMN state TEXT NOT NULL DEFAULT 'pending'")
+                db.execSQL("ALTER TABLE pending_operations ADD COLUMN last_error TEXT")
             }
         }
     }

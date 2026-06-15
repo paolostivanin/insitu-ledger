@@ -30,6 +30,8 @@ data class SettingsUiState(
     val isWebappConnected: Boolean = false,
     val userName: String = "",
     val pendingOps: Int = 0,
+    val failedOps: Int = 0,
+    val firstFailedOpError: String? = null,
     val lastSyncVersion: Long = 0,
     val isSyncing: Boolean = false,
     // Populated when the most recent sync attempt failed (push HTTP error,
@@ -52,6 +54,8 @@ data class SettingsUiState(
     val autoBackupWeeklyRetention: Int = 4,
     val autoBackupMonthlyEnabled: Boolean = false,
     val autoBackupMonthlyRetention: Int = 6,
+    val autoBackupLastAttemptAt: Long? = null,
+    val autoBackupLastSuccessfulAt: Long? = null,
     // mTLS fields
     val mtlsEnabled: Boolean = false,
     val mtlsAlias: String? = null,
@@ -129,10 +133,17 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 prefs.lastSyncVersionFlow,
-                pendingOpDao.getCount()
-            ) { syncVersion, pending ->
+                pendingOpDao.getCount(),
+                pendingOpDao.getFailedCount(),
+                pendingOpDao.getFirstFailedError()
+            ) { syncVersion, pending, failed, firstError ->
                 _uiState.update {
-                    it.copy(lastSyncVersion = syncVersion, pendingOps = pending)
+                    it.copy(
+                        lastSyncVersion = syncVersion,
+                        pendingOps = pending,
+                        failedOps = failed,
+                        firstFailedOpError = firstError
+                    )
                 }
             }.collect()
         }
@@ -197,7 +208,9 @@ class SettingsViewModel @Inject constructor(
                 prefs.autoBackupWeeklyEnabledFlow,
                 prefs.autoBackupWeeklyRetentionFlow,
                 prefs.autoBackupMonthlyEnabledFlow,
-                prefs.autoBackupMonthlyRetentionFlow
+                prefs.autoBackupMonthlyRetentionFlow,
+                prefs.autoBackupLastAttemptAtFlow,
+                prefs.autoBackupLastSuccessfulAtFlow
             ) { values: Array<Any?> ->
                 _uiState.update {
                     it.copy(
@@ -207,7 +220,9 @@ class SettingsViewModel @Inject constructor(
                         autoBackupWeeklyEnabled = values[3] as Boolean,
                         autoBackupWeeklyRetention = values[4] as Int,
                         autoBackupMonthlyEnabled = values[5] as Boolean,
-                        autoBackupMonthlyRetention = values[6] as Int
+                        autoBackupMonthlyRetention = values[6] as Int,
+                        autoBackupLastAttemptAt = values[7] as Long?,
+                        autoBackupLastSuccessfulAt = values[8] as Long?
                     )
                 }
             }.collect()
@@ -254,6 +269,19 @@ class SettingsViewModel @Inject constructor(
 
     fun clearSyncError() {
         _uiState.update { it.copy(syncError = null) }
+    }
+
+    fun retryFailedSyncOperations() {
+        viewModelScope.launch {
+            pendingOpDao.retryFailed()
+            syncManager.triggerImmediateSync()
+        }
+    }
+
+    fun discardFailedSyncOperations() {
+        viewModelScope.launch {
+            pendingOpDao.deleteFailed()
+        }
     }
 
     fun changePassword(currentPassword: String, newPassword: String) {

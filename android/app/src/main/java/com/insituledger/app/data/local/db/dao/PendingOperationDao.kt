@@ -6,11 +6,17 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface PendingOperationDao {
-    @Query("SELECT * FROM pending_operations ORDER BY created_at ASC")
+    @Query("SELECT * FROM pending_operations WHERE state = 'pending' ORDER BY created_at ASC")
     suspend fun getAll(): List<PendingOperationEntity>
 
-    @Query("SELECT COUNT(*) FROM pending_operations")
+    @Query("SELECT COUNT(*) FROM pending_operations WHERE state = 'pending'")
     fun getCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM pending_operations WHERE state = 'failed'")
+    fun getFailedCount(): Flow<Int>
+
+    @Query("SELECT last_error FROM pending_operations WHERE state = 'failed' ORDER BY created_at ASC LIMIT 1")
+    fun getFirstFailedError(): Flow<String?>
 
     @Insert
     suspend fun insert(op: PendingOperationEntity): Long
@@ -21,20 +27,29 @@ interface PendingOperationDao {
     @Query("DELETE FROM pending_operations")
     suspend fun deleteAll()
 
+    @Query("UPDATE pending_operations SET state = 'failed', last_error = :error WHERE id = :id")
+    suspend fun markFailed(id: Long, error: String)
+
+    @Query("UPDATE pending_operations SET state = 'pending', last_error = NULL WHERE state = 'failed'")
+    suspend fun retryFailed()
+
+    @Query("DELETE FROM pending_operations WHERE state = 'failed'")
+    suspend fun deleteFailed()
+
     @Query("UPDATE pending_operations SET entity_id = :newId WHERE entity_id = :oldId AND entity_type = :entityType")
     suspend fun updateEntityId(oldId: Long, newId: Long, entityType: String)
 
     // Used by SyncRepository.enqueueLocalDataForSync to skip entities that
     // already have a pending CREATE — without this, an offline-created
     // transaction would end up with two pending ops after re-login.
-    @Query("SELECT * FROM pending_operations WHERE entity_type = :entityType AND operation = :operation AND entity_id = :entityId LIMIT 1")
+    @Query("SELECT * FROM pending_operations WHERE state = 'pending' AND entity_type = :entityType AND operation = :operation AND entity_id = :entityId LIMIT 1")
     suspend fun findByEntity(entityType: String, operation: String, entityId: Long): PendingOperationEntity?
 
     // Used by SyncRepository.remapAccountId / remapCategoryId to find queued
     // CREATEs whose payload_json still references a freshly-remapped negative
     // foreign key. Without rewriting those payloads the backend keeps rejecting
     // them on every retry.
-    @Query("SELECT * FROM pending_operations WHERE entity_type = :entityType AND operation = :operation ORDER BY created_at ASC")
+    @Query("SELECT * FROM pending_operations WHERE state = 'pending' AND entity_type = :entityType AND operation = :operation ORDER BY created_at ASC")
     suspend fun findByEntityTypeAndOperation(entityType: String, operation: String): List<PendingOperationEntity>
 
     // Used by SyncRepository.pushPendingOperations to re-read an op just

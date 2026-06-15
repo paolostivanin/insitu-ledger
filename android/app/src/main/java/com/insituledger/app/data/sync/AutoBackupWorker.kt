@@ -15,7 +15,6 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import java.time.temporal.IsoFields
 
 @HiltWorker
 class AutoBackupWorker @AssistedInject constructor(
@@ -23,7 +22,8 @@ class AutoBackupWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val fileBackupRepository: FileBackupRepository,
     private val prefs: UserPreferences,
-    private val backupManager: BackupManager
+    private val backupManager: BackupManager,
+    private val fileWriter: AutoBackupFileWriter
 ) : CoroutineWorker(context, params) {
 
     companion object {
@@ -41,6 +41,8 @@ class AutoBackupWorker @AssistedInject constructor(
     }
 
     private suspend fun runBackup(): Result {
+        val attemptAt = System.currentTimeMillis()
+        prefs.saveAutoBackupLastAttemptAt(attemptAt)
         val folderUriStr = prefs.getAutoBackupFolderUriImmediate()
             ?: return Result.success()
 
@@ -50,6 +52,7 @@ class AutoBackupWorker @AssistedInject constructor(
             Log.e(TAG, "Backup folder not accessible")
             return Result.failure()
         }
+        val backupFolder = DocumentBackupFolder(applicationContext, folder)
 
         val jsonResult = fileBackupRepository.generateBackupJson()
         val json = jsonResult.getOrElse {
@@ -80,12 +83,16 @@ class AutoBackupWorker @AssistedInject constructor(
         // not block the weekly or skip retention of the others. Any failure
         // bubbles up to a retry so the user's last-good copy is preserved.
         var anyFailed = false
+        var anyWritten = false
 
         if (prefs.getAutoBackupDailyEnabledImmediate()) {
             val prefix = "insitu-backup-daily-"
             val fileName = "$prefix$today-T$runStamp.$ext"
-            if (writeBackup(folder, prefix, fileName, payload, mime)) {
-                cleanupOldBackups(folder, prefix, prefs.getAutoBackupDailyRetentionImmediate())
+            if (fileWriter.writeAndCleanup(
+                    backupFolder, prefix, fileName, payload, mime,
+                    prefs.getAutoBackupDailyRetentionImmediate()
+                )) {
+                anyWritten = true
             } else {
                 anyFailed = true
             }
@@ -93,10 +100,12 @@ class AutoBackupWorker @AssistedInject constructor(
 
         if (prefs.getAutoBackupWeeklyEnabledImmediate() && today.dayOfWeek == DayOfWeek.MONDAY) {
             val prefix = "insitu-backup-weekly-"
-            val weekNumber = today.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-            val fileName = "$prefix${today.year}-W${weekNumber.toString().padStart(2, '0')}-T$runStamp.$ext"
-            if (writeBackup(folder, prefix, fileName, payload, mime)) {
-                cleanupOldBackups(folder, prefix, prefs.getAutoBackupWeeklyRetentionImmediate())
+            val fileName = AutoBackupNaming.weeklyFileName(today, runStamp, ext)
+            if (fileWriter.writeAndCleanup(
+                    backupFolder, prefix, fileName, payload, mime,
+                    prefs.getAutoBackupWeeklyRetentionImmediate()
+                )) {
+                anyWritten = true
             } else {
                 anyFailed = true
             }
@@ -105,109 +114,17 @@ class AutoBackupWorker @AssistedInject constructor(
         if (prefs.getAutoBackupMonthlyEnabledImmediate() && today.dayOfMonth == 1) {
             val prefix = "insitu-backup-monthly-"
             val fileName = "$prefix${today.format(DateTimeFormatter.ofPattern("yyyy-MM"))}-T$runStamp.$ext"
-            if (writeBackup(folder, prefix, fileName, payload, mime)) {
-                cleanupOldBackups(folder, prefix, prefs.getAutoBackupMonthlyRetentionImmediate())
+            if (fileWriter.writeAndCleanup(
+                    backupFolder, prefix, fileName, payload, mime,
+                    prefs.getAutoBackupMonthlyRetentionImmediate()
+                )) {
+                anyWritten = true
             } else {
                 anyFailed = true
             }
         }
 
+        if (anyWritten) prefs.saveAutoBackupLastSuccessfulAt(System.currentTimeMillis())
         return if (anyFailed) Result.retry() else Result.success()
-    }
-
-    // Write-then-rename via a per-run .tmp sibling. fileName is unique per
-    // run (timestamp suffix) so we NEVER delete an existing target before
-    // attempting the rename — the previous good backup is always preserved
-    // even when SAF's renameTo fails. Stale .tmp orphans from prior failed
-    // runs of the same backup class are swept up front so they don't pile up.
-    // Returns true on success; the caller skips retention cleanup on false.
-    private fun writeBackup(
-        folder: DocumentFile,
-        prefix: String,
-        fileName: String,
-        payload: ByteArray,
-        mime: String
-    ): Boolean {
-        sweepTmpOrphans(folder, prefix)
-
-        val tmpName = "$fileName.tmp"
-        val tmpFile = try {
-            folder.createFile(mime, tmpName)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to create temp file: $tmpName", e)
-            return false
-        } ?: run {
-            Log.e(TAG, "Failed to create temp file: $tmpName")
-            return false
-        }
-
-        val wrote = try {
-            applicationContext.contentResolver.openOutputStream(tmpFile.uri).use { out ->
-                if (out == null) {
-                    Log.e(TAG, "Failed to open output stream for: $tmpName")
-                    false
-                } else {
-                    out.write(payload)
-                    out.flush()
-                    true
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to write temp backup: $tmpName", e)
-            false
-        }
-
-        if (!wrote) {
-            try { tmpFile.delete() } catch (_: Exception) {}
-            return false
-        }
-
-        return try {
-            if (!tmpFile.renameTo(fileName)) {
-                Log.e(TAG, "Failed to rename $tmpName -> $fileName (tmp left in place for sweep)")
-                return false
-            }
-            Log.d(TAG, "Wrote backup: $fileName")
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to finalize backup: $fileName", e)
-            false
-        }
-    }
-
-    private fun sweepTmpOrphans(folder: DocumentFile, prefix: String) {
-        try {
-            folder.listFiles()
-                .filter {
-                    val name = it.name ?: return@filter false
-                    name.startsWith(prefix) && name.endsWith(".tmp")
-                }
-                .forEach { tmp ->
-                    Log.d(TAG, "Sweeping orphan tmp: ${tmp.name}")
-                    try { tmp.delete() } catch (_: Exception) {}
-                }
-        } catch (_: Exception) {
-            // Listing failure isn't fatal — the new write will still proceed.
-        }
-    }
-
-    private fun cleanupOldBackups(folder: DocumentFile, prefix: String, retention: Int) {
-        try {
-            val backups = folder.listFiles()
-                .filter {
-                    val name = it.name ?: return@filter false
-                    name.startsWith(prefix) && (name.endsWith(".json") || name.endsWith(".ilbk"))
-                }
-                .sortedByDescending { it.name }
-
-            if (backups.size > retention) {
-                backups.drop(retention).forEach { file ->
-                    Log.d(TAG, "Deleting old backup: ${file.name}")
-                    file.delete()
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to cleanup backups for prefix: $prefix", e)
-        }
     }
 }

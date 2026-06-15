@@ -17,5 +17,14 @@ data class PendingOperationEntity(
     // the backend (TransactionInput.clientId etc.) so a retry after a
     // transient failure dedupes server-side instead of inserting twice.
     // Null for UPDATE/DELETE ops, which don't need idempotency.
-    @ColumnInfo(name = "client_id") val clientId: String? = null
-)
+    @ColumnInfo(name = "client_id") val clientId: String? = null,
+    // Permanent push failures move to a visible failed state so they cannot
+    // block every future pull. Users can retry or discard them from Settings.
+    val state: String = STATE_PENDING,
+    @ColumnInfo(name = "last_error") val lastError: String? = null
+) {
+    companion object {
+        const val STATE_PENDING = "pending"
+        const val STATE_FAILED = "failed"
+    }
+}

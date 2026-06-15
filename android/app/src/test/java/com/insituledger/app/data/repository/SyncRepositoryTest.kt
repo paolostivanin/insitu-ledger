@@ -77,7 +77,9 @@ class SyncRepositoryTest {
         val block = slot<suspend () -> Any?>()
         coEvery { database.withTransaction(capture(block)) } coAnswers { block.captured.invoke() }
 
-        coEvery { pendingOpDao.getAll() } answers { queue.toList() }
+        coEvery { pendingOpDao.getAll() } answers {
+            queue.filter { it.state == PendingOperationEntity.STATE_PENDING }
+        }
         coEvery { pendingOpDao.delete(any()) } answers {
             val op = firstArg<PendingOperationEntity>()
             queue.removeAll { it.id == op.id }
@@ -99,6 +101,23 @@ class SyncRepositoryTest {
             for (i in queue.indices) {
                 if (queue[i].id == id) queue[i] = queue[i].copy(payloadJson = payload)
             }
+        }
+        coEvery { pendingOpDao.markFailed(any(), any()) } answers {
+            val id = firstArg<Long>()
+            val error = secondArg<String>()
+            for (i in queue.indices) {
+                if (queue[i].id == id) {
+                    queue[i] = queue[i].copy(
+                        state = PendingOperationEntity.STATE_FAILED,
+                        lastError = error
+                    )
+                }
+            }
+        }
+        coEvery { pendingOpDao.deleteByEntity(any(), any()) } answers {
+            val type = firstArg<String>()
+            val id = secondArg<Long>()
+            queue.removeAll { it.entityType == type && it.entityId == id }
         }
         coEvery { pendingOpDao.findByEntityTypeAndOperation(any(), any()) } answers {
             val type = firstArg<String>()
@@ -157,6 +176,17 @@ class SyncRepositoryTest {
         ))
     }
 
+    private fun acctUpdate(entityId: Long): PendingOperationEntity = enqueue(PendingOperationEntity(
+        entityType = "account", operation = "UPDATE", entityId = entityId,
+        serverId = if (entityId > 0) entityId else null,
+        payloadJson = gson.toJson(AccountInput("Renamed", "EUR", null))
+    ))
+
+    private fun acctDelete(entityId: Long): PendingOperationEntity = enqueue(PendingOperationEntity(
+        entityType = "account", operation = "DELETE", entityId = entityId,
+        serverId = if (entityId > 0) entityId else null
+    ))
+
     private fun catCreate(localId: Long, parentId: Long? = null): PendingOperationEntity {
         val input = CategoryInput(parentId, "Food", "expense", null, null)
         return enqueue(PendingOperationEntity(
@@ -164,6 +194,40 @@ class SyncRepositoryTest {
             entityId = localId, payloadJson = gson.toJson(input), clientId = "cat-$localId"
         ))
     }
+
+    private fun catUpdate(entityId: Long): PendingOperationEntity = enqueue(PendingOperationEntity(
+        entityType = "category", operation = "UPDATE", entityId = entityId,
+        serverId = if (entityId > 0) entityId else null,
+        payloadJson = gson.toJson(CategoryInput(null, "Renamed", "expense", null, null))
+    ))
+
+    private fun catDelete(entityId: Long): PendingOperationEntity = enqueue(PendingOperationEntity(
+        entityType = "category", operation = "DELETE", entityId = entityId,
+        serverId = if (entityId > 0) entityId else null
+    ))
+
+    private fun schedCreate(localId: Long): PendingOperationEntity = enqueue(PendingOperationEntity(
+        entityType = "scheduled", operation = "CREATE", entityId = localId,
+        payloadJson = gson.toJson(ScheduledInput(
+            1L, 2L, "expense", 10.0, "EUR", null, null,
+            "FREQ=MONTHLY", "2026-07-01", null
+        )),
+        clientId = "sched-$localId"
+    ))
+
+    private fun schedUpdate(entityId: Long): PendingOperationEntity = enqueue(PendingOperationEntity(
+        entityType = "scheduled", operation = "UPDATE", entityId = entityId,
+        serverId = if (entityId > 0) entityId else null,
+        payloadJson = gson.toJson(ScheduledInput(
+            1L, 2L, "expense", 12.0, "EUR", null, null,
+            "FREQ=MONTHLY", "2026-07-01", null
+        ))
+    ))
+
+    private fun schedDelete(entityId: Long): PendingOperationEntity = enqueue(PendingOperationEntity(
+        entityType = "scheduled", operation = "DELETE", entityId = entityId,
+        serverId = if (entityId > 0) entityId else null
+    ))
 
     private inline fun <reified T> errorBody(code: Int): Response<T> = Response.error(
         code, "".toResponseBody("application/json".toMediaTypeOrNull())
@@ -245,6 +309,78 @@ class SyncRepositoryTest {
         coVerify(exactly = 1) { transactionApi.delete(99, isNull()) }
         coVerify(exactly = 0) { transactionApi.delete(eq(-7L), isNull()) }
         assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun offlineAccountCreateThenUpdateUsesRemappedServerId() = runTest {
+        acctCreate(-1L)
+        acctUpdate(-1L)
+        coEvery { accountApi.create(any(), isNull()) } returns Response.success(IdResponse(10L))
+        coEvery { accountApi.update(10L, any(), isNull()) } returns Response.success(Unit)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 1) { accountApi.update(10L, any(), isNull()) }
+    }
+
+    @Test
+    fun offlineAccountCreateThenDeleteUsesRemappedServerId() = runTest {
+        acctCreate(-1L)
+        acctDelete(-1L)
+        coEvery { accountApi.create(any(), isNull()) } returns Response.success(IdResponse(10L))
+        coEvery { accountApi.delete(10L, isNull()) } returns Response.success(Unit)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 1) { accountApi.delete(10L, isNull()) }
+    }
+
+    @Test
+    fun offlineCategoryCreateThenUpdateUsesRemappedServerId() = runTest {
+        catCreate(-1L)
+        catUpdate(-1L)
+        coEvery { categoryApi.create(any(), isNull()) } returns Response.success(IdResponse(10L))
+        coEvery { categoryApi.update(10L, any(), isNull()) } returns Response.success(Unit)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 1) { categoryApi.update(10L, any(), isNull()) }
+    }
+
+    @Test
+    fun offlineCategoryCreateThenDeleteUsesRemappedServerId() = runTest {
+        catCreate(-1L)
+        catDelete(-1L)
+        coEvery { categoryApi.create(any(), isNull()) } returns Response.success(IdResponse(10L))
+        coEvery { categoryApi.delete(10L, isNull()) } returns Response.success(Unit)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 1) { categoryApi.delete(10L, isNull()) }
+    }
+
+    @Test
+    fun offlineScheduledCreateThenUpdateUsesRemappedServerId() = runTest {
+        schedCreate(-1L)
+        schedUpdate(-1L)
+        coEvery { scheduledApi.create(any(), isNull()) } returns Response.success(IdResponse(10L))
+        coEvery { scheduledApi.update(10L, any(), isNull()) } returns Response.success(Unit)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 1) { scheduledApi.update(10L, any(), isNull()) }
+    }
+
+    @Test
+    fun offlineScheduledCreateThenDeleteUsesRemappedServerId() = runTest {
+        schedCreate(-1L)
+        schedDelete(-1L)
+        coEvery { scheduledApi.create(any(), isNull()) } returns Response.success(IdResponse(10L))
+        coEvery { scheduledApi.delete(10L, isNull()) } returns Response.success(Unit)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 1) { scheduledApi.delete(10L, isNull()) }
     }
 
     // ====================
@@ -390,6 +526,79 @@ class SyncRepositoryTest {
         assertTrue(result.isFailure)
         // pull() must not have been called — syncApi.sync would have fetched data.
         coVerify(exactly = 0) { syncApi.sync(any()) }
+    }
+
+    @Test
+    fun permanentFailureMovesToFailedQueueAndDoesNotBlockPull() = runTest {
+        txCreate(localId = -7, accountId = 1, categoryId = 2)
+        coEvery { transactionApi.create(any(), isNull()) } returns errorBody(400)
+        coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(0L)
+        coEvery { syncApi.sync(any()) } returns Response.success(
+            com.insituledger.app.data.remote.dto.SyncResponse(
+                currentVersion = 1,
+                transactions = emptyList(),
+                categories = emptyList(),
+                accounts = emptyList(),
+                scheduledTransactions = emptyList()
+            )
+        )
+
+        val result = newRepository().sync()
+
+        assertTrue(result.isFailure)
+        assertEquals(PendingOperationEntity.STATE_FAILED, queue.single().state)
+        coVerify(exactly = 1) { syncApi.sync(0L) }
+        coVerify(exactly = 1) { prefs.saveLastSyncVersion(1L) }
+    }
+
+    @Test
+    fun mixedLostAccessAndTransientFailureStillPurgesRevokedAccountWithoutAdvancingCursor() = runTest {
+        txUpdate(entityId = 42L, accountId = 7L, categoryId = 2L)
+        txCreate(localId = -7L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns errorBody(403)
+        coEvery { transactionApi.create(any(), isNull()) } returns errorBody(503)
+        coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(5L)
+        coEvery { syncApi.sync(5L) } returns Response.success(
+            com.insituledger.app.data.remote.dto.SyncResponse(
+                currentVersion = 9,
+                transactions = emptyList(),
+                categories = emptyList(),
+                accounts = emptyList(),
+                scheduledTransactions = emptyList(),
+                revokedAccountIds = listOf(7L)
+            )
+        )
+        coEvery { transactionDao.selectIdsByAccountId(7L) } returns listOf(42L)
+
+        val result = newRepository().sync()
+
+        assertTrue(result.isFailure)
+        coVerify(exactly = 1) { transactionDao.deleteByAccountId(7L) }
+        coVerify(exactly = 0) { prefs.saveLastSyncVersion(any()) }
+    }
+
+    @Test
+    fun suspectedLostAccessDoesNotBlockConfirmedRevocationPull() = runTest {
+        txUpdate(entityId = 42L, accountId = 7L, categoryId = 2L)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns errorBody(403)
+        coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(5L)
+        coEvery { syncApi.sync(5L) } returns Response.success(
+            com.insituledger.app.data.remote.dto.SyncResponse(
+                currentVersion = 9,
+                transactions = emptyList(),
+                categories = emptyList(),
+                accounts = emptyList(),
+                scheduledTransactions = emptyList(),
+                revokedAccountIds = listOf(7L)
+            )
+        )
+        coEvery { transactionDao.selectIdsByAccountId(7L) } returns listOf(42L)
+
+        newRepository().sync()
+
+        assertTrue("confirmed tombstone purge should remove the failed revoked op", queue.isEmpty())
+        coVerify(exactly = 1) { syncApi.sync(5L) }
+        coVerify(exactly = 1) { prefs.saveLastSyncVersion(9L) }
     }
 
     @Test
@@ -543,13 +752,48 @@ class SyncRepositoryTest {
         coVerify(exactly = 1) { accountDao.deleteById(77L) }
     }
 
+    @Test
+    fun pullCollectsDependentIdsBeforeGenericTombstonePurge() = runTest {
+        coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(0L)
+        val deletedAccount = com.insituledger.app.data.remote.dto.AccountDto(
+            id = 77L, userId = 1L, name = "Wallet", currency = "EUR", balance = 0.0,
+            createdAt = "", updatedAt = "", deletedAt = "deleted", syncVersion = 10L,
+            ownerUserId = 1L, ownerName = "Admin", isShared = false
+        )
+        val deletedTransaction = com.insituledger.app.data.remote.dto.TransactionDto(
+            id = 200L, accountId = 77L, categoryId = 2L, userId = 1L,
+            type = "expense", amount = 1.0, currency = "EUR", description = null,
+            note = null, date = "2026-01-01", createdAt = "", updatedAt = "",
+            deletedAt = "deleted", syncVersion = 10L
+        )
+        var rowsStillPresent = true
+        coEvery { transactionDao.selectIdsByAccountId(77L) } answers {
+            if (rowsStillPresent) listOf(200L) else emptyList()
+        }
+        coEvery { transactionDao.purgeDeleted() } answers { rowsStillPresent = false }
+        coEvery { syncApi.sync(any()) } returns Response.success(
+            com.insituledger.app.data.remote.dto.SyncResponse(
+                currentVersion = 10,
+                transactions = listOf(deletedTransaction),
+                categories = emptyList(),
+                accounts = listOf(deletedAccount),
+                scheduledTransactions = emptyList()
+            )
+        )
+
+        val result = newRepository().pull()
+
+        assertTrue(result.isSuccess)
+        coVerify(exactly = 1) { pendingOpDao.deleteByEntity("transaction", 200L) }
+    }
+
     // ====================
-    // v1.20 F1+F4: 403/404 on push is LostAccess — drop the op locally and
-    // let push report success so pull() runs and delivers the tombstone.
+    // 403/404 account-scoped mutations enter the visible failed queue until a
+    // pull confirms an access-loss tombstone and purges them.
     // ====================
 
     @Test
-    fun pushTransactionUpdateReturning403IsDroppedAndPushSucceeds() = runTest {
+    fun pushTransactionUpdateReturning403MovesToFailedQueue() = runTest {
         // Transaction was created online (entityId = 42, serverId = 42), edited
         // offline, then the account was revoked. Server returns 403.
         val op = txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
@@ -557,12 +801,9 @@ class SyncRepositoryTest {
 
         val result = newRepository().pushPendingOperations()
 
-        // Push reports success (no transient/permanent failures) so sync() runs
-        // pull() — which is the only path that delivers revoked_account_ids.
-        assertTrue("push should succeed (LostAccess only); got ${result.exceptionOrNull()?.message}", result.isSuccess)
-        // Op is dropped locally.
-        assertTrue("queue should be empty", queue.isEmpty())
-        coVerify(exactly = 1) { pendingOpDao.delete(op) }
+        assertTrue(result.isFailure)
+        assertEquals(PendingOperationEntity.STATE_FAILED, queue.single().state)
+        coVerify(exactly = 0) { pendingOpDao.delete(op) }
     }
 
     @Test
@@ -573,9 +814,22 @@ class SyncRepositoryTest {
 
         val result = newRepository().pushPendingOperations()
 
-        assertTrue(result.isSuccess)
-        assertTrue(queue.isEmpty())
-        coVerify(exactly = 1) { pendingOpDao.delete(op) }
+        assertTrue(result.isFailure)
+        assertEquals(PendingOperationEntity.STATE_FAILED, queue.single().state)
+        coVerify(exactly = 0) { pendingOpDao.delete(op) }
+    }
+
+    @Test
+    fun push403OnCreateIsPermanentAndNeverSilentlyDropped() = runTest {
+        val op = acctCreate(localId = -1L)
+        coEvery { accountApi.create(any(), isNull()) } returns errorBody<IdResponse>(403)
+
+        val result = newRepository().pushPendingOperations()
+
+        val ex = result.exceptionOrNull() as SyncPushException
+        assertEquals(1, ex.permanentCount)
+        assertEquals(PendingOperationEntity.STATE_FAILED, queue.single().state)
+        coVerify(exactly = 0) { pendingOpDao.delete(op) }
     }
 
     // ====================
@@ -611,6 +865,7 @@ class SyncRepositoryTest {
         assertEquals(1, ex.permanentCount)
         assertFalse("canRetry should be false when only permanent failures", ex.canRetry)
         assertEquals(1, queue.size)
+        assertEquals(PendingOperationEntity.STATE_FAILED, queue.single().state)
         coVerify(exactly = 0) { pendingOpDao.delete(op) }
     }
 

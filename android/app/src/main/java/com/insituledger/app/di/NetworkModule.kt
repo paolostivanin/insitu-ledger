@@ -28,6 +28,15 @@ import javax.net.ssl.X509TrustManager
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
+    internal val REDACTED_HEADERS = listOf(
+        "Authorization",
+        "Cookie",
+        "Set-Cookie",
+        "Proxy-Authorization"
+    )
+
+    internal fun loggingLevel(isDebug: Boolean): HttpLoggingInterceptor.Level =
+        if (isDebug) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
 
     @Provides
     @Singleton
@@ -57,15 +66,8 @@ object NetworkModule {
             // gives method/url/status for debugging without leaking payloads.
             // Release stays at NONE.
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = if (BuildConfig.DEBUG) {
-                    HttpLoggingInterceptor.Level.BASIC
-                } else {
-                    HttpLoggingInterceptor.Level.NONE
-                }
-                redactHeader("Authorization")
-                redactHeader("Cookie")
-                redactHeader("Set-Cookie")
-                redactHeader("Proxy-Authorization")
+                level = loggingLevel(BuildConfig.DEBUG)
+                REDACTED_HEADERS.forEach(::redactHeader)
             })
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

@@ -23,8 +23,17 @@ import com.insituledger.app.ui.common.AppCard
 import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 private const val MIN_BACKUP_PASSPHRASE_LENGTH = 12
+private val BACKUP_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+
+private fun formatBackupTime(timestamp: Long?): String =
+    timestamp?.let {
+        Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).format(BACKUP_TIME_FORMAT)
+    } ?: "Never"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -314,6 +323,16 @@ fun SettingsScreen(
                             TextButton(onClick = { folderPickerLauncher.launch(null) }) { Text("Change") }
                             TextButton(onClick = viewModel::clearAutoBackupFolder) { Text("Clear") }
                         }
+                        Text(
+                            "Last attempted: ${formatBackupTime(uiState.autoBackupLastAttemptAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "Last successful: ${formatBackupTime(uiState.autoBackupLastSuccessfulAt)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
 
                         Spacer(modifier = Modifier.height(AppSpacing.md))
                         HorizontalDivider()
@@ -457,6 +476,28 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(AppSpacing.sm))
                         Text("Last sync version: ${uiState.lastSyncVersion}", style = MaterialTheme.typography.bodySmall)
                         Text("Pending operations: ${uiState.pendingOps}", style = MaterialTheme.typography.bodySmall)
+                        if (uiState.failedOps > 0) {
+                            Text(
+                                "Failed operations: ${uiState.failedOps}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            uiState.firstFailedOpError?.let {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                                TextButton(onClick = viewModel::retryFailedSyncOperations) {
+                                    Text("Retry failed")
+                                }
+                                TextButton(onClick = viewModel::discardFailedSyncOperations) {
+                                    Text("Discard failed")
+                                }
+                            }
+                        }
                         Spacer(modifier = Modifier.height(AppSpacing.md))
                         Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
                             Button(onClick = viewModel::forceSync, enabled = !uiState.isSyncing) {

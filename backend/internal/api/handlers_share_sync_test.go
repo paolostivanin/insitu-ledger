@@ -280,6 +280,56 @@ func TestCategoryDeleteBlockedByScheduledTransaction(t *testing.T) {
 	}
 }
 
+func TestCategoryDeleteBlockedByInactiveUndeletedSchedule(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	adminToken := loginAdmin(t, handler)
+
+	walletID := mustCreateAccount(t, handler, adminToken, `{"name":"Wallet"}`)
+	catID := mustCreateCategory(t, handler, adminToken, `{"name":"Rent","type":"expense"}`)
+	if _, err := s.DB.Exec(
+		`INSERT INTO scheduled_transactions
+		 (account_id, category_id, user_id, type, amount, currency, rrule, next_occurrence, active)
+		 VALUES (?, ?, 1, 'expense', 1000, 'EUR', 'FREQ=MONTHLY', '2026-07-01', 0)`,
+		walletID, catID,
+	); err != nil {
+		t.Fatalf("seed inactive schedule: %v", err)
+	}
+
+	req := authedRequest("DELETE", fmt.Sprintf("/api/categories/%d", catID), "", adminToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("inactive undeleted schedule must block deletion: got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCategoryDeleteIgnoresSoftDeletedSchedule(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	adminToken := loginAdmin(t, handler)
+
+	walletID := mustCreateAccount(t, handler, adminToken, `{"name":"Wallet"}`)
+	catID := mustCreateCategory(t, handler, adminToken, `{"name":"Rent","type":"expense"}`)
+	if _, err := s.DB.Exec(
+		`INSERT INTO scheduled_transactions
+		 (account_id, category_id, user_id, type, amount, currency, rrule, next_occurrence, deleted_at)
+		 VALUES (?, ?, 1, 'expense', 1000, 'EUR', 'FREQ=MONTHLY', '2026-07-01', datetime('now'))`,
+		walletID, catID,
+	); err != nil {
+		t.Fatalf("seed deleted schedule: %v", err)
+	}
+
+	req := authedRequest("DELETE", fmt.Sprintf("/api/categories/%d", catID), "", adminToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("soft-deleted schedule must not block deletion: got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // Tier B B4: another user's category id must return 404, not leak existence
 // via the dependency-check timing.
 func TestCategoryDeleteOtherUserReturns404(t *testing.T) {

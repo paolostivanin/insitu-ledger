@@ -46,6 +46,8 @@ class UserPreferences @Inject constructor(
         val AUTO_BACKUP_WEEKLY_RETENTION = intPreferencesKey("auto_backup_weekly_retention")
         val AUTO_BACKUP_MONTHLY_ENABLED = booleanPreferencesKey("auto_backup_monthly_enabled")
         val AUTO_BACKUP_MONTHLY_RETENTION = intPreferencesKey("auto_backup_monthly_retention")
+        val AUTO_BACKUP_LAST_ATTEMPT_AT = longPreferencesKey("auto_backup_last_attempt_at")
+        val AUTO_BACKUP_LAST_SUCCESSFUL_AT = longPreferencesKey("auto_backup_last_successful_at")
         val MTLS_ENABLED = booleanPreferencesKey("mtls_enabled")
         val MTLS_ALIAS = stringPreferencesKey("mtls_alias")
         val CURRENCY_SYMBOL = stringPreferencesKey("currency_symbol")
@@ -85,6 +87,8 @@ class UserPreferences @Inject constructor(
     val autoBackupWeeklyRetentionFlow: Flow<Int> = context.dataStore.data.map { it[AUTO_BACKUP_WEEKLY_RETENTION] ?: 4 }
     val autoBackupMonthlyEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[AUTO_BACKUP_MONTHLY_ENABLED] ?: false }
     val autoBackupMonthlyRetentionFlow: Flow<Int> = context.dataStore.data.map { it[AUTO_BACKUP_MONTHLY_RETENTION] ?: 6 }
+    val autoBackupLastAttemptAtFlow: Flow<Long?> = context.dataStore.data.map { it[AUTO_BACKUP_LAST_ATTEMPT_AT] }
+    val autoBackupLastSuccessfulAtFlow: Flow<Long?> = context.dataStore.data.map { it[AUTO_BACKUP_LAST_SUCCESSFUL_AT] }
     val mtlsEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[MTLS_ENABLED] ?: false }
     val mtlsAliasFlow: Flow<String?> = context.dataStore.data.map { it[MTLS_ALIAS] }
     val currencySymbolFlow: Flow<String> = context.dataStore.data.map { it[CURRENCY_SYMBOL] ?: DEFAULT_CURRENCY_SYMBOL }
@@ -181,6 +185,14 @@ class UserPreferences @Inject constructor(
 
     suspend fun saveAutoBackupMonthlyRetention(count: Int) {
         context.dataStore.edit { it[AUTO_BACKUP_MONTHLY_RETENTION] = count }
+    }
+
+    suspend fun saveAutoBackupLastAttemptAt(timestamp: Long) {
+        context.dataStore.edit { it[AUTO_BACKUP_LAST_ATTEMPT_AT] = timestamp }
+    }
+
+    suspend fun saveAutoBackupLastSuccessfulAt(timestamp: Long) {
+        context.dataStore.edit { it[AUTO_BACKUP_LAST_SUCCESSFUL_AT] = timestamp }
     }
 
     suspend fun saveMtlsEnabled(enabled: Boolean) {
