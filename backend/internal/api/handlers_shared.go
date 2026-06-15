@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -27,7 +28,7 @@ func (s *Server) handleListSharedAccess(w http.ResponseWriter, r *http.Request) 
 		 FROM shared_account_access sa
 		 JOIN users u ON sa.guest_user_id = u.id
 		 JOIN accounts a ON sa.account_id = a.id
-		 WHERE sa.owner_user_id = ? AND a.deleted_at IS NULL
+		 WHERE sa.owner_user_id = ? AND a.deleted_at IS NULL AND sa.deleted_at IS NULL
 		 ORDER BY u.email, a.name`, userID,
 	)
 	if err != nil {
@@ -98,20 +99,50 @@ func (s *Server) handleCreateSharedAccess(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	result, err := s.DB.Exec(
-		`INSERT INTO shared_account_access (owner_user_id, guest_user_id, account_id, permission)
-		 VALUES (?, ?, ?, 'write')`,
+	// v1.19.0: re-granting after a soft-deleted revoke must reuse the existing
+	// row (the UNIQUE constraint forbids a parallel one). Check for any prior
+	// row first; if it's soft-deleted, undelete; if it's live, 409.
+	var existingID int64
+	var existingDeletedAt sql.NullString
+	err := s.DB.QueryRow(
+		`SELECT id, deleted_at FROM shared_account_access
+		 WHERE owner_user_id = ? AND guest_user_id = ? AND account_id = ?`,
 		userID, guestID, req.AccountID,
-	)
-	if err != nil {
-		http.Error(w, "already shared with this user for this account", http.StatusConflict)
-		return
-	}
+	).Scan(&existingID, &existingDeletedAt)
 
-	id, _ := result.LastInsertId()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]any{"id": id})
+	switch {
+	case err == sql.ErrNoRows:
+		result, insertErr := s.DB.Exec(
+			`INSERT INTO shared_account_access (owner_user_id, guest_user_id, account_id, permission)
+			 VALUES (?, ?, ?, 'write')`,
+			userID, guestID, req.AccountID,
+		)
+		if insertErr != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		id, _ := result.LastInsertId()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{"id": id})
+	case err != nil:
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	case !existingDeletedAt.Valid:
+		http.Error(w, "already shared with this user for this account", http.StatusConflict)
+	default:
+		// Soft-deleted: undelete in place. Trigger bumps sync_version so the
+		// guest re-discovers the grant on next incremental sync.
+		if _, updErr := s.DB.Exec(
+			`UPDATE shared_account_access SET deleted_at = NULL WHERE id = ?`,
+			existingID,
+		); updErr != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{"id": existingID})
+	}
 }
 
 // handleListAccessibleOwners returns the owners that have shared at least one
@@ -125,7 +156,7 @@ func (s *Server) handleListAccessibleOwners(w http.ResponseWriter, r *http.Reque
 		 FROM shared_account_access sa
 		 JOIN users u ON sa.owner_user_id = u.id
 		 JOIN accounts a ON sa.account_id = a.id
-		 WHERE sa.guest_user_id = ? AND a.deleted_at IS NULL
+		 WHERE sa.guest_user_id = ? AND a.deleted_at IS NULL AND sa.deleted_at IS NULL
 		 ORDER BY u.email, a.name`, userID,
 	)
 	if err != nil {
@@ -182,8 +213,14 @@ func (s *Server) handleDeleteSharedAccess(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// v1.19.0: soft-delete so the grant remains in the sync stream with a
+	// bumped sync_version. The guest's next incremental sync sees the tombstone
+	// via revoked_account_ids and purges the local copy of the account + its
+	// transactions/schedules.
 	result, err := s.DB.Exec(
-		"DELETE FROM shared_account_access WHERE id = ? AND owner_user_id = ?", id, userID,
+		`UPDATE shared_account_access SET deleted_at = datetime('now')
+		 WHERE id = ? AND owner_user_id = ? AND deleted_at IS NULL`,
+		id, userID,
 	)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

@@ -33,7 +33,7 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	query := `SELECT a.id, a.user_id, a.name, a.currency, a.balance,
 		         a.created_at, a.updated_at, a.sync_version,
 		         u.name AS owner_name,
-		         EXISTS(SELECT 1 FROM shared_account_access s WHERE s.account_id = a.id) AS is_shared
+		         EXISTS(SELECT 1 FROM shared_account_access s WHERE s.account_id = a.id AND s.deleted_at IS NULL) AS is_shared
 		 FROM accounts a
 		 JOIN users u ON u.id = a.user_id
 		 WHERE a.deleted_at IS NULL

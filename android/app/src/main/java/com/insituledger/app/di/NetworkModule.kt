@@ -51,12 +51,21 @@ object NetworkModule {
             .sslSocketFactory(sslContext.socketFactory, trustManager)
             .addInterceptor(authInterceptor)
             .addInterceptor(cleartextGuard)
+            // v1.19.0: BODY-level logging in debug exposed passwords, TOTP
+            // codes, and bearer tokens in Logcat — anyone with a debug build
+            // installed could exfiltrate. BASIC + redacted secret headers
+            // gives method/url/status for debugging without leaking payloads.
+            // Release stays at NONE.
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = if (BuildConfig.DEBUG) {
-                    HttpLoggingInterceptor.Level.BODY
+                    HttpLoggingInterceptor.Level.BASIC
                 } else {
                     HttpLoggingInterceptor.Level.NONE
                 }
+                redactHeader("Authorization")
+                redactHeader("Cookie")
+                redactHeader("Set-Cookie")
+                redactHeader("Proxy-Authorization")
             })
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

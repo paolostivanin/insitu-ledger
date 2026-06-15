@@ -390,6 +390,27 @@ class SyncRepository @Inject constructor(
                 scheduledDao.purgeDeleted()
             }
 
+            // v1.19.0: purge accounts whose grant was revoked server-side.
+            // All in one transaction so a crash mid-purge can't leave dangling
+            // transactions pointing at a deleted account.
+            val revoked = data.revokedAccountIds.orEmpty()
+            if (revoked.isNotEmpty()) {
+                database.withTransaction {
+                    for (accountId in revoked) {
+                        for (txnId in transactionDao.selectIdsByAccountId(accountId)) {
+                            pendingOpDao.deleteByEntity("transaction", txnId)
+                        }
+                        for (schedId in scheduledDao.selectIdsByAccountId(accountId)) {
+                            pendingOpDao.deleteByEntity("scheduled", schedId)
+                        }
+                        transactionDao.deleteByAccountId(accountId)
+                        scheduledDao.deleteByAccountId(accountId)
+                        pendingOpDao.deleteByEntity("account", accountId)
+                        accountDao.deleteById(accountId)
+                    }
+                }
+            }
+
             prefs.saveLastSyncVersion(data.currentVersion)
             Result.success(Unit)
         } catch (e: Exception) {

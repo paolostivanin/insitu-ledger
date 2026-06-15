@@ -35,4 +35,7 @@ interface AccountDao {
 
     @Query("UPDATE accounts SET is_local_only = 0 WHERE id = :id")
     suspend fun clearLocalOnly(id: Long)
+
+    @Query("DELETE FROM accounts WHERE id = :id")
+    suspend fun deleteById(id: Long)
 }

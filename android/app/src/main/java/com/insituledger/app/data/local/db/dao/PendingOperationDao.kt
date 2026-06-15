@@ -45,4 +45,10 @@ interface PendingOperationDao {
 
     @Query("UPDATE pending_operations SET payload_json = :payloadJson WHERE id = :id")
     suspend fun updatePayloadJson(id: Long, payloadJson: String)
+
+    // Used by SyncRepository.pull when an account's grant was revoked
+    // server-side: drop any queued op that targets the now-inaccessible
+    // entity (account itself, or transactions/schedules belonging to it).
+    @Query("DELETE FROM pending_operations WHERE entity_type = :entityType AND entity_id = :entityId")
+    suspend fun deleteByEntity(entityType: String, entityId: Long)
 }

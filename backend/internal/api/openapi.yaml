@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.18.0"
+  version: "1.19.0"
 
 servers:
   - url: /api
@@ -1157,6 +1157,35 @@ paths:
       responses:
         "200":
           description: Sync data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  current_version:
+                    type: integer
+                  transactions:
+                    type: array
+                    items: {}
+                  categories:
+                    type: array
+                    items: {}
+                  accounts:
+                    type: array
+                    items: {}
+                  scheduled_transactions:
+                    type: array
+                    items: {}
+                  revoked_account_ids:
+                    type: array
+                    description: >-
+                      Account IDs whose share grant was revoked since the
+                      client's last sync (v1.19.0+). The client must purge
+                      the account, its transactions and scheduled txns, and
+                      any pending operations targeting them. Pre-1.19
+                      clients may ignore this field.
+                    items:
+                      type: integer
 
   /reports/by-category:
     get:

@@ -3,6 +3,8 @@ package com.insituledger.app.data.repository
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.room.withTransaction
+import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.db.dao.*
 import com.insituledger.app.data.local.db.entity.*
 import com.google.gson.Gson
@@ -63,6 +65,7 @@ data class ScheduledBackup(
 @Singleton
 class FileBackupRepository @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val database: AppDatabase,
     private val accountDao: AccountDao,
     private val categoryDao: CategoryDao,
     private val transactionDao: TransactionDao,
@@ -185,9 +188,6 @@ class FileBackupRepository @Inject constructor(
                     isLocalOnly = true
                 )
             }
-            if (categoryEntities.isNotEmpty()) categoryDao.upsertAll(categoryEntities)
-
-            // Import accounts
             val accountEntities = backup.accounts.map {
                 AccountEntity(
                     id = it.id, userId = 0,
@@ -196,9 +196,6 @@ class FileBackupRepository @Inject constructor(
                     isLocalOnly = true
                 )
             }
-            if (accountEntities.isNotEmpty()) accountDao.upsertAll(accountEntities)
-
-            // Import transactions
             val transactionEntities = backup.transactions.map {
                 TransactionEntity(
                     id = it.id, accountId = it.accountId, categoryId = it.categoryId,
@@ -208,9 +205,6 @@ class FileBackupRepository @Inject constructor(
                     isLocalOnly = true
                 )
             }
-            if (transactionEntities.isNotEmpty()) transactionDao.upsertAll(transactionEntities)
-
-            // Import scheduled transactions
             val scheduledEntities = backup.scheduledTransactions.map {
                 ScheduledTransactionEntity(
                     id = it.id, accountId = it.accountId, categoryId = it.categoryId,
@@ -222,7 +216,16 @@ class FileBackupRepository @Inject constructor(
                     isLocalOnly = true
                 )
             }
-            if (scheduledEntities.isNotEmpty()) scheduledDao.upsertAll(scheduledEntities)
+
+            // All writes in one transaction so a mid-import failure can't
+            // leave a partial restore (categories present but their parent
+            // transactions missing, etc.).
+            database.withTransaction {
+                if (categoryEntities.isNotEmpty()) categoryDao.upsertAll(categoryEntities)
+                if (accountEntities.isNotEmpty()) accountDao.upsertAll(accountEntities)
+                if (transactionEntities.isNotEmpty()) transactionDao.upsertAll(transactionEntities)
+                if (scheduledEntities.isNotEmpty()) scheduledDao.upsertAll(scheduledEntities)
+            }
 
             val totalItems = categoryEntities.size + accountEntities.size +
                     transactionEntities.size + scheduledEntities.size
@@ -267,14 +270,17 @@ internal fun validateBackup(backup: BackupData): String? {
         if (!categoryIds.add(c.id)) return "categories[$i]: duplicate id ${c.id}"
     }
 
+    val transactionIds = HashSet<Long>(backup.transactions.size)
     backup.transactions.forEachIndexed { i, t ->
         if (t.id <= 0) return "transactions[$i]: invalid id ${t.id}"
         if (t.type !in TYPE_VALUES) return "transactions[$i]: invalid type '${t.type}'"
         if (!t.amount.isFinite() || t.amount <= 0) return "transactions[$i]: amount must be positive and finite"
         if (t.currency.isBlank()) return "transactions[$i]: currency is empty"
         if (!DATE_PREFIX.containsMatchIn(t.date)) return "transactions[$i]: unparseable date '${t.date}'"
+        if (!transactionIds.add(t.id)) return "transactions[$i]: duplicate id ${t.id}"
     }
 
+    val scheduledIds = HashSet<Long>(backup.scheduledTransactions.size)
     backup.scheduledTransactions.forEachIndexed { i, s ->
         if (s.id <= 0) return "scheduled[$i]: invalid id ${s.id}"
         if (s.type !in TYPE_VALUES) return "scheduled[$i]: invalid type '${s.type}'"
@@ -282,6 +288,7 @@ internal fun validateBackup(backup: BackupData): String? {
         if (s.currency.isBlank()) return "scheduled[$i]: currency is empty"
         if (!s.rrule.startsWith("FREQ=")) return "scheduled[$i]: rrule must start with FREQ="
         if (!DATE_PREFIX.containsMatchIn(s.nextOccurrence)) return "scheduled[$i]: unparseable next_occurrence '${s.nextOccurrence}'"
+        if (!scheduledIds.add(s.id)) return "scheduled[$i]: duplicate id ${s.id}"
     }
 
     return null

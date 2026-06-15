@@ -175,7 +175,12 @@ data class SyncResponse(
     val transactions: List<TransactionDto>,
     val categories: List<CategoryDto>,
     val accounts: List<AccountDto>,
-    @SerializedName("scheduled_transactions") val scheduledTransactions: List<ScheduledTransactionDto>
+    @SerializedName("scheduled_transactions") val scheduledTransactions: List<ScheduledTransactionDto>,
+    // v1.19.0: account IDs whose share grant was revoked since the client's
+    // last sync. The client wipes the account + its transactions/schedules +
+    // any pending ops that depended on it. Pre-1.19 backends omit the field
+    // (default null → empty list).
+    @SerializedName("revoked_account_ids") val revokedAccountIds: List<Long>? = null
 )
 
 data class AutocompleteSuggestion(

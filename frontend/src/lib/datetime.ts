@@ -57,3 +57,21 @@ export function extractTime(iso: string): string {
 	const time = afterT.slice(0, end);
 	return time.length >= 5 ? time.slice(0, 5) : time;
 }
+
+// Local-calendar "YYYY-MM-DD" for the given Date (defaults to now). Use this
+// for form defaults and any local-date display; Date.prototype.toISOString
+// formats in UTC and would shift the value by a day near local midnight.
+export function localDateInputValue(date: Date = new Date()): string {
+	const yyyy = date.getFullYear();
+	const mm = String(date.getMonth() + 1).padStart(2, '0');
+	const dd = String(date.getDate()).padStart(2, '0');
+	return `${yyyy}-${mm}-${dd}`;
+}
+
+// Local-calendar "YYYY-MM" for monthly bucketing. Same UTC-vs-local concern
+// as localDateInputValue, applied to month boundaries.
+export function localMonthKey(date: Date = new Date()): string {
+	const yyyy = date.getFullYear();
+	const mm = String(date.getMonth() + 1).padStart(2, '0');
+	return `${yyyy}-${mm}`;
+}

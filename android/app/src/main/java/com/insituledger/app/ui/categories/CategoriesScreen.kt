@@ -14,10 +14,10 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.data.repository.CategoryDeleteResult
 import com.insituledger.app.domain.model.Category
 import com.insituledger.app.ui.common.AppCard
 import com.insituledger.app.ui.common.ColorUtils
@@ -38,7 +39,6 @@ import com.insituledger.app.ui.common.LocalSnackbarHostState
 import com.insituledger.app.ui.common.SectionHeader
 import com.insituledger.app.ui.theme.AppSpacing
 import com.insituledger.app.ui.theme.BrandGradients
-import kotlinx.coroutines.launch
 
 private data class CategoryNode(
     val category: Category,
@@ -67,12 +67,22 @@ fun CategoriesScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = LocalSnackbarHostState.current
-    val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
-    val onDelete: (Long) -> Unit = { id ->
-        viewModel.delete(id)
-        scope.launch { snackbarHostState.showSnackbar("Category deleted") }
+    // Show the snackbar AFTER the repository reports back so a delete that
+    // can't proceed (live transactions / scheduled txns) surfaces the real
+    // reason instead of a lying "Category deleted".
+    LaunchedEffect(viewModel) {
+        viewModel.deleteEvents.collect { result ->
+            val msg = when (result) {
+                CategoryDeleteResult.Success -> "Category deleted"
+                CategoryDeleteResult.NotFound -> "Category not found"
+                CategoryDeleteResult.HasTransactions -> "Cannot delete: category has transactions"
+                CategoryDeleteResult.HasScheduled -> "Cannot delete: category has scheduled transactions"
+            }
+            snackbarHostState.showSnackbar(msg)
+        }
     }
+    val onDelete: (Long) -> Unit = { id -> viewModel.delete(id) }
     var filter by remember { mutableStateOf(CategoryFilter.ALL) }
 
     Scaffold(
