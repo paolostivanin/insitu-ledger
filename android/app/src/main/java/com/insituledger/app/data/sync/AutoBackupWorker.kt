@@ -13,6 +13,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.IsoFields
 
@@ -69,6 +70,11 @@ class AutoBackupWorker @AssistedInject constructor(
         val mime = if (passphrase.isNullOrEmpty()) "application/json" else "application/octet-stream"
 
         val today = LocalDate.now()
+        // v1.20.0: every run gets a unique timestamp suffix so we never need
+        // to replace a prior good backup. Two runs the same day (e.g. retry
+        // after a transient failure) end up as two distinct files; retention
+        // keeps only the newest N. This removes the SAF rename race entirely.
+        val runStamp = LocalTime.now().format(DateTimeFormatter.ofPattern("HHmmss"))
 
         // Each class is independent: a write failure of the daily backup must
         // not block the weekly or skip retention of the others. Any failure
@@ -76,28 +82,31 @@ class AutoBackupWorker @AssistedInject constructor(
         var anyFailed = false
 
         if (prefs.getAutoBackupDailyEnabledImmediate()) {
-            val fileName = "insitu-backup-daily-$today.$ext"
-            if (writeBackup(folder, fileName, payload, mime)) {
-                cleanupOldBackups(folder, "insitu-backup-daily-", prefs.getAutoBackupDailyRetentionImmediate())
+            val prefix = "insitu-backup-daily-"
+            val fileName = "$prefix$today-T$runStamp.$ext"
+            if (writeBackup(folder, prefix, fileName, payload, mime)) {
+                cleanupOldBackups(folder, prefix, prefs.getAutoBackupDailyRetentionImmediate())
             } else {
                 anyFailed = true
             }
         }
 
         if (prefs.getAutoBackupWeeklyEnabledImmediate() && today.dayOfWeek == DayOfWeek.MONDAY) {
+            val prefix = "insitu-backup-weekly-"
             val weekNumber = today.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-            val fileName = "insitu-backup-weekly-${today.year}-W${weekNumber.toString().padStart(2, '0')}.$ext"
-            if (writeBackup(folder, fileName, payload, mime)) {
-                cleanupOldBackups(folder, "insitu-backup-weekly-", prefs.getAutoBackupWeeklyRetentionImmediate())
+            val fileName = "$prefix${today.year}-W${weekNumber.toString().padStart(2, '0')}-T$runStamp.$ext"
+            if (writeBackup(folder, prefix, fileName, payload, mime)) {
+                cleanupOldBackups(folder, prefix, prefs.getAutoBackupWeeklyRetentionImmediate())
             } else {
                 anyFailed = true
             }
         }
 
         if (prefs.getAutoBackupMonthlyEnabledImmediate() && today.dayOfMonth == 1) {
-            val fileName = "insitu-backup-monthly-${today.format(DateTimeFormatter.ofPattern("yyyy-MM"))}.$ext"
-            if (writeBackup(folder, fileName, payload, mime)) {
-                cleanupOldBackups(folder, "insitu-backup-monthly-", prefs.getAutoBackupMonthlyRetentionImmediate())
+            val prefix = "insitu-backup-monthly-"
+            val fileName = "$prefix${today.format(DateTimeFormatter.ofPattern("yyyy-MM"))}-T$runStamp.$ext"
+            if (writeBackup(folder, prefix, fileName, payload, mime)) {
+                cleanupOldBackups(folder, prefix, prefs.getAutoBackupMonthlyRetentionImmediate())
             } else {
                 anyFailed = true
             }
@@ -106,17 +115,22 @@ class AutoBackupWorker @AssistedInject constructor(
         return if (anyFailed) Result.retry() else Result.success()
     }
 
-    // Write-then-swap: stage payload in a .tmp sibling, fsync, and only then
-    // remove the existing target so a storage failure can't destroy the last
-    // good copy. SAF has no atomic rename, so a rename failure after the
-    // delete leaves the .tmp file in place — still better than nothing.
-    // Returns true on success; the caller skips retention cleanup on false
-    // so a transient error doesn't quietly evict older known-good backups.
-    private fun writeBackup(folder: DocumentFile, fileName: String, payload: ByteArray, mime: String): Boolean {
-        val tmpName = "$fileName.tmp"
-        // Sweep any orphan from a prior failed run before staging again.
-        folder.findFile(tmpName)?.delete()
+    // Write-then-rename via a per-run .tmp sibling. fileName is unique per
+    // run (timestamp suffix) so we NEVER delete an existing target before
+    // attempting the rename — the previous good backup is always preserved
+    // even when SAF's renameTo fails. Stale .tmp orphans from prior failed
+    // runs of the same backup class are swept up front so they don't pile up.
+    // Returns true on success; the caller skips retention cleanup on false.
+    private fun writeBackup(
+        folder: DocumentFile,
+        prefix: String,
+        fileName: String,
+        payload: ByteArray,
+        mime: String
+    ): Boolean {
+        sweepTmpOrphans(folder, prefix)
 
+        val tmpName = "$fileName.tmp"
         val tmpFile = try {
             folder.createFile(mime, tmpName)
         } catch (e: Exception) {
@@ -149,9 +163,8 @@ class AutoBackupWorker @AssistedInject constructor(
         }
 
         return try {
-            folder.findFile(fileName)?.delete()
             if (!tmpFile.renameTo(fileName)) {
-                Log.e(TAG, "Failed to rename $tmpName -> $fileName (left in place)")
+                Log.e(TAG, "Failed to rename $tmpName -> $fileName (tmp left in place for sweep)")
                 return false
             }
             Log.d(TAG, "Wrote backup: $fileName")
@@ -159,6 +172,22 @@ class AutoBackupWorker @AssistedInject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to finalize backup: $fileName", e)
             false
+        }
+    }
+
+    private fun sweepTmpOrphans(folder: DocumentFile, prefix: String) {
+        try {
+            folder.listFiles()
+                .filter {
+                    val name = it.name ?: return@filter false
+                    name.startsWith(prefix) && name.endsWith(".tmp")
+                }
+                .forEach { tmp ->
+                    Log.d(TAG, "Sweeping orphan tmp: ${tmp.name}")
+                    try { tmp.delete() } catch (_: Exception) {}
+                }
+        } catch (_: Exception) {
+            // Listing failure isn't fatal — the new write will still proceed.
         }
     }
 
