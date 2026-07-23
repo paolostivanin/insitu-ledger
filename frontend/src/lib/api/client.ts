@@ -183,6 +183,10 @@ export interface TransactionInput {
 export interface AutocompleteSuggestion {
 	description: string;
 	category_id: number;
+	// Present only when the last N transactions with this description share one
+	// identical amount + currency; the client pre-fills them to speed up entry.
+	amount?: number;
+	currency?: string;
 }
 
 export const transactions = {

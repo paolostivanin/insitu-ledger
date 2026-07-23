@@ -22,6 +22,9 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
+// Must match the backend's autocompleteAmountSampleSize.
+const val AUTOCOMPLETE_AMOUNT_SAMPLE_SIZE = 3
+
 @Singleton
 class TransactionRepository @Inject constructor(
     private val database: AppDatabase,
@@ -129,6 +132,22 @@ class TransactionRepository @Inject constructor(
 
     suspend fun autocomplete(query: String): List<Pair<String, Long>> {
         return transactionDao.autocomplete(query).map { it.description to it.categoryId }
+    }
+
+    // Suggest an amount to pre-fill when the most recent [sampleSize] transactions
+    // for this exact description share one identical (amount, currency). Mirrors
+    // the backend's autocomplete amount logic for the local-first path.
+    suspend fun suggestedAmount(
+        description: String,
+        sampleSize: Int = AUTOCOMPLETE_AMOUNT_SAMPLE_SIZE
+    ): Pair<Double, String>? {
+        val rows = transactionDao.recentAmountsForDescription(description, sampleSize)
+        if (rows.size < sampleSize) return null
+        val first = rows.first()
+        val allSame = rows.all {
+            kotlin.math.abs(it.amount - first.amount) < 0.005 && it.currency == first.currency
+        }
+        return if (allSame) first.amount to first.currency else null
     }
 
     suspend fun create(

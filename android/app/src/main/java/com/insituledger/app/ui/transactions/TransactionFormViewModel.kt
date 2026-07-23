@@ -181,7 +181,29 @@ class TransactionFormViewModel @Inject constructor(
                 showSuggestions = false
             )
         }
+        // Reuse a stable recurring amount for this payee, but never overwrite a
+        // value the user has already typed.
+        viewModelScope.launch {
+            val current = _uiState.value.amount
+            if (current.isBlank() || current.toDoubleOrNull() == 0.0) {
+                transactionRepository.suggestedAmount(suggestion.description)?.let { (amt, ccy) ->
+                    _uiState.update {
+                        if (it.amount.isBlank() || it.amount.toDoubleOrNull() == 0.0) {
+                            it.copy(amount = formatAmount(amt), currency = ccy)
+                        } else {
+                            it
+                        }
+                    }
+                }
+            }
+        }
     }
+
+    private fun formatAmount(amount: Double): String =
+        java.math.BigDecimal.valueOf(amount)
+            .setScale(2, java.math.RoundingMode.HALF_UP)
+            .stripTrailingZeros()
+            .toPlainString()
 
     fun dismissSuggestions() {
         _uiState.update { it.copy(showSuggestions = false) }

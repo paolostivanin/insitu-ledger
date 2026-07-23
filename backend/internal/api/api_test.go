@@ -545,6 +545,104 @@ func createTestAccountAndCategory(t *testing.T, handler http.Handler, token stri
 	return acctID, catID
 }
 
+func TestAutocompleteSuggestsAmount(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	// All dates are in the past; future-dated transactions would be re-routed
+	// to scheduled entries and never land in the transactions table.
+	mkTxn := func(desc string, amount float64, currency, date string) {
+		t.Helper()
+		body := fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":%g,"currency":%q,"date":%q,"description":%q}`,
+			acctID, catID, amount, currency, date, desc)
+		req := authedRequest("POST", "/api/transactions", body, token)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != 201 {
+			t.Fatalf("create txn %q: got %d: %s", desc, w.Code, w.Body.String())
+		}
+	}
+
+	type sugg struct {
+		Description string   `json:"description"`
+		CategoryID  int64    `json:"category_id"`
+		Amount      *float64 `json:"amount"`
+		Currency    *string  `json:"currency"`
+	}
+	get := func(q string) []sugg {
+		t.Helper()
+		req := authedRequest("GET", "/api/transactions/autocomplete?q="+q, "", token)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != 200 {
+			t.Fatalf("autocomplete %q: got %d: %s", q, w.Code, w.Body.String())
+		}
+		var out []sugg
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode autocomplete %q: %v", q, err)
+		}
+		return out
+	}
+	find := func(list []sugg, desc string) *sugg {
+		for i := range list {
+			if list[i].Description == desc {
+				return &list[i]
+			}
+		}
+		return nil
+	}
+
+	// Stable fixed cost: the last 3 are identical (1200 EUR); an older 1000 is ignored.
+	mkTxn("Rent", 1000, "EUR", "2025-01-01")
+	mkTxn("Rent", 1200, "EUR", "2025-02-01")
+	mkTxn("Rent", 1200, "EUR", "2025-03-01")
+	mkTxn("Rent", 1200, "EUR", "2025-04-01")
+	// Variable cost: the last 3 differ.
+	mkTxn("Coffee", 3.5, "EUR", "2025-02-01")
+	mkTxn("Coffee", 4.0, "EUR", "2025-03-01")
+	mkTxn("Coffee", 3.5, "EUR", "2025-04-01")
+	// Too few samples (only 2).
+	mkTxn("Lunch", 10, "EUR", "2025-03-01")
+	mkTxn("Lunch", 10, "EUR", "2025-04-01")
+	// Same amount but a different currency within the last 3.
+	mkTxn("Gym", 30, "EUR", "2025-02-01")
+	mkTxn("Gym", 30, "EUR", "2025-03-01")
+	mkTxn("Gym", 30, "USD", "2025-04-01")
+
+	if r := find(get("Rent"), "Rent"); r == nil {
+		t.Fatal("Rent suggestion missing")
+	} else if r.Amount == nil || *r.Amount != 1200 {
+		t.Fatalf("Rent amount: want 1200, got %v", r.Amount)
+	} else if r.Currency == nil || *r.Currency != "EUR" {
+		t.Fatalf("Rent currency: want EUR, got %v", r.Currency)
+	}
+
+	if c := find(get("Coffee"), "Coffee"); c == nil {
+		t.Fatal("Coffee suggestion missing")
+	} else if c.Amount != nil {
+		t.Fatalf("Coffee amount: want nil, got %v", *c.Amount)
+	}
+
+	if l := find(get("Lunch"), "Lunch"); l == nil {
+		t.Fatal("Lunch suggestion missing")
+	} else if l.Amount != nil {
+		t.Fatalf("Lunch amount: want nil, got %v", *l.Amount)
+	}
+
+	if g := find(get("Gym"), "Gym"); g == nil {
+		t.Fatal("Gym suggestion missing")
+	} else if g.Amount != nil {
+		t.Fatalf("Gym amount: want nil, got %v", *g.Amount)
+	}
+
+	if out := get(""); len(out) != 0 {
+		t.Fatalf("empty q: want 0 suggestions, got %d", len(out))
+	}
+}
+
 func TestTransactionsCRUD(t *testing.T) {
 	s, cleanup := setupTestServer(t)
 	defer cleanup()

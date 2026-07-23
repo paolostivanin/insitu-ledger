@@ -19,6 +19,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -135,5 +136,41 @@ class TransactionFormViewModelTest {
         }
         assertTrue(vm.uiState.value.saved)
         assertNull(vm.uiState.value.error)
+    }
+
+    // Selecting a payee with a stable recurring amount pre-fills the amount +
+    // currency into the empty form (USD proves the currency came from history).
+    @Test
+    fun selectSuggestionFillsAmountWhenEmpty() = runTest {
+        coEvery { transactionRepository.suggestedAmount("Netflix") } returns (12.99 to "USD")
+        val vm = newViewModel()
+
+        vm.selectSuggestion(DescriptionSuggestion("Netflix", 2L))
+
+        assertEquals("12.99", vm.uiState.value.amount)
+        assertEquals("USD", vm.uiState.value.currency)
+    }
+
+    // A value the user already typed must never be clobbered by the suggestion.
+    @Test
+    fun selectSuggestionDoesNotClobberTypedAmount() = runTest {
+        coEvery { transactionRepository.suggestedAmount("Netflix") } returns (12.99 to "USD")
+        val vm = newViewModel()
+
+        vm.updateAmount("50")
+        vm.selectSuggestion(DescriptionSuggestion("Netflix", 2L))
+
+        assertEquals("50", vm.uiState.value.amount)
+    }
+
+    // No stable recurring amount → the amount field is left untouched.
+    @Test
+    fun selectSuggestionWithoutStableAmountLeavesFieldEmpty() = runTest {
+        coEvery { transactionRepository.suggestedAmount("Groceries") } returns null
+        val vm = newViewModel()
+
+        vm.selectSuggestion(DescriptionSuggestion("Groceries", 2L))
+
+        assertTrue(vm.uiState.value.amount.isBlank())
     }
 }

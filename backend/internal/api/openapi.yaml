@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.20.1"
+  version: "1.21.0"
 
 servers:
   - url: /api
@@ -177,6 +177,24 @@ components:
             the same `(created_by_user_id, client_id)` returns the original row
             (HTTP 200) instead of inserting a duplicate. Used by the Android
             pending-operations queue to make sync retries safe.
+
+    AutocompleteSuggestion:
+      type: object
+      required: [description, category_id]
+      properties:
+        description:
+          type: string
+        category_id:
+          type: integer
+          description: Category of the most recent transaction with this description.
+        amount:
+          type: number
+          description: >-
+            Present only when the last three transactions with this description
+            share one identical amount + currency; the client pre-fills it.
+        currency:
+          type: string
+          description: Currency accompanying `amount`; present under the same condition.
 
     Category:
       type: object
@@ -778,6 +796,38 @@ paths:
                 properties:
                   id:
                     type: integer
+
+  /transactions/autocomplete:
+    get:
+      tags: [Transactions]
+      summary: Autocomplete transaction descriptions
+      description: >-
+        Case-insensitive prefix search over past transaction descriptions,
+        returning up to 10 recent distinct matches. Each match carries the
+        category of its most recent occurrence, and — when the last three
+        transactions for that description share one identical amount and
+        currency — a suggested amount + currency for the client to pre-fill.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Description prefix. An empty value returns an empty array.
+          schema:
+            type: string
+        - name: owner_id
+          in: query
+          description: Optional shared-account owner filter (see List transactions).
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Matching suggestions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AutocompleteSuggestion"
 
   /transactions/{id}:
     put:

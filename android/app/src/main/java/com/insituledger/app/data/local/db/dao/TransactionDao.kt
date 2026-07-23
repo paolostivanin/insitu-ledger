@@ -61,6 +61,16 @@ interface TransactionDao {
     """)
     suspend fun autocomplete(query: String): List<LocalAutocompleteSuggestion>
 
+    // Most recent amounts for an exact description (case-insensitive). Used to
+    // detect a stable recurring amount to pre-fill on the transaction form.
+    @Query("""
+        SELECT amount, currency FROM transactions
+        WHERE deleted_at IS NULL AND description = :description COLLATE NOCASE
+        ORDER BY date DESC, id DESC
+        LIMIT :limit
+    """)
+    suspend fun recentAmountsForDescription(description: String, limit: Int): List<RecentAmountRow>
+
     @Query("""
         SELECT * FROM transactions
         WHERE deleted_at IS NULL
@@ -142,6 +152,11 @@ data class MonthlySummary(
 data class LocalAutocompleteSuggestion(
     val description: String,
     val categoryId: Long
+)
+
+data class RecentAmountRow(
+    val amount: Double,
+    val currency: String
 )
 
 data class CategoryBreakdownRow(

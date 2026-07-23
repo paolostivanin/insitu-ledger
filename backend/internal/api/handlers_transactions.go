@@ -409,6 +409,11 @@ func (s *Server) handleUpdateTransaction(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// autocompleteAmountSampleSize is how many of the most recent transactions for a
+// given description must share one identical (amount, currency) before the
+// autocomplete endpoint suggests that amount for reuse.
+const autocompleteAmountSampleSize = 3
+
 func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
@@ -426,14 +431,41 @@ func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.R
 	}
 
 	args := append([]any{q + "%"}, idsToArgs(accIDs)...)
+	// n is a compile-time constant, safe to interpolate directly into the SQL.
+	n := strconv.Itoa(autocompleteAmountSampleSize)
+	// Per matching description we take the most recent N transactions; if all N
+	// share one identical (amount rounded to cents, currency) we surface that
+	// amount + currency so the client can pre-fill it. The rn=1 row also drives
+	// the returned category_id (deterministically the most recent one).
 	rows, err := s.DB.Query(
-		`SELECT description, category_id FROM transactions
-		 WHERE deleted_at IS NULL AND description IS NOT NULL
-		   AND description LIKE ? COLLATE NOCASE
-		   AND account_id IN (`+sqlInPlaceholders(len(accIDs))+`)
-		 GROUP BY description COLLATE NOCASE
-		 ORDER BY MAX(date) DESC
-		 LIMIT 10`,
+		`WITH matched AS (
+			SELECT description, category_id, amount, currency, date, id,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY description COLLATE NOCASE
+			           ORDER BY date DESC, id DESC
+			       ) AS rn
+			FROM transactions
+			WHERE deleted_at IS NULL AND description IS NOT NULL
+			  AND description LIKE ? COLLATE NOCASE
+			  AND account_id IN (`+sqlInPlaceholders(len(accIDs))+`)
+		),
+		recent AS (
+			SELECT * FROM matched WHERE rn <= `+n+`
+		)
+		SELECT description,
+		       MAX(CASE WHEN rn = 1 THEN category_id END) AS category_id,
+		       CASE WHEN COUNT(*) = `+n+`
+		             AND COUNT(DISTINCT ROUND(amount, 2) || '|' || currency) = 1
+		            THEN MAX(CASE WHEN rn = 1 THEN ROUND(amount, 2) END)
+		       END AS suggested_amount,
+		       CASE WHEN COUNT(*) = `+n+`
+		             AND COUNT(DISTINCT ROUND(amount, 2) || '|' || currency) = 1
+		            THEN MAX(CASE WHEN rn = 1 THEN currency END)
+		       END AS suggested_currency
+		FROM recent
+		GROUP BY description COLLATE NOCASE
+		ORDER BY MAX(date) DESC
+		LIMIT 10`,
 		args...,
 	)
 	if err != nil {
@@ -443,17 +475,29 @@ func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.R
 	defer rows.Close()
 
 	type suggestion struct {
-		Description string `json:"description"`
-		CategoryID  int64  `json:"category_id"`
+		Description string   `json:"description"`
+		CategoryID  int64    `json:"category_id"`
+		Amount      *float64 `json:"amount,omitempty"`
+		Currency    *string  `json:"currency,omitempty"`
 	}
 	var results []suggestion
 	for rows.Next() {
-		var s suggestion
-		if err := rows.Scan(&s.Description, &s.CategoryID); err != nil {
+		var sug suggestion
+		var amt sql.NullFloat64
+		var ccy sql.NullString
+		if err := rows.Scan(&sug.Description, &sug.CategoryID, &amt, &ccy); err != nil {
 			http.Error(w, "scan error", http.StatusInternalServerError)
 			return
 		}
-		results = append(results, s)
+		if amt.Valid {
+			v := amt.Float64
+			sug.Amount = &v
+		}
+		if ccy.Valid {
+			c := ccy.String
+			sug.Currency = &c
+		}
+		results = append(results, sug)
 	}
 	if err := rows.Err(); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

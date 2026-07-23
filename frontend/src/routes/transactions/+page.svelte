@@ -100,6 +100,11 @@
 		fCategoryId = s.category_id;
 		const cat = cats.find(c => c.id === s.category_id);
 		if (cat) fType = cat.type;
+		// Reuse the recurring amount, but never clobber a value the user already typed.
+		if (s.amount != null && (!fAmount || fAmount === 0)) {
+			fAmount = s.amount;
+			if (s.currency) fCurrency = s.currency;
+		}
 		suggestions = [];
 		showSuggestions = false;
 		selectedSuggestionIndex = -1;
