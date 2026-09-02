@@ -13,6 +13,8 @@ import com.insituledger.app.domain.model.Category
 import com.insituledger.app.ui.transactions.AccountDisplay
 import com.insituledger.app.ui.transactions.DescriptionSuggestion
 import com.insituledger.app.util.DateTimeUtil
+import com.insituledger.app.util.Freq
+import com.insituledger.app.util.Rrule
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -33,7 +35,11 @@ data class ScheduledFormUiState(
     val currency: String = "EUR",
     val description: String = "",
     val note: String = "",
-    val frequency: String = "monthly",
+    val frequency: String = "monthly", // an Rrule.PRESETS key, or Rrule.CUSTOM_KEY
+    // Only read when frequency == Rrule.CUSTOM_KEY. String to match the
+    // amount / maxOccurrences convention for user-typed numbers.
+    val customInterval: String = "2",
+    val customUnit: Freq = Freq.MONTHLY,
     val nextDate: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE),
     val nextTime: String = "09:00",
     val endMode: String = "never", // "never" | "count" | "date"
@@ -51,33 +57,21 @@ data class ScheduledFormUiState(
     val error: String? = null,
     val saved: Boolean = false
 ) {
-    companion object {
-        val frequencyMap = mapOf(
-            "daily" to "FREQ=DAILY",
-            "weekly" to "FREQ=WEEKLY",
-            "biweekly" to "FREQ=WEEKLY;INTERVAL=2",
-            "monthly" to "FREQ=MONTHLY",
-            "quarterly" to "FREQ=MONTHLY;INTERVAL=3",
-            "yearly" to "FREQ=YEARLY"
-        )
-        val frequencyLabels = mapOf(
-            "daily" to "Daily",
-            "weekly" to "Weekly",
-            "biweekly" to "Biweekly",
-            "monthly" to "Monthly",
-            "quarterly" to "Quarterly",
-            "yearly" to "Yearly"
-        )
-    }
+    /** The {freq, interval} pair the frequency controls currently describe. */
+    val recurrence: Pair<Freq, Int>
+        get() = if (frequency == Rrule.CUSTOM_KEY) {
+            // Coerce like Rrule.parse does; save() is what rejects a bad value.
+            customUnit to (customInterval.toIntOrNull()?.takeIf { it > 0 } ?: 1)
+        } else {
+            Rrule.preset(frequency)?.let { it.freq to it.interval } ?: (Freq.MONTHLY to 1)
+        }
 
     val rrule: String
         get() {
-            val base = frequencyMap[frequency] ?: "FREQ=MONTHLY"
-            return if (endMode == "date" && endDate.isNotBlank()) {
-                // Encode end-of-day UTC so the chosen date itself is inclusive.
-                val compact = endDate.replace("-", "")
-                "$base;UNTIL=${compact}T235959Z"
-            } else base
+            val (freq, interval) = recurrence
+            // UNTIL is encoded end-of-day UTC so the chosen date is inclusive.
+            val until = if (endMode == "date") endDate else ""
+            return Rrule.build(freq, interval, until)
         }
 
     // Emit RFC3339 with the system zone's offset for the chosen date, so the
@@ -133,17 +127,13 @@ class ScheduledFormViewModel @Inject constructor(
                 if (editId != null && _uiState.value.isLoading) {
                     val item = scheduledRepository.getById(editId)
                     if (item != null) {
-                        // Strip optional ;UNTIL=... segment for frequency lookup; remember the date.
-                        val withoutUntil = item.rrule.split(";")
-                            .filterNot { it.startsWith("UNTIL=") }
-                            .joinToString(";")
-                        val freq = ScheduledFormUiState.frequencyMap.entries
-                            .find { it.value == withoutUntil }?.key ?: "monthly"
-                        val untilDate = item.rrule.split(";")
-                            .firstOrNull { it.startsWith("UNTIL=") }
-                            ?.removePrefix("UNTIL=")
-                            ?.let { extractIsoDate(it) }
-                            ?: ""
+                        // Parse the rrule into its parts rather than matching it
+                        // whole: an exact-string lookup silently degrades
+                        // anything unrecognized to "monthly", and saving then
+                        // overwrites the user's real recurrence.
+                        val parsed = Rrule.parse(item.rrule)
+                        val freq = Rrule.presetKey(parsed.freq, parsed.interval)
+                        val untilDate = parsed.until
                         // .take(5) bounds the time to "HH:mm" so the picker
                         // prefill works even when item.nextOccurrence carries
                         // an offset/seconds tail like "08:41:00+02:00".
@@ -163,7 +153,10 @@ class ScheduledFormViewModel @Inject constructor(
                                 type = item.type, amount = item.amount.toString(),
                                 currency = item.currency, description = item.description ?: "",
                                 note = item.note ?: "",
-                                frequency = freq, nextDate = date, nextTime = time,
+                                frequency = freq,
+                                customInterval = if (freq == Rrule.CUSTOM_KEY) parsed.interval.toString() else it.customInterval,
+                                customUnit = if (freq == Rrule.CUSTOM_KEY) parsed.freq else it.customUnit,
+                                nextDate = date, nextTime = time,
                                 endMode = endMode,
                                 maxOccurrences = item.maxOccurrences?.toString() ?: "",
                                 endDate = untilDate,
@@ -209,6 +202,17 @@ class ScheduledFormViewModel @Inject constructor(
 
     fun updateFrequency(frequency: String) {
         _uiState.update { it.copy(frequency = frequency) }
+        recomputePreview()
+    }
+    fun updateCustomInterval(value: String) {
+        // Digits only, bounded by the length of MAX_INTERVAL — a stray letter
+        // would otherwise fall back to 1 and silently save the wrong rule.
+        val digits = value.filter { it.isDigit() }.take(Rrule.MAX_INTERVAL.toString().length)
+        _uiState.update { it.copy(customInterval = digits) }
+        recomputePreview()
+    }
+    fun updateCustomUnit(unit: Freq) {
+        _uiState.update { it.copy(customUnit = unit) }
         recomputePreview()
     }
     fun updateNextDate(date: String) {
@@ -326,6 +330,15 @@ class ScheduledFormViewModel @Inject constructor(
             _uiState.update { it.copy(error = "Pick an end date") }
             return
         }
+        if (state.frequency == Rrule.CUSTOM_KEY) {
+            val interval = state.customInterval.toIntOrNull()
+            if (interval == null || interval < 1 || interval > Rrule.MAX_INTERVAL) {
+                _uiState.update {
+                    it.copy(error = "Repeat every must be a whole number between 1 and ${Rrule.MAX_INTERVAL}")
+                }
+                return
+            }
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true) }
             try {
@@ -370,33 +383,18 @@ class ScheduledFormViewModel @Inject constructor(
         } else null
         val countCap = if (state.endMode == "count") state.maxOccurrences.toIntOrNull()?.takeIf { it > 0 } else null
 
+        // Advance by the real {freq, interval} pair, not the UI key — the old
+        // key-based version ignored INTERVAL, so a custom rule previewed wrong.
+        val (freq, interval) = state.recurrence
         val out = mutableListOf<LocalDateTime>()
         var current = start
         while (out.size < max) {
             if (until != null && current.isAfter(until)) break
             out += current
             if (countCap != null && out.size >= countCap) break
-            current = advance(current, state.frequency)
+            current = Rrule.advance(current, freq, interval)
         }
         val fmt = DateTimeFormatter.ofPattern("d MMM")
         return out.map { fmt.format(it) }
-    }
-
-    private fun advance(t: LocalDateTime, frequency: String): LocalDateTime = when (frequency) {
-        "daily" -> t.plusDays(1)
-        "weekly" -> t.plusWeeks(1)
-        "biweekly" -> t.plusWeeks(2)
-        "monthly" -> t.plusMonths(1)
-        "quarterly" -> t.plusMonths(3)
-        "yearly" -> t.plusYears(1)
-        else -> t.plusMonths(1)
-    }
-
-    private fun extractIsoDate(until: String): String {
-        // Tolerate 20261231T235959Z, 20261231, 2026-12-31T..., 2026-12-31
-        val core = until.substringBefore("T")
-        return if (core.length == 8 && core.all { it.isDigit() }) {
-            "${core.substring(0, 4)}-${core.substring(4, 6)}-${core.substring(6, 8)}"
-        } else core
     }
 }

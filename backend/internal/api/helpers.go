@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/pstivanin/insitu-ledger/backend/internal/scheduler"
 )
 
 // truncDate ensures a date string is in YYYY-MM-DD format,
@@ -43,6 +46,73 @@ func validateLength(field, value string, maxLen int) error {
 		return fmt.Errorf("%s must not exceed %d characters", field, maxLen)
 	}
 	return nil
+}
+
+// maxRRuleLen and maxRRuleInterval bound the recurrence rule a client may
+// store. The interval cap is a sanity limit, not a semantic one — "every 999
+// months" is already absurd, and an unbounded value only invites overflow in
+// the date math.
+const (
+	maxRRuleLen      = 200
+	maxRRuleInterval = 999
+)
+
+var validRRuleFreqs = map[string]bool{
+	"DAILY": true, "WEEKLY": true, "MONTHLY": true, "YEARLY": true,
+}
+
+// validateRRule checks the RFC 5545 subset that scheduler.advanceDate
+// understands.
+//
+// Deliberately stricter than the scheduler, which must stay maximally lenient
+// because it reads stored rows it can never reject. Equally deliberately, this
+// is lenient about *unknown* keys and malformed segments: the scheduler skips
+// them harmlessly, and a 400 here becomes a permanently-stuck sync operation
+// on Android (SyncRepository maps 4xx to PushOutcome.Permanent). Only the
+// three values the scheduler actually acts on are enforced.
+func validateRRule(s string) error {
+	if s == "" {
+		return fmt.Errorf("invalid rrule: must not be empty")
+	}
+	if len(s) > maxRRuleLen {
+		return fmt.Errorf("invalid rrule: must not exceed %d characters", maxRRuleLen)
+	}
+
+	freq := ""
+	for _, part := range strings.Split(s, ";") {
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue // scheduler skips these too
+		}
+		switch kv[0] {
+		case "FREQ":
+			freq = kv[1]
+		case "INTERVAL":
+			n, err := strconv.Atoi(kv[1])
+			if err != nil || n < 1 || n > maxRRuleInterval {
+				return fmt.Errorf("invalid rrule: INTERVAL must be a whole number between 1 and %d", maxRRuleInterval)
+			}
+		case "UNTIL":
+			if _, ok := scheduler.ParseUntil(kv[1]); !ok {
+				return fmt.Errorf("invalid rrule: unrecognized UNTIL value %q", kv[1])
+			}
+		}
+	}
+
+	if freq == "" {
+		return fmt.Errorf("invalid rrule: missing FREQ")
+	}
+	if !validRRuleFreqs[freq] {
+		return fmt.Errorf("invalid rrule: FREQ must be DAILY, WEEKLY, MONTHLY or YEARLY")
+	}
+	return nil
+}
+
+// escapeLike neutralizes LIKE metacharacters in user input, so searching for
+// "50%" matches that literal text instead of "anything starting with 50".
+// Callers must append ESCAPE '\' to the LIKE predicate.
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 // parseSortParams validates and returns safe SQL sort fragments.

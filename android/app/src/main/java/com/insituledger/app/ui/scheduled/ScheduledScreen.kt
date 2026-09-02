@@ -30,6 +30,7 @@ import com.insituledger.app.ui.common.LoadingIndicator
 import com.insituledger.app.ui.theme.AppSpacing
 import com.insituledger.app.ui.theme.BrandGradients
 import com.insituledger.app.ui.theme.LocalSemanticColors
+import com.insituledger.app.util.Rrule
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -144,14 +145,7 @@ private fun ScheduledRow(
                 } else {
                     item.nextOccurrence to null
                 }
-                val rruleLabel = mapOf(
-                    "FREQ=DAILY" to "Daily",
-                    "FREQ=WEEKLY" to "Weekly",
-                    "FREQ=WEEKLY;INTERVAL=2" to "Biweekly",
-                    "FREQ=MONTHLY" to "Monthly",
-                    "FREQ=MONTHLY;INTERVAL=3" to "Quarterly",
-                    "FREQ=YEARLY" to "Yearly"
-                )[item.rrule] ?: item.rrule
+                val rruleLabel = Rrule.label(item.rrule)
                 val nextLabel = "Next: $nextDate" + (nextTime?.let { " · $it" } ?: "")
                 Text(
                     text = "$rruleLabel  ·  $nextLabel",

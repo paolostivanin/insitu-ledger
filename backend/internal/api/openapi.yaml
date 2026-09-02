@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.21.0"
+  version: "1.22.0"
 
 servers:
   - url: /api
@@ -342,6 +342,11 @@ components:
           maxLength: 2000
         rrule:
           type: string
+          description: >-
+            RFC 5545 RRULE subset, canonical form `FREQ=…[;INTERVAL=n][;UNTIL=…]`.
+            `INTERVAL` is omitted when it is 1, so the six historical presets are
+            returned byte-for-byte as they have always been stored. See
+            `ScheduledInput.rrule`.
         next_occurrence:
           type: string
           description: >-
@@ -391,10 +396,34 @@ components:
           maxLength: 2000
         rrule:
           type: string
+          maxLength: 200
+          example: FREQ=MONTHLY;INTERVAL=2
           description: >-
-            RFC 5545 RRULE. Supports FREQ=DAILY|WEEKLY|MONTHLY|YEARLY,
-            optional INTERVAL, and optional UNTIL=YYYYMMDDTHHMMSSZ to set an
-            end date (the scheduler deactivates the schedule once next > UNTIL).
+            RFC 5545 RRULE subset, written as `KEY=VALUE` pairs joined by `;`.
+
+
+            * `FREQ` (**required**) — one of `DAILY`, `WEEKLY`, `MONTHLY`,
+              `YEARLY`. Validated since v1.22.0.
+
+            * `INTERVAL` (optional) — whole number 1–999, "every N units".
+              **Omit it when it is 1**: the canonical form of a weekly schedule
+              is `FREQ=WEEKLY`, not `FREQ=WEEKLY;INTERVAL=1`. Clients built
+              before v1.22.0 resolve the recurrence by exact string match and
+              would fail to recognize the redundant form.
+
+            * `UNTIL` (optional) — end date; the scheduler deactivates the
+              schedule once the next occurrence is past it. Accepted shapes:
+              `20261231T235959Z`, `20261231T235959`, `20261231`, `2026-12-31`,
+              `2026-12-31T23:59:59`.
+
+
+            Unknown keys are ignored rather than rejected. A violation of the
+            rules above returns 400 `invalid rrule: …`.
+
+
+            `MONTHLY`/`YEARLY` clamp the day of month to the target month's last
+            valid day (2026-01-31 + 1 month → 2026-02-28) and the clamp is
+            sticky, i.e. the schedule then stays on the 28th.
         next_occurrence:
           type: string
           description: >-
@@ -760,6 +789,16 @@ paths:
           in: query
           schema:
             type: string
+        - name: q
+          in: query
+          description: >-
+            Free-text search (since v1.22.0). Case-insensitive infix match on
+            `description` only; `%` and `_` are matched literally. Combined with
+            the other filters as AND, and never widens account scope. Rows with
+            a null description are excluded.
+          schema:
+            type: string
+            maxLength: 200
         - name: limit
           in: query
           schema:
@@ -926,6 +965,15 @@ paths:
           schema:
             type: string
             format: date
+        - name: q
+          in: query
+          description: >-
+            Same free-text description search as `GET /transactions`
+            (since v1.22.0), so exporting while a search is active does not
+            silently dump everything.
+          schema:
+            type: string
+            maxLength: 200
       responses:
         "200":
           description: CSV file

@@ -192,7 +192,8 @@ export interface AutocompleteSuggestion {
 export const transactions = {
 	// owner_id is an optional list/autocomplete filter (since v1.15.0); mutations
 	// derive auth from the path or the authenticated user.
-	list: (params?: { from?: string; to?: string; category_id?: string; account_id?: string; limit?: string; offset?: string; sort_by?: string; sort_dir?: string; owner_id?: string }) =>
+	// q is a free-text infix search on description (since v1.22.0).
+	list: (params?: { from?: string; to?: string; category_id?: string; account_id?: string; q?: string; limit?: string; offset?: string; sort_by?: string; sort_dir?: string; owner_id?: string }) =>
 		request<Transaction[]>('/transactions', { params }),
 	create: (data: TransactionInput) =>
 		request<{ id: number }>('/transactions', { method: 'POST', body: data }),
@@ -453,7 +454,7 @@ export const batch = {
 
 // CSV import/export
 export const csv = {
-	exportTransactions: async (params?: { from?: string; to?: string; owner_id?: string; account_id?: string }) => {
+	exportTransactions: async (params?: { from?: string; to?: string; owner_id?: string; account_id?: string; q?: string }) => {
 		let url = `${BASE}/transactions/export`;
 		if (params) {
 			const search = new URLSearchParams(

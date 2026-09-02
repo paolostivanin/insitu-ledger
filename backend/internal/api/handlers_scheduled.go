@@ -135,6 +135,10 @@ func (s *Server) handleCreateScheduled(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := validateRRule(req.RRule); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	active := 1
 	if req.Active != nil && !*req.Active {
@@ -232,6 +236,10 @@ func (s *Server) handleUpdateScheduled(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+	}
+	if err := validateRRule(req.RRule); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	if req.Active != nil {

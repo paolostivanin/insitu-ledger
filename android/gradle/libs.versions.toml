@@ -21,7 +21,6 @@ gson = "2.11.0"
 biometric = "1.1.0"
 documentfile = "1.0.1"
 splashscreen = "1.0.1"
-lib-recur = "0.16.0"
 sqlcipher = "4.6.1"
 
 junit = "4.13.2"
@@ -77,7 +76,6 @@ biometric = { module = "androidx.biometric:biometric", version.ref = "biometric"
 documentfile = { module = "androidx.documentfile:documentfile", version.ref = "documentfile" }
 core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "splashscreen" }
 
-lib-recur = { module = "org.dmfs:lib-recur", version.ref = "lib-recur" }
 sqlcipher-android = { module = "net.zetetic:sqlcipher-android", version.ref = "sqlcipher" }
 
 junit = { module = "junit:junit", version.ref = "junit" }

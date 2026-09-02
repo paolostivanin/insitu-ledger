@@ -334,19 +334,130 @@ func TestAdvanceDateFormatMatrix(t *testing.T) {
 	}
 }
 
+// TestAdvanceDateMonthEndClamps: a MONTHLY advance must clamp the day-of-month
+// to the target month's last valid day instead of overflowing forward. Before
+// the fix, time.AddDate turned 2026-01-31 + 1 month into 2026-03-03 — skipping
+// February entirely and disagreeing with java.time.plusMonths on Android.
+func TestAdvanceDateMonthEndClamps(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		rrule string
+		want  string
+	}{
+		{"jan 31 clamps to feb 28", "2026-01-31", "FREQ=MONTHLY", "2026-02-28"},
+		{"jan 31 clamps to feb 29 in a leap year", "2024-01-31", "FREQ=MONTHLY", "2024-02-29"},
+		{"jan 31 + 3 months clamps to apr 30", "2026-01-31", "FREQ=MONTHLY;INTERVAL=3", "2026-04-30"},
+		{"mar 31 clamps to apr 30", "2026-03-31", "FREQ=MONTHLY", "2026-04-30"},
+		{"jan 30 clamps to feb 28", "2026-01-30", "FREQ=MONTHLY", "2026-02-28"},
+		{"mid-month does not clamp", "2026-05-15", "FREQ=MONTHLY", "2026-06-15"},
+		{"dec 31 rolls the year without clamping", "2026-12-31", "FREQ=MONTHLY", "2027-01-31"},
+		{"nov 30 + 2 months crosses the year", "2026-11-30", "FREQ=MONTHLY;INTERVAL=2", "2027-01-30"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _ := advanceDate(tc.input, tc.rrule)
+			if got != tc.want {
+				t.Errorf("advanceDate(%q, %q) = %q, want %q", tc.input, tc.rrule, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAdvanceDateYearlyLeapDayClamps: YEARLY is implemented as 12*interval
+// months, so Feb 29 clamps to Feb 28 in a non-leap target year and survives
+// intact when the target year is itself a leap year.
+func TestAdvanceDateYearlyLeapDayClamps(t *testing.T) {
+	cases := []struct {
+		input string
+		rrule string
+		want  string
+	}{
+		{"2024-02-29", "FREQ=YEARLY", "2025-02-28"},
+		{"2024-02-29", "FREQ=YEARLY;INTERVAL=4", "2028-02-29"},
+		{"2026-06-11", "FREQ=YEARLY", "2027-06-11"},
+	}
+	for _, tc := range cases {
+		got, _ := advanceDate(tc.input, tc.rrule)
+		if got != tc.want {
+			t.Errorf("advanceDate(%q, %q) = %q, want %q", tc.input, tc.rrule, got, tc.want)
+		}
+	}
+}
+
+// TestAdvanceDateClampPreservesShapeAndOffset: clamping goes through a
+// time.Date rebuild, which is where a Location or a clock time is easiest to
+// drop. Complements TestAdvanceDateFormatMatrix, which only exercises a
+// non-clamping date.
+func TestAdvanceDateClampPreservesShapeAndOffset(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"rfc3339 offset survives the clamp", "2026-01-31T09:00:00+02:00", "2026-02-28T09:00:00+02:00"},
+		{"naive shape survives the clamp", "2026-01-31T09:00", "2026-02-28T09:00"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _ := advanceDate(tc.input, "FREQ=MONTHLY")
+			if got != tc.want {
+				t.Errorf("advanceDate(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAdvanceDateClampDrifts documents the accepted trade-off: the clamp is
+// sticky, so a schedule anchored on the 31st permanently moves to the 28th
+// after passing through February. This matches java.time.plusMonths on
+// Android. True RFC 5545 semantics would keep the 31st anchor and skip short
+// months, which needs an anchor-day column — see TODO.
+func TestAdvanceDateClampDrifts(t *testing.T) {
+	feb, _ := advanceDate("2026-01-31", "FREQ=MONTHLY")
+	if feb != "2026-02-28" {
+		t.Fatalf("first advance = %q, want %q", feb, "2026-02-28")
+	}
+	mar, _ := advanceDate(feb, "FREQ=MONTHLY")
+	if mar != "2026-03-28" {
+		t.Errorf("second advance = %q, want %q (clamp is sticky, not restored to the 31st)", mar, "2026-03-28")
+	}
+}
+
+// TestAdvanceDateArbitraryInterval: INTERVAL was always parsed, but only the
+// values the six UI presets emitted (1, 2, 3) were ever exercised. Custom
+// recurrence lets a user pick any N, so cover the whole FREQ matrix.
+func TestAdvanceDateArbitraryInterval(t *testing.T) {
+	cases := []struct {
+		rrule string
+		want  string
+	}{
+		{"FREQ=DAILY;INTERVAL=10", "2026-01-15"},
+		{"FREQ=WEEKLY;INTERVAL=5", "2026-02-09"},
+		{"FREQ=MONTHLY;INTERVAL=7", "2026-08-05"},
+		{"FREQ=YEARLY;INTERVAL=2", "2028-01-05"},
+	}
+	for _, tc := range cases {
+		got, _ := advanceDate("2026-01-05", tc.rrule)
+		if got != tc.want {
+			t.Errorf("advanceDate(%q, %q) = %q, want %q", "2026-01-05", tc.rrule, got, tc.want)
+		}
+	}
+}
+
 // TestParseUntilDateOnlyInclusive: per RFC 5545, a date-only UNTIL value is
 // inclusive of the whole day, so it must parse as the last instant of that day
 // rather than midnight (which would exclude any later time on the same date).
 func TestParseUntilDateOnlyInclusive(t *testing.T) {
 	want := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC).Add(24*time.Hour - time.Nanosecond)
 	for _, s := range []string{"20261231", "2026-12-31"} {
-		got, ok := parseUntil(s)
+		got, ok := ParseUntil(s)
 		if !ok {
-			t.Errorf("parseUntil(%q) failed", s)
+			t.Errorf("ParseUntil(%q) failed", s)
 			continue
 		}
 		if !got.Equal(want) {
-			t.Errorf("parseUntil(%q) = %v, want %v", s, got, want)
+			t.Errorf("ParseUntil(%q) = %v, want %v", s, got, want)
 		}
 	}
 }
@@ -361,13 +472,13 @@ func TestParseUntilExplicitTimePreserved(t *testing.T) {
 		"2026-12-31T15:30:45": time.Date(2026, 12, 31, 15, 30, 45, 0, time.UTC),
 	}
 	for s, want := range cases {
-		got, ok := parseUntil(s)
+		got, ok := ParseUntil(s)
 		if !ok {
-			t.Errorf("parseUntil(%q) failed", s)
+			t.Errorf("ParseUntil(%q) failed", s)
 			continue
 		}
 		if !got.Equal(want) {
-			t.Errorf("parseUntil(%q) = %v, want %v", s, got, want)
+			t.Errorf("ParseUntil(%q) = %v, want %v", s, got, want)
 		}
 	}
 }

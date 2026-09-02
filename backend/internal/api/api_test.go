@@ -1647,3 +1647,384 @@ func TestChangePassword(t *testing.T) {
 		t.Errorf("login with new password: got %d", w.Code)
 	}
 }
+
+// ===== Scheduled RRULE Validation Tests =====
+
+// postScheduled is a small helper for the rrule validation tests: it POSTs a
+// scheduled transaction carrying `rrule` and returns the response recorder.
+func postScheduled(t *testing.T, handler http.Handler, token string, acctID, catID int, rrule string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := fmt.Sprintf(
+		`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"currency":"EUR","rrule":%q,"next_occurrence":"2026-07-01"}`,
+		acctID, catID, rrule,
+	)
+	req := authedRequest("POST", "/api/scheduled", body, token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	return w
+}
+
+// TestScheduledRRuleAcceptsHistoricalClients is the backwards-compatibility
+// gate for validateRRule. It enumerates every rrule any shipped client has
+// ever produced — the six web/Android presets plus the "FREQ=DAILY" one-shot
+// that the future-dated-transaction auto-convert emits — each on its own and
+// with the UNTIL suffix the "Ends on date" mode appends. If any of these
+// starts returning 400, older apps will park a permanently-failed sync op.
+func TestScheduledRRuleAcceptsHistoricalClients(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	legacy := []string{
+		"FREQ=DAILY",
+		"FREQ=WEEKLY",
+		"FREQ=WEEKLY;INTERVAL=2",
+		"FREQ=MONTHLY",
+		"FREQ=MONTHLY;INTERVAL=3",
+		"FREQ=YEARLY",
+	}
+	for _, base := range legacy {
+		for _, rrule := range []string{base, base + ";UNTIL=20261231T235959Z"} {
+			t.Run(rrule, func(t *testing.T) {
+				if w := postScheduled(t, handler, token, acctID, catID, rrule); w.Code != 201 {
+					t.Errorf("got %d (%s), want 201", w.Code, strings.TrimSpace(w.Body.String()))
+				}
+			})
+		}
+	}
+}
+
+// TestScheduledRRuleAcceptsCustomInterval: arbitrary INTERVAL values must be
+// accepted and echoed back byte-for-byte — the clients round-trip the stored
+// string, so any server-side rewriting would corrupt the user's recurrence.
+func TestScheduledRRuleAcceptsCustomInterval(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	custom := []string{
+		"FREQ=MONTHLY;INTERVAL=2",
+		"FREQ=DAILY;INTERVAL=45",
+		"FREQ=WEEKLY;INTERVAL=3;UNTIL=20261231T235959Z",
+		"FREQ=YEARLY;INTERVAL=999",
+	}
+	for _, rrule := range custom {
+		if w := postScheduled(t, handler, token, acctID, catID, rrule); w.Code != 201 {
+			t.Fatalf("POST %q: got %d (%s), want 201", rrule, w.Code, strings.TrimSpace(w.Body.String()))
+		}
+	}
+
+	req := authedRequest("GET", "/api/scheduled", "", token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var items []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &items)
+
+	stored := map[string]bool{}
+	for _, it := range items {
+		stored[it["rrule"].(string)] = true
+	}
+	for _, rrule := range custom {
+		if !stored[rrule] {
+			t.Errorf("rrule %q not echoed back verbatim; got %v", rrule, stored)
+		}
+	}
+}
+
+// TestScheduledRRuleRejectsInvalid: the values the scheduler would silently
+// mis-handle (unknown FREQ falls back to monthly; INTERVAL=0 falls back to 1)
+// must be caught at the door rather than stored and quietly reinterpreted.
+func TestScheduledRRuleRejectsInvalid(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	invalid := []string{
+		"",
+		"FREQ=HOURLY",
+		"MONTHLY",
+		"INTERVAL=2",
+		"FREQ=MONTHLY;INTERVAL=0",
+		"FREQ=MONTHLY;INTERVAL=-2",
+		"FREQ=MONTHLY;INTERVAL=abc",
+		"FREQ=MONTHLY;INTERVAL=1000",
+		"FREQ=MONTHLY;UNTIL=nonsense",
+	}
+	for _, rrule := range invalid {
+		t.Run(rrule, func(t *testing.T) {
+			if w := postScheduled(t, handler, token, acctID, catID, rrule); w.Code != 400 {
+				t.Errorf("got %d, want 400", w.Code)
+			}
+		})
+	}
+}
+
+// TestScheduledRRuleRejectsInvalidOnUpdate: PUT must validate too, and a
+// rejected update must leave the stored row untouched.
+func TestScheduledRRuleRejectsInvalidOnUpdate(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	w := postScheduled(t, handler, token, acctID, catID, "FREQ=MONTHLY;INTERVAL=2")
+	if w.Code != 201 {
+		t.Fatalf("create: got %d", w.Code)
+	}
+	var created map[string]any
+	json.Unmarshal(w.Body.Bytes(), &created)
+	id := int(created["id"].(float64))
+
+	body := fmt.Sprintf(
+		`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"currency":"EUR","rrule":"FREQ=FORTNIGHTLY","next_occurrence":"2026-07-01"}`,
+		acctID, catID,
+	)
+	req := authedRequest("PUT", fmt.Sprintf("/api/scheduled/%d", id), body, token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Fatalf("update with bad rrule: got %d, want 400", w.Code)
+	}
+
+	req = authedRequest("GET", "/api/scheduled", "", token)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var items []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &items)
+	if len(items) != 1 || items[0]["rrule"] != "FREQ=MONTHLY;INTERVAL=2" {
+		t.Errorf("row changed after rejected update: %v", items)
+	}
+}
+
+// ===== Transaction Search Tests =====
+
+// seedSearchTxns creates one transaction per description and returns the
+// account/category it used.
+func seedSearchTxns(t *testing.T, handler http.Handler, token string, descriptions ...string) (int, int) {
+	t.Helper()
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+	for _, d := range descriptions {
+		body := fmt.Sprintf(
+			`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"description":%q,"date":"2025-01-01"}`,
+			acctID, catID, d,
+		)
+		req := authedRequest("POST", "/api/transactions", body, token)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != 201 {
+			t.Fatalf("seed %q: got %d (%s)", d, w.Code, strings.TrimSpace(w.Body.String()))
+		}
+	}
+	return acctID, catID
+}
+
+// searchTxns issues GET /api/transactions with the given raw query string and
+// returns the decoded rows.
+func searchTxns(t *testing.T, handler http.Handler, token, rawQuery string) []map[string]any {
+	t.Helper()
+	req := authedRequest("GET", "/api/transactions?"+rawQuery, "", token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("GET ?%s: got %d (%s)", rawQuery, w.Code, strings.TrimSpace(w.Body.String()))
+	}
+	var txns []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &txns)
+	return txns
+}
+
+func TestTransactionSearchByDescription(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	seedSearchTxns(t, handler, token, "Coffee beans", "coffee shop", "Rent")
+
+	cases := []struct {
+		name  string
+		query string
+		want  int
+	}{
+		{"case-insensitive match", "q=coffee", 2},
+		{"infix match", "q=beans", 1}, // a prefix-only LIKE would return 0 here
+		{"no match", "q=zzz", 0},
+		{"absent q returns everything", "", 3},
+		{"whitespace-only q is ignored", "q=%20%20", 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := len(searchTxns(t, handler, token, tc.query)); got != tc.want {
+				t.Errorf("?%s returned %d rows, want %d", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTransactionSearchEscapesLikeWildcards: '%' and '_' are LIKE
+// metacharacters. A user searching for "100%" must not match every row.
+func TestTransactionSearchEscapesLikeWildcards(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	seedSearchTxns(t, handler, token, "100% wool", "Rent", "a_b", "axb", `back\slash`)
+
+	cases := []struct {
+		name  string
+		query string
+		want  int
+	}{
+		{"percent is literal", "q=%25", 1},
+		{"underscore is literal", "q=a_b", 1},
+		{"backslash is literal", `q=back%5Cslash`, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := len(searchTxns(t, handler, token, tc.query)); got != tc.want {
+				t.Errorf("?%s returned %d rows, want %d", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTransactionSearchCombinesWithFilters: q must AND with the existing
+// filters, not replace or widen them.
+func TestTransactionSearchCombinesWithFilters(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	seed := []struct{ desc, date string }{
+		{"Coffee January", "2025-01-15"},
+		{"Coffee June", "2025-06-15"},
+		{"Rent January", "2025-01-20"},
+	}
+	for _, x := range seed {
+		body := fmt.Sprintf(
+			`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"description":%q,"date":%q}`,
+			acctID, catID, x.desc, x.date,
+		)
+		req := authedRequest("POST", "/api/transactions", body, token)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+	}
+
+	txns := searchTxns(t, handler, token, fmt.Sprintf("q=coffee&from=2025-01-01&to=2025-01-31&category_id=%d", catID))
+	if len(txns) != 1 {
+		t.Fatalf("got %d rows, want 1 (the intersection)", len(txns))
+	}
+	if txns[0]["description"] != "Coffee January" {
+		t.Errorf("description = %v, want %q", txns[0]["description"], "Coffee January")
+	}
+}
+
+// TestTransactionSearchDoesNotWidenAccess: the search predicate is a pure AND
+// on top of the account scope, so it must never surface another user's rows.
+func TestTransactionSearchDoesNotWidenAccess(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	adminToken, guestToken, _ := setupTwoUsers(t, handler)
+	seedSearchTxns(t, handler, adminToken, "Admin secret purchase")
+
+	if got := len(searchTxns(t, handler, guestToken, "q=secret")); got != 0 {
+		t.Errorf("guest search returned %d rows of the admin's data, want 0", got)
+	}
+	if got := len(searchTxns(t, handler, adminToken, "q=secret")); got != 1 {
+		t.Errorf("admin search returned %d rows, want 1", got)
+	}
+}
+
+// TestTransactionSearchIgnoresNullDescription: rows with no description can
+// never match, and must not error out via SQL three-valued logic either.
+func TestTransactionSearchIgnoresNullDescription(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	body := fmt.Sprintf(`{"account_id":%d,"category_id":%d,"type":"expense","amount":10,"date":"2025-01-01"}`, acctID, catID)
+	req := authedRequest("POST", "/api/transactions", body, token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if got := len(searchTxns(t, handler, token, "q=anything")); got != 0 {
+		t.Errorf("null-description row matched: got %d rows, want 0", got)
+	}
+	if got := len(searchTxns(t, handler, token, "")); got != 1 {
+		t.Errorf("unfiltered list lost the row: got %d, want 1", got)
+	}
+}
+
+func TestTransactionSearchTooLong(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+
+	req := authedRequest("GET", "/api/transactions?q="+strings.Repeat("a", 300), "", token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("got %d, want 400", w.Code)
+	}
+}
+
+// TestExportCsvHonoursSearch: exporting while a search is active must export
+// the search result, not the whole ledger.
+func TestExportCsvHonoursSearch(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	seedSearchTxns(t, handler, token, "Coffee beans", "Rent")
+
+	req := authedRequest("GET", "/api/transactions/export?q=coffee", "", token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("export: got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Coffee beans") {
+		t.Errorf("export missing the matching row:\n%s", body)
+	}
+	if strings.Contains(body, "Rent") {
+		t.Errorf("export leaked a non-matching row:\n%s", body)
+	}
+}
+
+// TestAutocompleteEscapesLikeWildcards: the autocomplete endpoint builds its
+// own prefix LIKE and had the same latent wildcard-injection issue.
+func TestAutocompleteEscapesLikeWildcards(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	seedSearchTxns(t, handler, token, "%discount", "Rent", "Coffee")
+
+	req := authedRequest("GET", "/api/transactions/autocomplete?q=%25", "", token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("autocomplete: got %d", w.Code)
+	}
+	var results []map[string]any
+	json.Unmarshal(w.Body.Bytes(), &results)
+	if len(results) != 1 {
+		t.Fatalf("got %d suggestions, want 1 (only the literal '%%' prefix)", len(results))
+	}
+	if results[0]["description"] != "%discount" {
+		t.Errorf("description = %v, want %q", results[0]["description"], "%discount")
+	}
+}

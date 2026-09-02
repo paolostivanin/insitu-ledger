@@ -6,8 +6,14 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
+
+// maxSearchLen bounds the free-text `q` param on the list and export
+// endpoints. Descriptions cap at 500 chars, so anything longer than this
+// cannot match a real row anyway.
+const maxSearchLen = 200
 
 type createTransactionRequest struct {
 	AccountID   int64   `json:"account_id"`
@@ -34,9 +40,10 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Optional query params for filtering
-	from := r.URL.Query().Get("from")  // YYYY-MM-DD
-	to := r.URL.Query().Get("to")      // YYYY-MM-DD
+	from := r.URL.Query().Get("from") // YYYY-MM-DD
+	to := r.URL.Query().Get("to")     // YYYY-MM-DD
 	catID := r.URL.Query().Get("category_id")
+	q := strings.TrimSpace(r.URL.Query().Get("q")) // free-text description search
 
 	limitVal, offsetVal, err := parsePagination(r.URL.Query().Get("limit"), r.URL.Query().Get("offset"))
 	if err != nil {
@@ -63,6 +70,10 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "invalid 'to' date: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+	}
+	if err := validateLength("q", q, maxSearchLen); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	accInClause := sqlInPlaceholders(len(accIDs))
@@ -100,6 +111,17 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 		// ("Hotel", "Flights", …). Authorization stays via t.account_id IN (...).
 		query += " AND t.category_id IN (SELECT id FROM categories WHERE id = ? OR parent_id = ?)"
 		args = append(args, catID, catID)
+	}
+	if q != "" {
+		// Infix match on description only — mirrors the Android DAO
+		// (TransactionDao.search) and the only text column the web table
+		// renders, so every hit is visibly explainable. SQLite's LIKE already
+		// folds ASCII case (no case_sensitive_like pragma is set), so no
+		// COLLATE is needed. This is a scan: idx_transactions_description is
+		// prefix-ordered and cannot serve '%q%'. Fine at family scale — if it
+		// ever isn't, the answer is FTS5, not another index.
+		query += ` AND t.description LIKE ? ESCAPE '\'`
+		args = append(args, "%"+escapeLike(q)+"%")
 	}
 
 	query += " ORDER BY " + sortColumn + " " + sortDirection + ", t.id DESC LIMIT ? OFFSET ?"
@@ -430,7 +452,7 @@ func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	args := append([]any{q + "%"}, idsToArgs(accIDs)...)
+	args := append([]any{escapeLike(q) + "%"}, idsToArgs(accIDs)...)
 	// n is a compile-time constant, safe to interpolate directly into the SQL.
 	n := strconv.Itoa(autocompleteAmountSampleSize)
 	// Per matching description we take the most recent N transactions; if all N
@@ -446,7 +468,7 @@ func (s *Server) handleAutocompleteTransactions(w http.ResponseWriter, r *http.R
 			       ) AS rn
 			FROM transactions
 			WHERE deleted_at IS NULL AND description IS NOT NULL
-			  AND description LIKE ? COLLATE NOCASE
+			  AND description LIKE ? ESCAPE '\' COLLATE NOCASE
 			  AND account_id IN (`+sqlInPlaceholders(len(accIDs))+`)
 		),
 		recent AS (

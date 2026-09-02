@@ -36,6 +36,8 @@ import com.insituledger.app.ui.common.LoadingIndicator
 import com.insituledger.app.ui.common.LocalSnackbarHostState
 import com.insituledger.app.ui.theme.AppSpacing
 import com.insituledger.app.ui.theme.InterFontFamily
+import com.insituledger.app.util.Freq
+import com.insituledger.app.util.Rrule
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -245,6 +247,15 @@ fun ScheduledFormScreen(
                     onSelect = viewModel::updateFrequency
                 )
 
+                if (uiState.frequency == Rrule.CUSTOM_KEY) {
+                    CustomIntervalRow(
+                        interval = uiState.customInterval,
+                        unit = uiState.customUnit,
+                        onIntervalChange = viewModel::updateCustomInterval,
+                        onUnitChange = viewModel::updateCustomUnit
+                    )
+                }
+
                 EndsSelector(
                     endMode = uiState.endMode,
                     onChange = viewModel::updateEndMode
@@ -445,9 +456,11 @@ private fun FrequencyDropdown(
     onSelect: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val label = if (selected == Rrule.CUSTOM_KEY) "Custom…"
+    else Rrule.preset(selected)?.label ?: selected
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(
-            value = ScheduledFormUiState.frequencyLabels[selected] ?: selected,
+            value = label,
             onValueChange = {},
             readOnly = true,
             label = { Text("Frequency") },
@@ -456,11 +469,69 @@ private fun FrequencyDropdown(
             modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            ScheduledFormUiState.frequencyLabels.forEach { (key, label) ->
-                DropdownMenuItem(text = { Text(label) }, onClick = {
-                    onSelect(key)
+            Rrule.PRESETS.forEach { preset ->
+                DropdownMenuItem(text = { Text(preset.label) }, onClick = {
+                    onSelect(preset.key)
                     expanded = false
                 })
+            }
+            DropdownMenuItem(text = { Text("Custom…") }, onClick = {
+                onSelect(Rrule.CUSTOM_KEY)
+                expanded = false
+            })
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CustomIntervalRow(
+    interval: String,
+    unit: Freq,
+    onIntervalChange: (String) -> Unit,
+    onUnitChange: (Freq) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val count = interval.toIntOrNull() ?: 1
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedTextField(
+            value = interval,
+            onValueChange = onIntervalChange,
+            label = { Text("Every") },
+            placeholder = { Text("e.g. 2") },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.weight(1f)
+        )
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it },
+            modifier = Modifier.weight(1.4f)
+        ) {
+            OutlinedTextField(
+                value = Rrule.unitLabel(unit, count).replaceFirstChar { it.uppercase() },
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Unit") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
+            )
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                Freq.entries.forEach { freq ->
+                    DropdownMenuItem(
+                        text = { Text(Rrule.unitLabel(freq, count).replaceFirstChar { it.uppercase() }) },
+                        onClick = {
+                            onUnitChange(freq)
+                            expanded = false
+                        }
+                    )
+                }
             }
         }
     }

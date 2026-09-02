@@ -30,6 +30,13 @@
 	let filterFrom = $state('');
 	let filterTo = $state('');
 	let filterCat = $state('');
+	let filterQ = $state('');
+	// Distinct from the form's `debounceTimer` below — sharing one would make the
+	// search box and the description autocomplete cancel each other.
+	let searchDebounceTimer: ReturnType<typeof setTimeout>;
+	// Monotonic request counter: debounced typing makes out-of-order responses
+	// likely (type "cof" then "coffee"; the slower "cof" must not win).
+	let loadSeq = 0;
 
 	// Sort
 	let sortBy = $state('date');
@@ -146,6 +153,7 @@
 
 	onDestroy(() => {
 		clearTimeout(debounceTimer);
+		clearTimeout(searchDebounceTimer);
 		if (typeof window !== 'undefined') {
 			window.removeEventListener('shortcut-new', onShortcutNew);
 			window.removeEventListener('shortcut-close', onShortcutClose);
@@ -185,27 +193,41 @@
 	async function loadTransactions() {
 		const oid = $sharedOwnerUserId || undefined;
 		const aid = $currentAccountId !== null ? $currentAccountId.toString() : undefined;
-		txns = await transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat, account_id: aid, limit: PAGE_SIZE.toString(), sort_by: sortBy, sort_dir: sortDir, owner_id: oid });
+		const seq = ++loadSeq;
+		const rows = await transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat, q: filterQ, account_id: aid, limit: PAGE_SIZE.toString(), sort_by: sortBy, sort_dir: sortDir, owner_id: oid });
+		// A newer request has already been issued — drop this stale response.
+		if (seq !== loadSeq) return;
+		txns = rows;
 		hasMore = txns.length === PAGE_SIZE;
 		selectedIds = new Set();
+	}
+
+	function onSearchInput() {
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = setTimeout(() => void load(), 300);
 	}
 
 	async function loadMore() {
 		loadingMore = true;
 		const oid = $sharedOwnerUserId || undefined;
 		const aid = $currentAccountId !== null ? $currentAccountId.toString() : undefined;
+		// Observe, don't claim, the sequence: if the filters change mid-flight
+		// this page belongs to the previous result set and must be dropped.
+		const seq = loadSeq;
 		try {
 			const more = await transactions.list({
-				from: filterFrom, to: filterTo, category_id: filterCat, account_id: aid,
+				from: filterFrom, to: filterTo, category_id: filterCat, q: filterQ, account_id: aid,
 				limit: PAGE_SIZE.toString(), offset: txns.length.toString(),
 				sort_by: sortBy, sort_dir: sortDir, owner_id: oid
 			});
+			if (seq !== loadSeq) return;
 			txns = [...txns, ...more];
 			hasMore = more.length === PAGE_SIZE;
 		} catch (e: any) {
 			error = e.message;
+		} finally {
+			loadingMore = false;
 		}
-		loadingMore = false;
 	}
 
 	function isSharedAcct(accountId: number): boolean {
@@ -396,6 +418,7 @@
 			await csv.exportTransactions({
 				from: filterFrom,
 				to: filterTo,
+				q: filterQ,
 				owner_id: $sharedOwnerUserId || undefined,
 				account_id: $currentAccountId !== null ? $currentAccountId.toString() : undefined
 			});
@@ -538,6 +561,18 @@
 
 	<div class="card filters">
 		<div class="form-row">
+			<div class="form-group">
+				<label for="fq">Search</label>
+				<input
+					id="fq"
+					type="search"
+					bind:value={filterQ}
+					oninput={onSearchInput}
+					placeholder="Search descriptions..."
+					maxlength="200"
+					autocomplete="off"
+				/>
+			</div>
 			<div class="form-group">
 				<label for="ff">From</label>
 				<input id="ff" type="date" bind:value={filterFrom} onchange={() => load()} />

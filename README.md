@@ -7,10 +7,10 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 ## Features
 
 - **Transactions** — record income and expenses across multiple accounts with date, time, and free-text notes
-- **Search** — free-text search across transaction descriptions (Android)
+- **Search** — free-text search across transaction descriptions
 - **Accounts** — manage multiple accounts with independent balances and currencies (default EUR)
 - **Categories** — hierarchical categories (with parent/child, icons, and colors) for income and expense
-- **Scheduled transactions** — recurring transactions with date and time (daily, weekly, monthly, yearly), automatically materialized by the backend scheduler (checks every minute) and by the Android local WorkManager (every 15 minutes). Future-dated transactions are automatically converted to one-time scheduled entries
+- **Scheduled transactions** — recurring transactions with date and time, on any interval (every N days, weeks, months, or years — from the six presets to a custom bimonthly rule), automatically materialized by the backend scheduler (checks every minute) and by the Android local WorkManager (every 15 minutes). Future-dated transactions are automatically converted to one-time scheduled entries
 - **Reports** — spending by category, by month, and trend analysis (powered by ECharts)
 - **Multi-user** — admin-created users, per-account sharing with read/write permissions (grant access to individual accounts, not your whole ledger)
 - **Default account** — pick a default account in your profile preferences; clients select it on launch for new transactions and persist the choice server-side

@@ -22,6 +22,11 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if err := validateLength("q", q, maxSearchLen); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	// "added_by" projects the creator's display name unconditionally — solo
 	// accounts get the same column populated, which is simpler than per-row
@@ -43,6 +48,12 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 	if to != "" {
 		query += " AND SUBSTR(t.date, 1, 10) <= ?"
 		args = append(args, to)
+	}
+	if q != "" {
+		// Keep the export in step with the list view's search, so exporting
+		// while a search is active doesn't silently dump everything.
+		query += ` AND t.description LIKE ? ESCAPE '\'`
+		args = append(args, "%"+escapeLike(q)+"%")
 	}
 	query += " ORDER BY t.date DESC"
 

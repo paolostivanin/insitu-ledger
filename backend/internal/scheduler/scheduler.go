@@ -188,6 +188,8 @@ func isLockedError(err error) bool {
 // with optional INTERVAL=n and UNTIL=YYYYMMDD[THHMMSSZ].
 // Preserves time component AND offset if present (e.g.
 // 2026-03-18T09:00:00+02:00 -> 2026-04-18T09:00:00+02:00).
+// MONTHLY/YEARLY clamp the day-of-month to the target month's last valid day
+// (see addMonthsClamped) so the backend agrees with the Android client.
 // Returns (next, pastUntil) where pastUntil is true if the new occurrence falls
 // after the rrule's UNTIL value (caller should deactivate the schedule).
 func advanceDate(current string, rrule string) (string, bool) {
@@ -250,16 +252,16 @@ func advanceDate(current string, rrule string) (string, bool) {
 	case "WEEKLY":
 		t = t.AddDate(0, 0, 7*interval)
 	case "MONTHLY":
-		t = t.AddDate(0, interval, 0)
+		t = addMonthsClamped(t, interval)
 	case "YEARLY":
-		t = t.AddDate(interval, 0, 0)
+		t = addMonthsClamped(t, 12*interval)
 	default:
-		t = t.AddDate(0, 1, 0) // fallback: monthly
+		t = addMonthsClamped(t, 1) // fallback: monthly
 	}
 
 	pastUntil := false
 	if untilStr != "" {
-		if until, ok := parseUntil(untilStr); ok && t.After(until) {
+		if until, ok := ParseUntil(untilStr); ok && t.After(until) {
 			pastUntil = true
 		}
 	}
@@ -267,10 +269,52 @@ func advanceDate(current string, rrule string) (string, bool) {
 	return t.Format(emitFormat), pastUntil
 }
 
-// parseUntil accepts the common RFC 5545 UNTIL forms:
+// lastDayOfMonth returns the number of days in (y, m). Day 0 of month m+1 is
+// the last day of month m; time.Date normalizes December → January of y+1.
+func lastDayOfMonth(y int, m time.Month) int {
+	return time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day()
+}
+
+// addMonthsClamped adds n months, clamping the day-of-month to the last valid
+// day of the target month (2026-01-31 + 1mo → 2026-02-28). Go's AddDate
+// normalizes the overflow *forward* (→ 2026-03-03), which skips February
+// entirely and diverges from java.time.LocalDate.plusMonths on Android.
+//
+// The clamp is sticky: once a schedule lands on Feb 28 it stays on the 28th
+// (Feb 28 → Mar 28, not Mar 31). That matches Android and is the accepted
+// trade-off; true RFC 5545 semantics would keep the 31st anchor and skip
+// short months, which needs an anchor-day column. See TODO.
+//
+// Preserves the clock time and the input's Location so a fixed RFC3339 offset
+// survives advanceDate's format contract.
+func addMonthsClamped(t time.Time, n int) time.Time {
+	total := int(t.Month()) - 1 + n
+	y := t.Year() + total/12
+	m := total % 12
+	// Guard the negative-modulo case defensively; the rrule parser guarantees
+	// interval >= 1 today, but this must not silently produce month 0 or -3.
+	if m < 0 {
+		m += 12
+		y--
+	}
+	targetMonth := time.Month(m + 1)
+
+	d := t.Day()
+	if last := lastDayOfMonth(y, targetMonth); d > last {
+		d = last
+	}
+
+	return time.Date(y, targetMonth, d,
+		t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+}
+
+// ParseUntil accepts the common RFC 5545 UNTIL forms:
 //
 //	20261231T235959Z, 20261231T235959, 20261231, 2026-12-31, 2026-12-31T23:59:59
-func parseUntil(s string) (time.Time, bool) {
+//
+// Exported so internal/api can validate a client-supplied UNTIL against
+// exactly the shapes the scheduler will later accept.
+func ParseUntil(s string) (time.Time, bool) {
 	for _, e := range []struct {
 		layout   string
 		dateOnly bool

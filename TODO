@@ -28,3 +28,22 @@
 # "X/Y occurrences" from COUNT() instead of the brittle counter field).
 # File as a fresh ticket if/when wanted.
 
+
+# ============================================================================
+# Recurrence: true RFC 5545 month semantics
+# ============================================================================
+# Since v1.22.0 / Android 1.33.0 both platforms agree on month-end rollover:
+# MONTHLY/YEARLY clamp the day of month to the target month's last valid day
+# (2026-01-31 + 1 month -> 2026-02-28). Go's addMonthsClamped was written to
+# match java.time.LocalDate.plusMonths, which the Android worker already used.
+#
+# Neither implements true RFC 5545, which keeps the original day-of-month as
+# an anchor and *skips* months that have no such day: Jan 31 -> Mar 31, never
+# Feb 28. Our clamp is sticky instead, so a schedule that lands on Feb 28
+# stays on the 28th forever.
+#
+# A durable fix needs an anchor day-of-month stored alongside the schedule
+# (scheduled_transactions.anchor_day, defaulting to the day of the initial
+# next_occurrence), advanced from the anchor rather than from the previous
+# occurrence. Backend, Android worker and the form preview all have to change
+# together, and existing rows need a backfill from their creation date.

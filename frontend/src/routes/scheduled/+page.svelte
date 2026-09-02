@@ -7,6 +7,17 @@
 	import { formatMoney } from '$lib/format';
 	import { sharedOwnerUserId } from '$lib/stores/shared';
 	import { extractTime, localDateInputValue, toIsoOffset } from '$lib/datetime';
+	import {
+		CUSTOM_KEY,
+		MAX_INTERVAL,
+		PRESETS,
+		buildRrule,
+		parseRrule,
+		presetKeyFor,
+		rruleLabel,
+		type Freq,
+		type FrequencyKey
+	} from '$lib/rrule';
 
 	let items = $state<ScheduledTransaction[]>([]);
 	let cats = $state<Category[]>([]);
@@ -29,7 +40,10 @@
 	let fCurrency = $state('EUR');
 	let fDescription = $state('');
 	let fNote = $state('');
-	let fFrequency = $state('monthly');
+	let fFrequency = $state<FrequencyKey>('monthly');
+	// Only read when fFrequency is 'custom'.
+	let fInterval = $state(2);
+	let fUnit = $state<Freq>('MONTHLY');
 	let fNextDate = $state(localDateInputValue());
 	let fNextTime = $state('09:00');
 	let fEndMode = $state<'never' | 'count' | 'date'>('never');
@@ -37,23 +51,13 @@
 	let fEndDate = $state('');
 	let fActive = $state(true);
 
-	const frequencyMap: Record<string, string> = {
-		daily: 'FREQ=DAILY',
-		weekly: 'FREQ=WEEKLY',
-		biweekly: 'FREQ=WEEKLY;INTERVAL=2',
-		monthly: 'FREQ=MONTHLY',
-		quarterly: 'FREQ=MONTHLY;INTERVAL=3',
-		yearly: 'FREQ=YEARLY'
-	};
-
-	const rruleLabels: Record<string, string> = {
-		'FREQ=DAILY': 'Daily',
-		'FREQ=WEEKLY': 'Weekly',
-		'FREQ=WEEKLY;INTERVAL=2': 'Biweekly',
-		'FREQ=MONTHLY': 'Monthly',
-		'FREQ=MONTHLY;INTERVAL=3': 'Quarterly',
-		'FREQ=YEARLY': 'Yearly'
-	};
+	// Resolve the form's frequency controls to the {freq, interval} pair that
+	// buildRrule serializes.
+	function selectedRecurrence(): { freq: Freq; interval: number } {
+		if (fFrequency === CUSTOM_KEY) return { freq: fUnit, interval: fInterval };
+		const p = PRESETS.find(p => p.key === fFrequency);
+		return p ? { freq: p.freq, interval: p.interval } : { freq: 'MONTHLY', interval: 1 };
+	}
 
 	let mounted = false;
 	let prevOwnerId: string | null = null;
@@ -106,37 +110,6 @@
 		return formatMoney(n, $currencySymbol);
 	}
 
-	function rruleLabel(rrule: string): string {
-		return rruleLabels[rrule] || rrule;
-	}
-
-	// Strip optional ;UNTIL=... from an rrule and return the base + the YYYY-MM-DD UNTIL date (if any).
-	function splitRrule(rrule: string): { base: string; until: string } {
-		const parts = rrule.split(';');
-		const base = parts.filter(p => !p.startsWith('UNTIL=')).join(';');
-		const untilRaw = parts.find(p => p.startsWith('UNTIL='))?.slice(6) || '';
-		// Tolerate 20261231T235959Z, 20261231, 2026-12-31, 2026-12-31T...
-		let until = '';
-		if (untilRaw) {
-			const core = untilRaw.split('T')[0];
-			if (/^\d{8}$/.test(core)) {
-				until = `${core.slice(0, 4)}-${core.slice(4, 6)}-${core.slice(6, 8)}`;
-			} else {
-				until = core;
-			}
-		}
-		return { base, until };
-	}
-
-	function buildRrule(frequencyKey: string, endMode: string, endDate: string): string {
-		const base = frequencyMap[frequencyKey];
-		if (endMode === 'date' && endDate) {
-			const compact = endDate.replace(/-/g, '');
-			return `${base};UNTIL=${compact}T235959Z`;
-		}
-		return base;
-	}
-
 	function resetForm() {
 		editId = null;
 		fType = 'expense';
@@ -145,6 +118,8 @@
 		fDescription = '';
 		fNote = '';
 		fFrequency = 'monthly';
+		fInterval = 2;
+		fUnit = 'MONTHLY';
 		fNextDate = localDateInputValue();
 		fNextTime = '09:00';
 		fEndMode = 'never';
@@ -175,9 +150,15 @@
 			fNextDate = item.next_occurrence;
 			fNextTime = '09:00';
 		}
-		// Strip ;UNTIL=... before reverse-looking up the frequency key.
-		const { base, until } = splitRrule(item.rrule);
-		fFrequency = Object.entries(frequencyMap).find(([, v]) => v === base)?.[0] || 'monthly';
+		// Parse the rrule into its parts rather than matching it whole: an
+		// exact-string lookup silently degrades anything unrecognized to
+		// "monthly", and saving then overwrites the user's real recurrence.
+		const { freq, interval, until } = parseRrule(item.rrule);
+		fFrequency = presetKeyFor(freq, interval);
+		if (fFrequency === CUSTOM_KEY) {
+			fUnit = freq;
+			fInterval = interval;
+		}
 		if (until) {
 			fEndMode = 'date';
 			fEndDate = until;
@@ -202,6 +183,11 @@
 			error = 'Pick an end date';
 			return;
 		}
+		const recurrence = selectedRecurrence();
+		if (!Number.isInteger(recurrence.interval) || recurrence.interval < 1 || recurrence.interval > MAX_INTERVAL) {
+			error = `Repeat every must be a whole number between 1 and ${MAX_INTERVAL}`;
+			return;
+		}
 		submitting = true;
 		const maxOcc = fEndMode === 'count' && fMaxOccurrences ? parseInt(fMaxOccurrences, 10) : null;
 		const data: any = {
@@ -212,7 +198,7 @@
 			currency: fCurrency,
 			description: fDescription || undefined,
 			note: fNote || undefined,
-			rrule: buildRrule(fFrequency, fEndMode, fEndDate),
+			rrule: buildRrule(recurrence.freq, recurrence.interval, fEndMode === 'date' ? fEndDate : ''),
 			next_occurrence: toIsoOffset(`${fNextDate}T${fNextTime}`),
 			max_occurrences: maxOcc && maxOcc > 0 ? maxOcc : null
 		};
@@ -281,15 +267,30 @@
 					<div class="form-group">
 						<label for="freq">Frequency</label>
 						<select id="freq" bind:value={fFrequency}>
-							<option value="daily">Daily</option>
-							<option value="weekly">Weekly</option>
-							<option value="biweekly">Biweekly</option>
-							<option value="monthly">Monthly</option>
-							<option value="quarterly">Quarterly</option>
-							<option value="yearly">Yearly</option>
+							{#each PRESETS as p (p.key)}
+								<option value={p.key}>{p.label}</option>
+							{/each}
+							<option value={CUSTOM_KEY}>Custom…</option>
 						</select>
 					</div>
 				</div>
+				{#if fFrequency === CUSTOM_KEY}
+					<div class="form-row">
+						<div class="form-group">
+							<label for="interval">Repeat every</label>
+							<input id="interval" type="number" min="1" max={MAX_INTERVAL} step="1" bind:value={fInterval} required />
+						</div>
+						<div class="form-group">
+							<label for="unit">Unit</label>
+							<select id="unit" bind:value={fUnit}>
+								<option value="DAILY">Days</option>
+								<option value="WEEKLY">Weeks</option>
+								<option value="MONTHLY">Months</option>
+								<option value="YEARLY">Years</option>
+							</select>
+						</div>
+					</div>
+				{/if}
 				<div class="form-row">
 					<div class="form-group">
 						<label for="account">Account</label>

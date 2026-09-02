@@ -13,6 +13,7 @@ import com.insituledger.app.data.local.db.dao.ScheduledTransactionDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
 import com.insituledger.app.data.local.db.entity.TransactionEntity
 import com.insituledger.app.util.DateTimeUtil
+import com.insituledger.app.util.Rrule
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.time.LocalDateTime
@@ -48,7 +49,7 @@ class ScheduledTransactionWorker @AssistedInject constructor(
 
         for (scheduled in due) {
             val txDate = scheduled.nextOccurrence
-            val (next, pastUntil) = advanceDate(scheduled.nextOccurrence, scheduled.rrule)
+            val (next, pastUntil) = Rrule.advanceDate(scheduled.nextOccurrence, scheduled.rrule)
             val newCount = scheduled.occurrenceCount + 1
             val deactivate = pastUntil ||
                 (scheduled.maxOccurrences != null && newCount >= scheduled.maxOccurrences)
@@ -91,69 +92,5 @@ class ScheduledTransactionWorker @AssistedInject constructor(
         }
 
         return Result.success()
-    }
-
-    private fun advanceDate(current: String, rrule: String): Pair<String, Boolean> {
-        val hasTime = current.contains('T') || current.contains(' ')
-        val dateTime = DateTimeUtil.parseFlexibleLocalDateTime(current)
-
-        var freq = ""
-        var interval = 1
-        var untilStr: String? = null
-        for (part in rrule.split(";")) {
-            val kv = part.split("=", limit = 2)
-            if (kv.size != 2) continue
-            when (kv[0]) {
-                "FREQ" -> freq = kv[1]
-                "INTERVAL" -> kv[1].toIntOrNull()?.let { if (it > 0) interval = it }
-                "UNTIL" -> untilStr = kv[1]
-            }
-        }
-
-        val next = when (freq) {
-            "DAILY" -> dateTime.plusDays(interval.toLong())
-            "WEEKLY" -> dateTime.plusWeeks(interval.toLong())
-            "MONTHLY" -> dateTime.plusMonths(interval.toLong())
-            "YEARLY" -> dateTime.plusYears(interval.toLong())
-            else -> dateTime.plusMonths(1)
-        }
-
-        val pastUntil = untilStr?.let { parseUntil(it) }?.let { next.isAfter(it) } ?: false
-
-        // Datetime inputs emit RFC3339 with the system zone's offset so the
-        // backend's TZ-aware comparison stays correct after a local sync push.
-        // Date-only inputs stay date-only (TZ-agnostic by design).
-        val nextStr = if (hasTime) {
-            next.atZone(java.time.ZoneId.systemDefault())
-                .toOffsetDateTime()
-                .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-        } else {
-            next.toLocalDate().toString()
-        }
-        return nextStr to pastUntil
-    }
-
-    // RFC 5545 UNTIL: typical forms are 20261231T235959Z or 20261231; we also
-    // tolerate the same set the backend tolerates so round-tripping is safe.
-    private fun parseUntil(s: String): LocalDateTime? {
-        val patterns = listOf(
-            "yyyyMMdd'T'HHmmss'Z'",
-            "yyyyMMdd'T'HHmmss",
-            "yyyyMMdd",
-            "yyyy-MM-dd'T'HH:mm:ss",
-            "yyyy-MM-dd'T'HH:mm",
-            "yyyy-MM-dd"
-        )
-        for (p in patterns) {
-            try {
-                val fmt = java.time.format.DateTimeFormatter.ofPattern(p)
-                return if (p == "yyyyMMdd" || p == "yyyy-MM-dd") {
-                    java.time.LocalDate.parse(s, fmt).atTime(23, 59, 59)
-                } else {
-                    LocalDateTime.parse(s, fmt)
-                }
-            } catch (_: Exception) { /* try next */ }
-        }
-        return null
     }
 }
