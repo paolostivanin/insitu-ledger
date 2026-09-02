@@ -4,38 +4,74 @@
 
 A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, and Android app with offline-first local storage and optional sync.
 
+**Current release:** backend + frontend `v1.22.0` · Android `v1.33.0` · MIT licensed
+
+## Contents
+
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Development](#development)
+  - [Running Tests](#running-tests)
+  - [Configuration](#configuration)
+  - [First-boot admin](#first-boot-admin)
+- [Deployment](#deployment)
+  - [Docker](#docker)
+  - [Reverse proxy (required)](#reverse-proxy-required)
+  - [Proxmox VE (LXC)](#proxmox-ve-lxc)
+- [API Reference](#api-reference)
+- [Security & Privacy](#security--privacy)
+- [Versioning](#versioning)
+- [License](#license)
+
 ## Features
+
+### Core ledger
 
 - **Transactions** — record income and expenses across multiple accounts with date, time, and free-text notes
 - **Search** — free-text search across transaction descriptions
-- **Accounts** — manage multiple accounts with independent balances and currencies (default EUR)
-- **Categories** — hierarchical categories (with parent/child, icons, and colors) for income and expense
-- **Scheduled transactions** — recurring transactions with date and time, on any interval (every N days, weeks, months, or years — from the six presets to a custom bimonthly rule), automatically materialized by the backend scheduler (checks every minute) and by the Android local WorkManager (every 15 minutes). Future-dated transactions are automatically converted to one-time scheduled entries
-- **Reports** — spending by category, by month, and trend analysis (powered by ECharts)
-- **Multi-user** — admin-created users, per-account sharing with read/write permissions (grant access to individual accounts, not your whole ledger)
-- **Default account** — pick a default account in your profile preferences; clients select it on launch for new transactions and persist the choice server-side
-- **Authentication** — bcrypt passwords, bearer-token sessions (30-day expiry, hashed at rest), TOTP two-factor authentication
-- **Rate limiting** — login (10 per IP per 15 min), TOTP verification, and per-IP API throttling
-- **Mobile sync** — version-based incremental sync API for offline-first mobile clients
-- **Android app** — local-first with optional sync; SQLCipher-encrypted Room database (Keystore-bound), encrypted local backups (PBKDF2 + AES-256-GCM via SAF), optional mTLS client-certificate authentication for sync, home-screen quick-add widget, swipe-to-delete, owner switcher to view accounts shared with you
-- **Dark/Light mode** — theme toggle with localStorage persistence and FOUC prevention
-- **Keyboard shortcuts** — `n` (new item), `Escape` (close), `?` (help)
+- **Autocomplete** — typing a description suggests previously used entries and prefills the category, and the amount for recurring ones
+- **Accounts** — multiple accounts with independent balances and currencies (default EUR)
+- **Categories** — hierarchical categories (parent/child, icons, colors) for income and expense
+- **Scheduled transactions** — recurring entries with date and time on any interval (every N days, weeks, months, or years — from the six presets to a custom bimonthly rule), materialized by the backend scheduler (checks every minute) and by the Android WorkManager job (every 15 minutes). Future-dated transactions are automatically converted to one-time scheduled entries
+- **Reports** — spending by category, by month, and trend analysis (ECharts)
 - **Batch operations** — multi-select transactions for bulk delete or category change
 - **CSV import/export** — export filtered transactions; import with category/account name matching
-- **Audit logging** — all admin actions are logged with timestamps, IP addresses, and target users
+- **Soft deletes** — entities are tombstoned with `deleted_at` so sync clients can converge
+
+### Multi-user
+
+- **Admin-created users** — no open registration
+- **Per-account sharing** — grant access to individual accounts, not your whole ledger. Since v1.15.0 shares are **co-owner only**: a guest can create and edit transactions on the shared account, but only the original owner may rename, delete, or re-share it
+- **Owner switcher** — web and Android both let you filter the whole UI down to one owner's accounts
+- **Default account** — pick a default in your profile preferences; clients select it on launch for new transactions and persist the choice server-side
+- **Audit logging** — admin actions are logged with timestamps, IP addresses, and target users
+
+### Security
+
+- **Authentication** — bcrypt passwords, bearer-token sessions (30-day expiry, hashed at rest)
+- **Two-factor** — TOTP, with optional per-browser trusted devices that skip the prompt for 30 days (revocable individually or all at once)
+- **Rate limiting** — login (10 per IP / 15 min), TOTP verification (5 per account / 15 min), and a global per-IP API cap (300 req/min)
 - **Database backup & restore** — admin one-click download via `VACUUM INTO`, plus automatic scheduled backups (daily/weekly/monthly with retention) written to `data/backups/`. Admins can also restore from a previously downloaded backup: the upload is validated (SQLite header, integrity check, schema, at least one admin), the current DB is auto-snapshotted to `data/backups/pre-restore-<TIMESTAMP>.db` for one-click rollback, then atomically swapped and the server restarts so the orchestrator (Docker, systemd, OpenRC) brings it back on the restored data
-- **PWA support** — installable as a Progressive Web App with offline caching and service worker
+
+### Clients
+
+- **Web** — dark/light theme with localStorage persistence and FOUC prevention, keyboard shortcuts (`n` new item, `Escape` close, `?` help), offline banner
+- **PWA** — installable, with offline caching and a service worker
+- **Android** — local-first with optional sync; SQLCipher-encrypted Room database (Keystore-bound), encrypted local backups (PBKDF2 + AES-256-GCM via SAF), optional mTLS client-certificate authentication for sync, home-screen quick-add widget, biometric unlock, swipe-to-delete
+- **Mobile sync** — version-based incremental sync API for offline-first clients
 - **API documentation** — interactive Swagger UI at `/api/docs`
-- **Soft deletes** — all entities support soft deletion with `deleted_at` timestamps
-- **Single binary** — compiles to a single Go binary that serves the SvelteKit SPA as static files
+- **Single binary** — the Go binary serves the SvelteKit SPA as static files; no external services
 
 ## Tech Stack
 
 | Layer    | Technology                        |
 |----------|-----------------------------------|
-| Backend  | Go (stdlib `net/http`, no framework) |
+| Backend  | Go 1.26 (stdlib `net/http`, no framework) |
 | Database | SQLite (WAL mode, via `modernc.org/sqlite`) with scheduled `VACUUM INTO` backups |
-| Frontend | SvelteKit 2, Svelte 5, TypeScript |
+| Frontend | SvelteKit 2, Svelte 5 (runes), TypeScript, Vite 8 |
 | Charts   | ECharts 6                         |
 | Auth     | bcrypt + bearer tokens + TOTP (`pquerna/otp`) |
 | Tests    | Go `testing` + `httptest`, Vitest + jsdom |
@@ -47,54 +83,27 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 ├── backend/
 │   ├── cmd/server/main.go        # Entry point
 │   ├── internal/
-│   │   ├── api/                  # HTTP handlers, router, middleware, tests
+│   │   ├── api/                  # HTTP handlers, router, middleware, OpenAPI spec, tests
 │   │   ├── auth/                 # Password hashing, sessions, token management
-│   │   ├── db/                   # SQLite setup and schema
+│   │   ├── db/                   # SQLite setup and schema.sql (go:embed)
 │   │   ├── models/               # Data structures
-│   │   └── scheduler/            # Recurring transaction processor
+│   │   ├── scheduler/            # Recurring transaction + backup processors
+│   │   └── version.go            # Shared backend/frontend version constant
 │   ├── go.mod
 │   └── go.sum
 ├── frontend/
 │   ├── src/
 │   │   ├── lib/api/client.ts     # API client
-│   │   ├── lib/stores/           # Auth, theme, and toast state management
+│   │   ├── lib/stores/           # Auth, theme, toast, account-filter, shared-owner state
 │   │   ├── lib/components/       # Shared components (ThemeToggle, ToastContainer, etc.)
 │   │   └── routes/               # SvelteKit pages
 │   ├── static/                   # PWA manifest, service worker, icons
 │   └── package.json
 ├── android/                      # Android app (Jetpack Compose, local-first with optional sync)
+├── scripts/                      # One-off data-migration / bootstrap helpers (Python)
 ├── Dockerfile                    # Multi-stage build
 └── docker-compose.yml
 ```
-
-## API Endpoints
-
-Full interactive documentation is available at `/api/docs` (Swagger UI).
-
-### Public
-- `GET /api/health` — health check (returns `{"status":"ok"}`)
-- `POST /api/auth/login` — rate-limited (10 attempts per IP per 15 minutes)
-- `GET /api/docs` — Swagger UI
-- `GET /api/docs/openapi.yaml` — OpenAPI 3.0 spec
-
-### Protected (Bearer token required)
-- **Auth** — `POST logout`, `POST change-password`, `PUT profile`, `GET me`, `GET/PUT profile/preferences`
-- **TOTP** — `POST totp/setup`, `POST totp/verify`, `POST totp/reset`
-- **Transactions** — `GET`, `POST`, `PUT {id}`, `DELETE {id}`
-- **Batch** — `POST batch-delete`, `POST batch-update-category`
-- **CSV** — `GET export`, `POST import`
-- **Categories** — `GET`, `POST`, `PUT {id}`, `DELETE {id}`
-- **Accounts** — `GET`, `POST`, `PUT {id}`, `DELETE {id}`
-- **Scheduled** — `GET`, `POST`, `PUT {id}`, `DELETE {id}`
-- **Sync** — `GET /api/sync?since_version=N`
-- **Reports** — `GET by-category`, `GET by-month`, `GET trend`
-- **Shared access** — `GET`, `POST`, `DELETE {id}`
-
-### Admin (admin users only)
-- **Users** — `GET`, `POST`, `PUT {id}`, `DELETE {id}`, `POST {id}/reset-password`, `POST {id}/toggle-admin`, `POST {id}/disable-totp`
-- **Audit logs** — `GET /api/admin/audit-logs`
-- **Backup** — `GET /api/admin/backup`, `GET/PUT /api/admin/backup/settings`
-- **Restore** — `POST /api/admin/restore` (multipart upload; server restarts on success)
 
 ## Getting Started
 
@@ -116,7 +125,7 @@ npm install
 npm run dev
 ```
 
-The backend serves the API on `:8080`. In development, run the SvelteKit dev server separately and proxy API calls to the backend.
+The backend serves the API on `:8080`. The Vite dev server already proxies `/api` there (see `frontend/vite.config.ts`), so no extra configuration is needed.
 
 ### Running Tests
 
@@ -125,8 +134,28 @@ The backend serves the API on `:8080`. In development, run the SvelteKit dev ser
 cd backend && go test ./...
 
 # Frontend
-cd frontend && npm test
+cd frontend && npm test          # Vitest
+cd frontend && npm run check     # svelte-check / TypeScript
+
+# Android
+cd android && ./gradlew compileDebugKotlin
 ```
+
+### Configuration
+
+| Flag / Env Var              | Default   | Description                  |
+|-----------------------------|-----------|------------------------------|
+| `-addr` / `INSITU_ADDR`     | `:8080`   | Listen address               |
+| `-data` / `INSITU_DATA_DIR` | `./data`  | Directory for the SQLite database (and `backups/` subdirectory) |
+| `INSITU_TRUST_PROXY`        | `false`   | When `true`, trust `X-Forwarded-For` for client IP (use only behind a reverse proxy that sets it) |
+
+Environment variables take precedence over flags.
+
+### First-boot admin
+
+When the backend starts against an empty database, it creates a single admin user (`admin@localhost`) and prints a randomly generated initial password to **stderr**, once. Capture it from your container/service logs and change it on first login.
+
+## Deployment
 
 ### Docker
 
@@ -134,9 +163,9 @@ cd frontend && npm test
 docker compose up --build
 ```
 
-This builds a multi-stage image (Node for the frontend, Go for the backend) and runs the server on port 8080. Data is persisted in a named Docker volume.
+This builds a multi-stage image (Node for the frontend, Go for the backend) and runs the server on port 8080. Data is persisted in a named Docker volume (`<project>_ledger_data`).
 
-### Reverse Proxy (required)
+### Reverse proxy (required)
 
 InSitu Ledger does **not** handle TLS. You must run it behind a reverse proxy such as [Caddy](https://caddyserver.com/) or nginx for HTTPS termination. Example Caddyfile:
 
@@ -146,7 +175,7 @@ ledger.example.com {
 }
 ```
 
-### Proxmox VE (LXC) deployment
+### Proxmox VE (LXC)
 
 InSitu Ledger fits comfortably in a small unprivileged LXC container on Proxmox VE. The single Go binary, embedded SPA, and on-disk SQLite mean there are no external services to provision.
 
@@ -161,7 +190,7 @@ InSitu Ledger fits comfortably in a small unprivileged LXC container on Proxmox 
 | Unprivileged| yes         | yes        | |
 | Network     | bridged     | bridged    | Static IP recommended for the reverse-proxy upstream |
 
-**Option A — Docker-in-LXC** (matches the published `Dockerfile`):
+#### Option A — Docker-in-LXC (matches the published `Dockerfile`)
 
 1. On the PvE host, enable nesting and keyctl on the container so Docker can run inside it:
    ```
@@ -174,14 +203,14 @@ InSitu Ledger fits comfortably in a small unprivileged LXC container on Proxmox 
    ```
 4. Back up the named volume (`<project>_ledger_data`) via PvE's container backups or a separate snapshot job.
 
-**Option B — Native binary** (no Docker, smallest footprint):
+#### Option B — Native binary (no Docker, smallest footprint)
 
 The Go binary serves the SvelteKit SPA from a `static/` directory next to its working directory. Build both on a workstation (avoids installing Node and Go inside the LXC), then ship the artefacts across.
 
 **Step 1 — On your workstation: build binary + SPA**
 
 ```bash
-git clone https://github.com/pstivanin/insitu-ledger.git
+git clone https://github.com/paolostivanin/insitu-ledger.git
 cd insitu-ledger
 
 # Build the SPA (output lands in frontend/build/)
@@ -222,7 +251,7 @@ chmod 0755 /opt/insitu-ledger/insitu-ledger
 cat >/etc/systemd/system/insitu-ledger.service <<'EOF'
 [Unit]
 Description=InSitu Ledger (self-hosted personal finance tracker)
-Documentation=https://github.com/pstivanin/insitu-ledger
+Documentation=https://github.com/paolostivanin/insitu-ledger
 After=network-online.target
 Wants=network-online.target
 
@@ -339,19 +368,45 @@ systemctl restart insitu-ledger    # Debian
 
 The SQLite schema migrates automatically on startup; back up `/var/lib/insitu-ledger/` (or take a PvE container snapshot) before upgrading.
 
-### Configuration
+## API Reference
 
-| Flag / Env Var              | Default   | Description                  |
-|-----------------------------|-----------|------------------------------|
-| `-addr` / `INSITU_ADDR`     | `:8080`   | Listen address               |
-| `-data` / `INSITU_DATA_DIR` | `./data`  | Directory for the SQLite database (and `backups/` subdirectory) |
-| `INSITU_TRUST_PROXY`        | `false`   | When `true`, trust `X-Forwarded-For` for client IP (use only behind a reverse proxy that sets it) |
+Full interactive documentation is available at `/api/docs` (Swagger UI). The spec itself lives at [`backend/internal/api/openapi.yaml`](backend/internal/api/openapi.yaml).
 
-Environment variables take precedence over flags.
+### Public
 
-### First-boot admin
+- `GET /api/health` — health check; pings the DB, so it doubles as a readiness probe (`{"status":"ok"}` / 503 `db_unavailable`)
+- `POST /api/auth/login` — rate-limited (10 attempts per IP per 15 minutes)
+- `GET /api/docs` — Swagger UI
+- `GET /api/docs/openapi.yaml` — OpenAPI 3.0 spec
 
-When the backend starts against an empty database, it creates a single admin user (`admin@localhost`) and prints a randomly generated initial password to **stderr**, once. Capture it from your container/service logs and change it on first login.
+### Protected (Bearer token required)
+
+| Group | Endpoints |
+|-------|-----------|
+| Auth | `POST /api/auth/logout`, `POST /api/auth/change-password`, `PUT /api/auth/profile`, `GET /api/auth/me` |
+| Preferences | `GET/PUT /api/profile/preferences` |
+| TOTP | `POST /api/auth/totp/setup`, `POST /api/auth/totp/verify`, `POST /api/auth/totp/reset` |
+| Trusted devices | `GET /api/auth/trusted-devices`, `DELETE /api/auth/trusted-devices`, `DELETE /api/auth/trusted-devices/{id}` |
+| Transactions | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/transactions`, plus `GET /api/transactions/autocomplete` |
+| Batch | `POST /api/transactions/batch-delete`, `POST /api/transactions/batch-update-category` |
+| CSV | `GET /api/transactions/export`, `POST /api/transactions/import` |
+| Categories | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/categories` |
+| Accounts | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/accounts` |
+| Scheduled | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/scheduled` |
+| Sync | `GET /api/sync?since_version=N` |
+| Reports | `GET /api/reports/by-category`, `GET /api/reports/by-month`, `GET /api/reports/trend` |
+| Shared access | `GET /api/shared`, `POST /api/shared`, `DELETE /api/shared/{id}`, `GET /api/shared/accessible` |
+
+Request bodies are capped at 1 MB, except CSV import (10 MB) and DB restore, which apply their own limits.
+
+### Admin (admin users only)
+
+| Group | Endpoints |
+|-------|-----------|
+| Users | `GET /api/admin/users`, `POST`, `PUT {id}`, `DELETE {id}`, `POST {id}/reset-password`, `POST {id}/toggle-admin`, `POST {id}/disable-totp` |
+| Audit logs | `GET /api/admin/audit-logs` |
+| Backup | `GET /api/admin/backup`, `GET/PUT /api/admin/backup/settings` |
+| Restore | `POST /api/admin/restore` (multipart upload; server restarts on success) |
 
 ## Security & Privacy
 
@@ -360,8 +415,22 @@ When the backend starts against an empty database, it creates a single admin use
 
 A few notes worth surfacing:
 
-- The web UI stores its bearer token in `localStorage`. This is the standard SPA tradeoff; an XSS in any frontend dependency would be able to read it. Mitigations: a strict Content-Security-Policy is set, and dependencies are kept current.
+- The web UI stores its bearer token in `localStorage`. This is the standard SPA tradeoff; an XSS in any frontend dependency would be able to read it. Migrating to `HttpOnly` cookies + CSRF tokens is a known, non-trivial refactor.
+- A Content-Security-Policy is sent on every response, but it still allows `'unsafe-inline'` for scripts and styles — SvelteKit emits two inline bootstrap scripts, and removing them requires per-build hashing. `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, and HSTS are set unconditionally.
 - The backend writes scheduled backups to `data/backups/` on the same volume as the live database. Off-host copies (PvE backup, restic, rclone, etc.) are the operator's responsibility — that's the actual disaster-recovery story. The admin Restore feature replaces the entire database in-place; expect a few seconds of downtime while the process exits and the orchestrator restarts it, and expect every user to be logged out (sessions live in the DB that just got swapped).
+- Audit logging covers admin actions only. Self-service security events (login, password change, TOTP enable/disable, trusted-device add/revoke) are not recorded.
 - The Android app encrypts its Room database at rest with SQLCipher; the key is stored in the Android Keystore and is non-exportable. Local manual backups (via SAF) are encrypted with a user-chosen passphrase (PBKDF2 + AES-256-GCM).
 - The Android app intentionally lets the home-screen widget add a transaction without biometric unlock. The widget never displays existing data.
 - The Android app keeps `minSdk = 34` (Android 14). This is a deliberate choice in exchange for relying on modern platform security primitives (Keystore-bound DB encryption, predictive back, edge-to-edge); it does narrow the supported device range.
+
+This project is built for a small, self-hosted, single-trust deployment where every user is trusted. A number of hardening items have been consciously deferred on that basis — they are enumerated in [`CLAUDE.md`](CLAUDE.md#known-issues--consciously-deferred-family--single-trust-deployment). Re-evaluate them before opening an instance to users outside that circle.
+
+## Versioning
+
+- **Backend + frontend** share a single version and are released together (`frontend/package.json`, `backend/internal/version.go`, `backend/internal/api/openapi.yaml`).
+- **Android** versions independently (`versionName` / `versionCode` in `android/app/build.gradle.kts`).
+- Each release gets **one git tag** for the backend+frontend version (e.g. `v1.22.0`); the Android version is noted in the release notes.
+
+## License
+
+[MIT](LICENSE) © 2026 Paolo Stivanin
