@@ -36,7 +36,8 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 - **Accounts** — multiple accounts with independent balances and currencies (default EUR)
 - **Categories** — hierarchical categories (parent/child, icons, colors) for income and expense
 - **Scheduled transactions** — recurring entries with date and time on any interval (every N days, weeks, months, or years — from the six presets to a custom bimonthly rule), materialized by the backend scheduler (checks every minute) and by the Android WorkManager job (every 15 minutes). Future-dated transactions are automatically converted to one-time scheduled entries
-- **Reports** — spending by category, by month, and trend analysis (ECharts)
+- **Reports** — spending by category or rolled up into parent categories, over a period (this week/month/year, last month/year, or a custom range), plus by-month and trend analysis (ECharts)
+- **Search summary** — total any description search into money in, money out and the net, one row per currency. Tag a trip or project in the description ("Valencia") and see what you spent, what people paid back, and where it landed
 - **Batch operations** — multi-select transactions for bulk delete or category change
 - **CSV import/export** — export filtered transactions; import with category/account name matching
 - **Soft deletes** — entities are tombstoned with `deleted_at` so sync clients can converge
@@ -394,7 +395,7 @@ Full interactive documentation is available at `/api/docs` (Swagger UI). The spe
 | Accounts | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/accounts` |
 | Scheduled | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/scheduled` |
 | Sync | `GET /api/sync?since_version=N` |
-| Reports | `GET /api/reports/by-category`, `GET /api/reports/by-month`, `GET /api/reports/trend` |
+| Reports | `GET /api/reports/summary`, `GET /api/reports/by-category`, `GET /api/reports/by-month`, `GET /api/reports/trend` |
 | Shared access | `GET /api/shared`, `POST /api/shared`, `DELETE /api/shared/{id}`, `GET /api/shared/accessible` |
 
 Request bodies are capped at 1 MB, except CSV import (10 MB) and DB restore, which apply their own limits.

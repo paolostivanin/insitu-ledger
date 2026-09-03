@@ -6,6 +6,7 @@ import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.db.dao.AccountDao
 import com.insituledger.app.data.local.db.dao.CategoryBreakdownRow
+import com.insituledger.app.data.local.db.dao.CurrencySummaryRow
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
 import com.insituledger.app.data.local.db.entity.PendingOperationEntity
@@ -60,6 +61,7 @@ class TransactionRepository @Inject constructor(
         from: String? = null,
         to: String? = null,
         categoryId: Long? = null,
+        search: String? = null,
         sortBy: String = "date",
         sortDir: String = "desc",
         limit: Int = 100,
@@ -90,6 +92,14 @@ class TransactionRepository @Inject constructor(
             sb.append(" AND category_id IN (SELECT id FROM categories WHERE id = ? OR parent_id = ?)")
             args.add(categoryId)
             args.add(categoryId)
+        }
+        if (!search.isNullOrBlank()) {
+            // Search is a predicate like any other, so it composes with the date
+            // and category filters, the chosen sort and the LIMIT above.
+            // Description only, matching GET /api/transactions and the reports
+            // search summary.
+            sb.append(" AND description LIKE ? ESCAPE '\\'")
+            args.add("%" + escapeLike(search.trim()) + "%")
         }
 
         sb.append(" ORDER BY $column $dir, id DESC LIMIT ? OFFSET ?")
@@ -253,15 +263,19 @@ class TransactionRepository @Inject constructor(
         }
     }
 
-    fun search(query: String): Flow<List<Transaction>> = transactionDao.search(query).map { list ->
-        list.map { it.toDomain() }
-    }
-
     suspend fun getFilteredSync(from: String?, to: String?, categoryId: Long?): List<Transaction> =
         transactionDao.getFilteredSync(from, to, categoryId).map { it.toDomain() }
 
     suspend fun getCategoryBreakdown(from: String?, to: String?): List<CategoryBreakdownRow> =
         transactionDao.getCategoryBreakdown(from, to)
+
+    suspend fun searchSummary(query: String): List<CurrencySummaryRow> =
+        transactionDao.searchSummary(escapeLike(query.trim()))
+
+    // % and _ are LIKE wildcards; a user typing one means the character, not
+    // "match anything". Paired with ESCAPE '\' in the DAO query.
+    private fun escapeLike(s: String): String =
+        s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     private fun TransactionEntity.toDomain() = Transaction(
         id = id, accountId = accountId, categoryId = categoryId,

@@ -8,6 +8,7 @@
 	import { currentAccountId } from '$lib/stores/accountFilter';
 	import AccountFilterPill from '$lib/components/AccountFilterPill.svelte';
 	import { extractTime, localMonthKey } from '$lib/datetime';
+	import { rollUpByParent } from '$lib/categoryRollup';
 
 	let accts = $state<Account[]>([]);
 	let recentTxns = $state<Transaction[]>([]);
@@ -15,6 +16,9 @@
 	let monthData = $state<MonthReport[]>([]);
 	let loading = $state(true);
 	let loadError = $state('');
+	// Rolled up to parents: a top-8 list of scattered subcategories says much
+	// less than the same eight rows grouped into the categories you think in.
+	const topCategories = $derived(rollUpByParent(categoryData).slice(0, 8));
 	let mounted = false;
 	let prevOwnerId: string | null = null;
 	let prevAccountId: number | null = null;
@@ -165,11 +169,11 @@
 
 			<div class="card">
 				<h2>Top Expense Categories</h2>
-				{#if categoryData.length === 0}
+				{#if topCategories.length === 0}
 					<p class="empty-state">No data yet</p>
 				{:else}
 					<div class="category-list">
-						{#each categoryData.slice(0, 8) as cat}
+						{#each topCategories as cat}
 							<div class="cat-row">
 								<span class="cat-dot" style="background: {cat.category_color || '#6366f1'}"></span>
 								<span class="cat-name">{cat.category_name}</span>

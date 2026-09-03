@@ -3,12 +3,16 @@ package com.insituledger.app.ui.reports
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.local.datastore.UserPreferences
+import com.insituledger.app.data.local.db.dao.CategoryBreakdownRow
+import com.insituledger.app.data.local.db.dao.CurrencySummaryRow
 import com.insituledger.app.data.repository.CategoryRepository
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.Transaction
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
@@ -25,18 +29,60 @@ data class CategorySummary(
 
 enum class DateRangePreset { THIS_WEEK, THIS_MONTH, LAST_WEEK, LAST_MONTH, LAST_3_MONTHS, LAST_YEAR, CUSTOM }
 
+enum class CategoryGrouping { CATEGORY, PARENT }
+
+private const val SEARCH_DEBOUNCE_MS = 300L
+
+/**
+ * Build the category breakdown from raw per-(category, type) sums.
+ *
+ * In PARENT mode each row is attributed to its parent, so a parent's figure is
+ * its own transactions plus every child's. `type` stays in the bucket key:
+ * the category form lets you parent an income category under an expense one,
+ * and merging those into one number would be meaningless.
+ *
+ * A child whose parent no longer exists falls back to itself rather than
+ * vanishing — same rule the backend applies to soft-deleted parents.
+ *
+ * Pure and top-level so it can be tested without Hilt or a Room instance.
+ */
+internal fun buildBreakdown(
+    rows: List<CategoryBreakdownRow>,
+    categories: List<Category>,
+    grouping: CategoryGrouping
+): List<CategorySummary> {
+    val byId = categories.associateBy { it.id }
+    return rows
+        .mapNotNull { row ->
+            val cat = byId[row.categoryId] ?: return@mapNotNull null
+            val effective = if (grouping == CategoryGrouping.PARENT) {
+                cat.parentId?.let { byId[it] } ?: cat
+            } else {
+                cat
+            }
+            Triple(effective, row.type, row.total)
+        }
+        .groupBy { (effective, type, _) -> effective.id to type }
+        .map { (_, group) -> CategorySummary(group.first().first, group.sumOf { it.third }) }
+        .sortedByDescending { it.total }
+}
+
 data class ReportsUiState(
     val categories: List<Category> = emptyList(),
     val totalIncome: Double = 0.0,
     val totalExpense: Double = 0.0,
     val categoryBreakdown: List<CategorySummary> = emptyList(),
+    val grouping: CategoryGrouping = CategoryGrouping.CATEGORY,
     val dateRangePreset: DateRangePreset = DateRangePreset.THIS_MONTH,
     val customFrom: String = "",
     val customTo: String = "",
     val isLoading: Boolean = true,
     val selectedCategory: Category? = null,
     val selectedCategoryTransactions: List<Transaction> = emptyList(),
-    val selectedCategoryTotal: Double = 0.0
+    val selectedCategoryTotal: Double = 0.0,
+    val searchQuery: String = "",
+    val searchSummary: List<CurrencySummaryRow> = emptyList(),
+    val isSearching: Boolean = false
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -59,6 +105,10 @@ class ReportsViewModel @Inject constructor(
 
     private var weekStartDay: DayOfWeek = DayOfWeek.MONDAY
 
+    // Cancelled and restarted on every keystroke, so only the pause at the end
+    // of typing reaches the database.
+    private var searchJob: Job? = null
+
     init {
         viewModelScope.launch {
             categories.collect { cats ->
@@ -78,6 +128,35 @@ class ReportsViewModel @Inject constructor(
     fun setDateRangePreset(preset: DateRangePreset) {
         _uiState.update { it.copy(dateRangePreset = preset) }
         viewModelScope.launch { loadReport() }
+    }
+
+    fun setGrouping(grouping: CategoryGrouping) {
+        _uiState.update { it.copy(grouping = grouping) }
+        viewModelScope.launch { loadReport() }
+    }
+
+    /**
+     * Free-text search over transaction descriptions, totalled per currency.
+     *
+     * Deliberately all-time and independent of the date-range preset above:
+     * you look a trip up months after it ended, and the default THIS_MONTH
+     * would silently return nothing.
+     */
+    fun setSearchQuery(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            // Clear straight away rather than after the debounce — a stale
+            // total under an empty box reads as a result for "everything".
+            _uiState.update { it.copy(searchSummary = emptyList(), isSearching = false) }
+            return
+        }
+        _uiState.update { it.copy(isSearching = true) }
+        searchJob = viewModelScope.launch {
+            delay(SEARCH_DEBOUNCE_MS)
+            val rows = transactionRepository.searchSummary(query)
+            _uiState.update { it.copy(searchSummary = rows, isSearching = false) }
+        }
     }
 
     fun setCustomDateRange(from: String, to: String) {
@@ -114,14 +193,11 @@ class ReportsViewModel @Inject constructor(
         val totalIncome = breakdownRows.filter { it.type == "income" }.sumOf { it.total }
         val totalExpense = breakdownRows.filter { it.type == "expense" }.sumOf { it.total }
 
-        val categories = _uiState.value.categories
-        val breakdown = breakdownRows
-            .groupBy { it.categoryId }
-            .mapNotNull { (catId, rows) ->
-                val cat = categories.find { it.id == catId } ?: return@mapNotNull null
-                CategorySummary(cat, rows.sumOf { it.total })
-            }
-            .sortedByDescending { it.total }
+        val breakdown = buildBreakdown(
+            breakdownRows,
+            _uiState.value.categories,
+            _uiState.value.grouping
+        )
 
         _uiState.update {
             it.copy(

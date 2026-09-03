@@ -11,12 +11,17 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE deleted_at IS NULL ORDER BY date DESC, id DESC")
     fun getAll(): Flow<List<TransactionEntity>>
 
+    // Filtering by a parent category includes its children, matching the
+    // backend's GET /api/transactions (handlers_transactions.go). One level
+    // deep, like every other place that walks the hierarchy.
     @Query("""
         SELECT * FROM transactions
         WHERE deleted_at IS NULL
         AND (:from IS NULL OR date >= :from)
         AND (:to IS NULL OR SUBSTR(date, 1, 10) <= :to)
-        AND (:categoryId IS NULL OR category_id = :categoryId)
+        AND (:categoryId IS NULL OR category_id IN (
+            SELECT id FROM categories WHERE id = :categoryId OR parent_id = :categoryId
+        ))
         ORDER BY date DESC, id DESC
         LIMIT :limit OFFSET :offset
     """)
@@ -71,14 +76,6 @@ interface TransactionDao {
     """)
     suspend fun recentAmountsForDescription(description: String, limit: Int): List<RecentAmountRow>
 
-    @Query("""
-        SELECT * FROM transactions
-        WHERE deleted_at IS NULL
-        AND description LIKE '%' || :query || '%' COLLATE NOCASE
-        ORDER BY date DESC, id DESC
-    """)
-    fun search(query: String): Flow<List<TransactionEntity>>
-
     @RawQuery(observedEntities = [TransactionEntity::class])
     fun getSorted(query: SupportSQLiteQuery): Flow<List<TransactionEntity>>
 
@@ -127,7 +124,9 @@ interface TransactionDao {
         WHERE deleted_at IS NULL
         AND (:from IS NULL OR date >= :from)
         AND (:to IS NULL OR SUBSTR(date, 1, 10) <= :to)
-        AND (:categoryId IS NULL OR category_id = :categoryId)
+        AND (:categoryId IS NULL OR category_id IN (
+            SELECT id FROM categories WHERE id = :categoryId OR parent_id = :categoryId
+        ))
         ORDER BY date DESC, id DESC
     """)
     suspend fun getFilteredSync(from: String?, to: String?, categoryId: Long?): List<TransactionEntity>
@@ -142,6 +141,26 @@ interface TransactionDao {
         ORDER BY total DESC
     """)
     suspend fun getCategoryBreakdown(from: String?, to: String?): List<CategoryBreakdownRow>
+
+    // Totals for a description search: what went out, what came back, and how
+    // many rows — split per currency, because a trip abroad is exactly where
+    // currencies mix and one combined sum would be confidently wrong.
+    // Mirrors GET /api/reports/summary, including the ESCAPE clause (the caller
+    // escapes % and _ so a typed wildcard matches literally). No COLLATE: LIKE
+    // is already ASCII-case-insensitive in SQLite unless case_sensitive_like is
+    // set, and a COLLATE after ESCAPE would bind to the escape character.
+    @Query("""
+        SELECT currency,
+               COALESCE(SUM(CASE WHEN type = 'income' THEN amount END), 0) AS income,
+               COALESCE(SUM(CASE WHEN type = 'expense' THEN amount END), 0) AS expense,
+               COUNT(*) AS count
+        FROM transactions
+        WHERE deleted_at IS NULL
+        AND description LIKE '%' || :query || '%' ESCAPE '\'
+        GROUP BY currency
+        ORDER BY SUM(amount) DESC, currency ASC
+    """)
+    suspend fun searchSummary(query: String): List<CurrencySummaryRow>
 }
 
 data class MonthlySummary(
@@ -165,3 +184,14 @@ data class CategoryBreakdownRow(
     val total: Double,
     val count: Int
 )
+
+data class CurrencySummaryRow(
+    val currency: String,
+    val income: Double,
+    val expense: Double,
+    val count: Int
+) {
+    // Negative when you spent more than came back.
+    @get:Ignore
+    val net: Double get() = income - expense
+}

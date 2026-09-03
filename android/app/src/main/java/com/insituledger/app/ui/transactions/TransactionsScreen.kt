@@ -190,6 +190,15 @@ fun TransactionsScreen(
 
                 when {
                     uiState.isLoading -> TransactionListSkeleton()
+                    // Search narrows within the active filters, so an empty list
+                    // usually means "nothing matched", not "nothing recorded".
+                    uiState.transactions.isEmpty() && isNarrowed(uiState) -> EmptyState(
+                        icon = Icons.Default.SearchOff,
+                        title = "Nothing matches",
+                        message = "No transactions match the current search and filters.",
+                        actionLabel = "Clear search and filters",
+                        onAction = { viewModel.clearSearchAndFilters() }
+                    )
                     uiState.transactions.isEmpty() -> EmptyState(
                         icon = Icons.AutoMirrored.Filled.ReceiptLong,
                         title = "No transactions yet",
@@ -737,3 +746,11 @@ private fun friendlyDayLabel(isoDate: String): String {
         isoDate
     }
 }
+
+// True when a search term or any filter is narrowing the list, so an empty
+// result can be explained rather than mistaken for an empty ledger.
+private fun isNarrowed(uiState: TransactionsUiState): Boolean =
+    uiState.searchQuery.isNotBlank() ||
+        uiState.filterFrom != null ||
+        uiState.filterTo != null ||
+        uiState.filterCategoryId != null

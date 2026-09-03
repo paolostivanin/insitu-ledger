@@ -109,6 +109,7 @@ func NewRouter(s *Server) http.Handler {
 	protected.HandleFunc("GET /api/sync", s.handleSync)
 
 	// Graph / reporting data
+	protected.HandleFunc("GET /api/reports/summary", s.handleReportSummary)
 	protected.HandleFunc("GET /api/reports/by-category", s.handleReportByCategory)
 	protected.HandleFunc("GET /api/reports/by-month", s.handleReportByMonth)
 	protected.HandleFunc("GET /api/reports/trend", s.handleReportTrend)

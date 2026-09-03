@@ -113,23 +113,19 @@ class TransactionsViewModel @Inject constructor(
                     }
                     _uiState.update { it.copy(isLoading = true) }
                     val limit = req.pages * PAGE_SIZE
-                    val txnFlow = if (req.fs.searchQuery.isNotBlank()) {
-                        // Search ignores pagination — relatively bounded result set.
-                        transactionRepository.search(req.fs.searchQuery)
-                    } else {
-                        transactionRepository.getSorted(
-                            from = req.fs.from, to = req.fs.to, categoryId = req.fs.categoryId,
-                            sortBy = req.fs.sortBy, sortDir = req.fs.sortDir,
-                            limit = limit, offset = 0
-                        )
-                    }
+                    // Search is one more predicate on the same query, so it stacks
+                    // with the date/category filters and the sort instead of
+                    // replacing them, and it paginates like everything else.
+                    val txnFlow = transactionRepository.getSorted(
+                        from = req.fs.from, to = req.fs.to, categoryId = req.fs.categoryId,
+                        search = req.fs.searchQuery.ifBlank { null },
+                        sortBy = req.fs.sortBy, sortDir = req.fs.sortDir,
+                        limit = limit, offset = 0
+                    )
                     txnFlow.map { txns ->
                         val visible = if (accountIds == null) txns else txns.filter { it.accountId in accountIds }
-                        // hasMore is true when this page filled the LIMIT entirely
-                        // (and we're not in search mode, which doesn't paginate).
-                        val isSearch = req.fs.searchQuery.isNotBlank()
-                        val more = !isSearch && txns.size >= limit
-                        visible to more
+                        // hasMore is true when this page filled the LIMIT entirely.
+                        visible to (txns.size >= limit)
                     }
                 }
                 .collect { (txns, more) ->
@@ -148,6 +144,22 @@ class TransactionsViewModel @Inject constructor(
 
     fun clearFilters() {
         setFilters(null, null, null)
+    }
+
+    // Search and filters narrow the same query, so the empty state offers to
+    // drop both at once rather than making the user find each control.
+    fun clearSearchAndFilters() {
+        _uiState.update {
+            it.copy(
+                searchQuery = "", isSearchActive = false,
+                filterFrom = null, filterTo = null, filterCategoryId = null
+            )
+        }
+        _searchInput.value = ""
+        _pageCount.value = 1
+        _filterAndSort.update {
+            FilterAndSort(sortBy = it.sortBy, sortDir = it.sortDir)
+        }
     }
 
     fun setSort(sortBy: String, sortDir: String) {

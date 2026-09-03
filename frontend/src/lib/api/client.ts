@@ -333,6 +333,11 @@ export interface CategoryReport {
 	category_id: number;
 	category_name: string;
 	category_color: string | null;
+	// Null for a top-level category, and also when the parent has been
+	// soft-deleted — so `parent_id ?? category_id` is always a live bucket.
+	parent_id: number | null;
+	parent_name: string | null;
+	parent_color: string | null;
 	type: string;
 	total: number;
 }
@@ -349,13 +354,26 @@ export interface TrendReport {
 	total: number;
 }
 
+// One row per currency — a trip abroad mixes them, and adding dollars to
+// euros would produce a confident wrong number.
+export interface SearchSummary {
+	currency: string;
+	income: number;
+	expense: number;
+	// income - expense; negative when you spent more than came back.
+	net: number;
+	count: number;
+}
+
 export const reports = {
 	byCategory: (params?: { from?: string; to?: string; type?: string; owner_id?: string; account_id?: string }) =>
 		request<CategoryReport[]>('/reports/by-category', { params }),
 	byMonth: (params?: { year?: string; owner_id?: string; account_id?: string }) =>
 		request<MonthReport[]>('/reports/by-month', { params }),
 	trend: (params?: { from?: string; to?: string; group_by?: string; owner_id?: string; account_id?: string }) =>
-		request<TrendReport[]>('/reports/trend', { params })
+		request<TrendReport[]>('/reports/trend', { params }),
+	summary: (params?: { q?: string; from?: string; to?: string; category_id?: string; owner_id?: string; account_id?: string }) =>
+		request<SearchSummary[]>('/reports/summary', { params })
 };
 
 // Shared access — one row per (guest, account) pair.

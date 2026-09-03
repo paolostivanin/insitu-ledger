@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.insituledger.app.ui.theme.AppSpacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.data.local.db.dao.CurrencySummaryRow
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AmountText
 import com.insituledger.app.ui.common.ColorUtils
@@ -80,6 +81,20 @@ private fun SummaryView(
             contentPadding = PaddingValues(AppSpacing.screenPadding),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
         ) {
+            // Group by: leaf category or rolled up into parent categories
+            item {
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().animateItem()) {
+                    CategoryGrouping.entries.forEachIndexed { index, grouping ->
+                        SegmentedButton(
+                            selected = uiState.grouping == grouping,
+                            onClick = { viewModel.setGrouping(grouping) },
+                            shape = SegmentedButtonDefaults.itemShape(index, CategoryGrouping.entries.size),
+                            label = { Text(groupingLabel(grouping)) }
+                        )
+                    }
+                }
+            }
+
             // Date range chips
             item {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm), modifier = Modifier.animateItem()) {
@@ -215,6 +230,54 @@ private fun SummaryView(
                 ) {
                     SummaryCard("Income", uiState.totalIncome, semanticColors.income, Modifier.weight(1f))
                     SummaryCard("Expenses", uiState.totalExpense, semanticColors.expense, Modifier.weight(1f))
+                }
+            }
+
+            // Search summary. Deliberately all-dates and independent of the
+            // range chips above: you look a trip up months after it ended, and
+            // the THIS_MONTH default would silently return nothing.
+            item {
+                Column(modifier = Modifier.fillMaxWidth().animateItem()) {
+                    Text(
+                        "Search Summary",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = AppSpacing.sectionGap, bottom = AppSpacing.sm)
+                    )
+                    OutlinedTextField(
+                        value = uiState.searchQuery,
+                        onValueChange = { viewModel.setSearchQuery(it) },
+                        label = { Text("Search descriptions") },
+                        placeholder = { Text("e.g. valencia") },
+                        supportingText = { Text("Totals across all dates, ignoring the range above") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            if (uiState.searchQuery.isNotBlank()) {
+                if (uiState.isSearching) {
+                    item {
+                        Text(
+                            "Searching…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                } else if (uiState.searchSummary.isEmpty()) {
+                    item {
+                        Text(
+                            "No transactions match \"${uiState.searchQuery.trim()}\".",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                } else {
+                    items(uiState.searchSummary, key = { it.currency }) { row ->
+                        SearchSummaryCard(row, modifier = Modifier.animateItem())
+                    }
                 }
             }
 
@@ -356,6 +419,65 @@ private fun DrillDownTransactionRow(txn: Transaction, modifier: Modifier = Modif
     }
 }
 
+// One card per currency: money in, money out and the net. Formatted with the
+// row's own currency rather than the user's display symbol — labelling a USD
+// total with a euro sign would be worse than useless.
+@Composable
+private fun SearchSummaryCard(row: CurrencySummaryRow, modifier: Modifier = Modifier) {
+    val semanticColors = LocalSemanticColors.current
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth().padding(AppSpacing.lg)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    row.currency,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    if (row.count == 1) "1 transaction" else "${row.count} transactions",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(AppSpacing.sm))
+            SearchSummaryLine("In", CurrencyFormatter.format(row.income, row.currency), semanticColors.income)
+            SearchSummaryLine("Out", CurrencyFormatter.format(row.expense, row.currency), semanticColors.expense)
+            HorizontalDivider(modifier = Modifier.padding(vertical = AppSpacing.xs))
+            SearchSummaryLine(
+                "Net",
+                CurrencyFormatter.format(row.net, row.currency),
+                if (row.net >= 0) semanticColors.income else semanticColors.expense,
+                bold = true
+            )
+        }
+    }
+}
+
+@Composable
+private fun SearchSummaryLine(label: String, value: String, color: Color, bold: Boolean = false) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+            color = color
+        )
+    }
+}
+
 @Composable
 private fun SummaryCard(title: String, amount: Double, color: Color, modifier: Modifier = Modifier) {
     Card(modifier = modifier) {
@@ -380,6 +502,11 @@ private fun presetLabel(preset: DateRangePreset): String = when (preset) {
     DateRangePreset.LAST_3_MONTHS -> "Last 3 Months"
     DateRangePreset.LAST_YEAR -> "Last Year"
     DateRangePreset.CUSTOM -> "Custom"
+}
+
+private fun groupingLabel(grouping: CategoryGrouping): String = when (grouping) {
+    CategoryGrouping.CATEGORY -> "By Category"
+    CategoryGrouping.PARENT -> "By Parent"
 }
 
 

@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.22.0"
+  version: "1.23.0"
 
 servers:
   - url: /api
@@ -498,6 +498,25 @@ components:
                 deprecated: true
                 description: Always "write" since v1.15.0.
 
+    SearchSummary:
+      type: object
+      properties:
+        currency:
+          type: string
+          example: EUR
+        income:
+          type: number
+          description: Sum of matching income transactions (positive).
+        expense:
+          type: number
+          description: Sum of matching expense transactions (positive).
+        net:
+          type: number
+          description: income - expense; negative when you spent more than came back.
+        count:
+          type: integer
+          description: Number of matching transactions in this currency.
+
     CategoryReport:
       type: object
       properties:
@@ -506,6 +525,19 @@ components:
         category_name:
           type: string
         category_color:
+          type: string
+          nullable: true
+        parent_id:
+          type: integer
+          nullable: true
+          description: >-
+            Parent category id, or null for a top-level category. Also null when
+            the parent has been soft-deleted, so clients can safely roll totals
+            up on `parent_id ?? category_id`.
+        parent_name:
+          type: string
+          nullable: true
+        parent_color:
           type: string
           nullable: true
         type:
@@ -1284,6 +1316,56 @@ paths:
                       clients may ignore this field.
                     items:
                       type: integer
+
+  /reports/summary:
+    get:
+      tags: [Reports]
+      summary: Money in / out / net for a free-text search
+      description: >-
+        Totals the transactions matching a description search and the usual
+        date/category filters. Grouped by currency, so a trip that mixed
+        currencies returns one row per currency rather than a meaningless
+        combined sum. Omitting `q` summarises everything the other filters
+        match.
+      parameters:
+        - name: q
+          in: query
+          description: Case-insensitive infix match on description, as on GET /transactions.
+          schema:
+            type: string
+            maxLength: 200
+        - name: owner_id
+          in: query
+          schema:
+            type: integer
+        - name: account_id
+          in: query
+          schema:
+            type: integer
+        - name: category_id
+          in: query
+          description: Expanded to include the category's direct children.
+          schema:
+            type: integer
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: One row per currency, dominant currency first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SearchSummary"
 
   /reports/by-category:
     get:
