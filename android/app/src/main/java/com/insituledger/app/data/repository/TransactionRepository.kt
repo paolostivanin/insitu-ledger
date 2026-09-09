@@ -269,8 +269,8 @@ class TransactionRepository @Inject constructor(
     suspend fun getCategoryBreakdown(from: String?, to: String?): List<CategoryBreakdownRow> =
         transactionDao.getCategoryBreakdown(from, to)
 
-    suspend fun searchSummary(query: String): List<CurrencySummaryRow> =
-        transactionDao.searchSummary(escapeLike(query.trim()))
+    suspend fun searchSummary(query: String, from: String? = null, to: String? = null): List<CurrencySummaryRow> =
+        transactionDao.searchSummary(escapeLike(query.trim()), from, to)
 
     // % and _ are LIKE wildcards; a user typing one means the character, not
     // "match anything". Paired with ESCAPE '\' in the DAO query.

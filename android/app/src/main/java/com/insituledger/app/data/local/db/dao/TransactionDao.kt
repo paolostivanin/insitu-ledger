@@ -149,6 +149,7 @@ interface TransactionDao {
     // escapes % and _ so a typed wildcard matches literally). No COLLATE: LIKE
     // is already ASCII-case-insensitive in SQLite unless case_sensitive_like is
     // set, and a COLLATE after ESCAPE would bind to the escape character.
+    // Null bounds mean unbounded, so an all-time search stays one query.
     @Query("""
         SELECT currency,
                COALESCE(SUM(CASE WHEN type = 'income' THEN amount END), 0) AS income,
@@ -157,10 +158,12 @@ interface TransactionDao {
         FROM transactions
         WHERE deleted_at IS NULL
         AND description LIKE '%' || :query || '%' ESCAPE '\'
+        AND (:from IS NULL OR date >= :from)
+        AND (:to IS NULL OR SUBSTR(date, 1, 10) <= :to)
         GROUP BY currency
         ORDER BY SUM(amount) DESC, currency ASC
     """)
-    suspend fun searchSummary(query: String): List<CurrencySummaryRow>
+    suspend fun searchSummary(query: String, from: String?, to: String?): List<CurrencySummaryRow>
 }
 
 data class MonthlySummary(

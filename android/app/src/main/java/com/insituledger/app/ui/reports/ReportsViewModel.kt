@@ -10,9 +10,11 @@ import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.Transaction
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
@@ -27,7 +29,16 @@ data class CategorySummary(
     val total: Double
 )
 
-enum class DateRangePreset { THIS_WEEK, THIS_MONTH, LAST_WEEK, LAST_MONTH, LAST_3_MONTHS, LAST_YEAR, CUSTOM }
+/**
+ * Declared in the order the chips are drawn — the chip row iterates `entries`,
+ * so this list *is* the ordering. Nothing persists the ordinal, so it is safe
+ * to reorder when adding a preset.
+ */
+enum class DateRangePreset {
+    THIS_WEEK, THIS_MONTH, THIS_YEAR,
+    LAST_WEEK, LAST_MONTH, LAST_3_MONTHS, LAST_YEAR,
+    ALL_TIME, CUSTOM
+}
 
 enum class CategoryGrouping { CATEGORY, PARENT }
 
@@ -121,6 +132,9 @@ class ReportsViewModel @Inject constructor(
             weekStart.collect { day ->
                 weekStartDay = day
                 loadReport()
+                // Moves the THIS_WEEK / LAST_WEEK bounds, so an active search
+                // has to be re-run against them too.
+                runSearch(debounce = false)
             }
         }
     }
@@ -128,6 +142,7 @@ class ReportsViewModel @Inject constructor(
     fun setDateRangePreset(preset: DateRangePreset) {
         _uiState.update { it.copy(dateRangePreset = preset) }
         viewModelScope.launch { loadReport() }
+        runSearch(debounce = false)
     }
 
     fun setGrouping(grouping: CategoryGrouping) {
@@ -138,30 +153,63 @@ class ReportsViewModel @Inject constructor(
     /**
      * Free-text search over transaction descriptions, totalled per currency.
      *
-     * Deliberately all-time and independent of the date-range preset above:
-     * you look a trip up months after it ended, and the default THIS_MONTH
-     * would silently return nothing.
+     * Scoped by the same date preset as the charts — one date control drives
+     * the whole screen. Looking up a trip that ended months ago is the case
+     * that motivated an all-time search, and it is handled by the ALL_TIME
+     * preset plus the "Search all dates" button on the empty state.
      */
     fun setSearchQuery(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
+        runSearch(debounce = true)
+    }
+
+    fun setCustomDateRange(from: String, to: String) {
+        // A backwards range matches nothing and reads as "no results" rather
+        // than "you filled the fields in the wrong order", so take it as meant.
+        val reversed = from.isNotBlank() && to.isNotBlank() && from > to
+        val start = if (reversed) to else from
+        val end = if (reversed) from else to
+        _uiState.update {
+            it.copy(customFrom = start, customTo = end, dateRangePreset = DateRangePreset.CUSTOM)
+        }
+        viewModelScope.launch { loadReport() }
+        runSearch(debounce = false)
+    }
+
+    /**
+     * Run (or re-run) the search summary for the current query and date range.
+     *
+     * Debounced only when driven by typing — a chip tap is a single deliberate
+     * action, so it queries straight away.
+     */
+    private fun runSearch(debounce: Boolean) {
         searchJob?.cancel()
-        if (query.isBlank()) {
+        if (_uiState.value.searchQuery.isBlank()) {
             // Clear straight away rather than after the debounce — a stale
             // total under an empty box reads as a result for "everything".
+            // Also keeps a blank query out of the DB, where it would become
+            // LIKE '%%' and total the whole table.
             _uiState.update { it.copy(searchSummary = emptyList(), isSearching = false) }
             return
         }
         _uiState.update { it.copy(isSearching = true) }
         searchJob = viewModelScope.launch {
-            delay(SEARCH_DEBOUNCE_MS)
-            val rows = transactionRepository.searchSummary(query)
-            _uiState.update { it.copy(searchSummary = rows, isSearching = false) }
+            if (debounce) delay(SEARCH_DEBOUNCE_MS)
+            // Read both after the delay: a chip tap mid-debounce must not pair
+            // a stale bound with a fresh term.
+            val query = _uiState.value.searchQuery
+            val (from, to) = resolveDateRange()
+            try {
+                val rows = transactionRepository.searchSummary(query, from, to)
+                ensureActive()
+                _uiState.update { it.copy(searchSummary = rows, isSearching = false) }
+            } catch (e: CancellationException) {
+                // A newer search is already in flight and owns the flag.
+                throw e
+            } catch (_: Exception) {
+                _uiState.update { it.copy(searchSummary = emptyList(), isSearching = false) }
+            }
         }
-    }
-
-    fun setCustomDateRange(from: String, to: String) {
-        _uiState.update { it.copy(customFrom = from, customTo = to, dateRangePreset = DateRangePreset.CUSTOM) }
-        viewModelScope.launch { loadReport() }
     }
 
     fun selectCategory(category: Category) {
@@ -211,40 +259,61 @@ class ReportsViewModel @Inject constructor(
 
     private fun resolveDateRange(): Pair<String?, String?> {
         val state = _uiState.value
-        val now = LocalDate.now()
-        val fmt = DateTimeFormatter.ISO_LOCAL_DATE
-        return when (state.dateRangePreset) {
-            DateRangePreset.THIS_WEEK -> {
-                val weekStart = now.with(TemporalAdjusters.previousOrSame(weekStartDay))
-                weekStart.format(fmt) to now.format(fmt)
-            }
-            DateRangePreset.THIS_MONTH -> {
-                now.withDayOfMonth(1).format(fmt) to now.format(fmt)
-            }
-            DateRangePreset.LAST_WEEK -> {
-                val thisWeekStart = now.with(TemporalAdjusters.previousOrSame(weekStartDay))
-                val lastWeekStart = thisWeekStart.minusWeeks(1)
-                val lastWeekEnd = thisWeekStart.minusDays(1)
-                lastWeekStart.format(fmt) to lastWeekEnd.format(fmt)
-            }
-            DateRangePreset.LAST_MONTH -> {
-                val lastMonth = YearMonth.from(now).minusMonths(1)
-                lastMonth.atDay(1).format(fmt) to lastMonth.atEndOfMonth().format(fmt)
-            }
-            DateRangePreset.LAST_3_MONTHS -> {
-                val threeMonthsAgo = YearMonth.from(now).minusMonths(3)
-                val lastMonth = YearMonth.from(now).minusMonths(1)
-                threeMonthsAgo.atDay(1).format(fmt) to lastMonth.atEndOfMonth().format(fmt)
-            }
-            DateRangePreset.LAST_YEAR -> {
-                val lastYear = now.year - 1
-                LocalDate.of(lastYear, 1, 1).format(fmt) to LocalDate.of(lastYear, 12, 31).format(fmt)
-            }
-            DateRangePreset.CUSTOM -> {
-                val from = state.customFrom.ifBlank { null }
-                val to = state.customTo.ifBlank { null }
-                from to to
-            }
+        return resolveRange(state.dateRangePreset, state.customFrom, state.customTo, weekStartDay)
+    }
+}
+
+/**
+ * Resolve a preset to the bare `YYYY-MM-DD` bounds the queries expect. Both
+ * bounds are inclusive; `null` means unbounded.
+ *
+ * The "this …" presets stop at today rather than at the end of the period, the
+ * same way the web does (`frontend/src/lib/reportPeriod.ts`). Future-dated rows
+ * — only reachable by editing a date forward, CSV import or restore, since the
+ * create path converts them to scheduled entries — therefore fall outside them
+ * and show up under ALL_TIME.
+ *
+ * Pure and top-level so it can be tested without Hilt or a Room instance.
+ */
+internal fun resolveRange(
+    preset: DateRangePreset,
+    customFrom: String,
+    customTo: String,
+    weekStart: DayOfWeek,
+    today: LocalDate = LocalDate.now()
+): Pair<String?, String?> {
+    val fmt = DateTimeFormatter.ISO_LOCAL_DATE
+    return when (preset) {
+        DateRangePreset.THIS_WEEK -> {
+            val weekStartDate = today.with(TemporalAdjusters.previousOrSame(weekStart))
+            weekStartDate.format(fmt) to today.format(fmt)
         }
+        DateRangePreset.THIS_MONTH -> {
+            today.withDayOfMonth(1).format(fmt) to today.format(fmt)
+        }
+        DateRangePreset.THIS_YEAR -> {
+            LocalDate.of(today.year, 1, 1).format(fmt) to today.format(fmt)
+        }
+        DateRangePreset.LAST_WEEK -> {
+            val thisWeekStart = today.with(TemporalAdjusters.previousOrSame(weekStart))
+            val lastWeekStart = thisWeekStart.minusWeeks(1)
+            val lastWeekEnd = thisWeekStart.minusDays(1)
+            lastWeekStart.format(fmt) to lastWeekEnd.format(fmt)
+        }
+        DateRangePreset.LAST_MONTH -> {
+            val lastMonth = YearMonth.from(today).minusMonths(1)
+            lastMonth.atDay(1).format(fmt) to lastMonth.atEndOfMonth().format(fmt)
+        }
+        DateRangePreset.LAST_3_MONTHS -> {
+            val threeMonthsAgo = YearMonth.from(today).minusMonths(3)
+            val lastMonth = YearMonth.from(today).minusMonths(1)
+            threeMonthsAgo.atDay(1).format(fmt) to lastMonth.atEndOfMonth().format(fmt)
+        }
+        DateRangePreset.LAST_YEAR -> {
+            val lastYear = today.year - 1
+            LocalDate.of(lastYear, 1, 1).format(fmt) to LocalDate.of(lastYear, 12, 31).format(fmt)
+        }
+        DateRangePreset.ALL_TIME -> null to null
+        DateRangePreset.CUSTOM -> customFrom.ifBlank { null } to customTo.ifBlank { null }
     }
 }

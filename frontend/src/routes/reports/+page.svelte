@@ -42,8 +42,9 @@
 	];
 
 	// Search summary: total up everything whose description matches a term —
-	// a trip, a project, a person. Deliberately all-time and independent of the
-	// category period above: you look this up months after the trip ended.
+	// a trip, a project, a person. Scoped by the same period as the category
+	// chart: one date control for the page. Looking a trip up months after it
+	// ended is the "All time" preset, one click away from the empty state.
 	const SEARCH_DEBOUNCE_MS = 300;
 	const MAX_SEARCH_LEN = 200; // mirrors maxSearchLen in the backend
 
@@ -54,6 +55,21 @@
 	let searchTimer: ReturnType<typeof setTimeout>;
 	// Bumped per request so a slow early response can't overwrite a later one.
 	let searchSeq = 0;
+
+	// The active period as a phrase that slots straight into a sentence ("…
+	// matches, this year", "No transactions match “x” between A and B"), or
+	// null when it covers everything — an unbounded custom range is all dates
+	// however the select is labelled.
+	const periodPhrase = $derived.by(() => {
+		if (categoryPeriod === 'all') return null;
+		if (categoryPeriod === 'custom') {
+			if (!categoryFrom && !categoryTo) return null;
+			if (!categoryFrom) return `on or before ${categoryTo}`;
+			if (!categoryTo) return `on or after ${categoryFrom}`;
+			return `between ${categoryFrom} and ${categoryTo}`;
+		}
+		return PERIOD_LABELS[categoryPeriod].toLowerCase();
+	});
 
 	let pieChartEl: HTMLDivElement;
 	let barChartEl: HTMLDivElement;
@@ -171,6 +187,20 @@
 		renderTrend();
 	}
 
+	// The period drives the category chart and the search summary alike, so one
+	// control changes both. Clearing the debounce matters: searchSeq discards a
+	// stale response, but a queued timer would still fire a second request.
+	function onPeriodChange() {
+		clearTimeout(searchTimer);
+		void loadCategory();
+		void loadSearch();
+	}
+
+	function searchAllDates() {
+		categoryPeriod = 'all';
+		onPeriodChange();
+	}
+
 	function onSearchInput() {
 		clearTimeout(searchTimer);
 		if (searchQuery.trim() === '') {
@@ -192,8 +222,9 @@
 		if (q === '') return;
 		const seq = ++searchSeq;
 		searchLoading = true;
+		const { from, to } = resolvePeriod(categoryPeriod, categoryFrom, categoryTo);
 		try {
-			const rows = await reports.summary({ q, owner_id: $sharedOwnerUserId || undefined });
+			const rows = await reports.summary({ q, from, to, owner_id: $sharedOwnerUserId || undefined });
 			if (seq !== searchSeq) return;
 			searchSummary = rows;
 			searchError = '';
@@ -305,8 +336,8 @@
 				</select>
 			</div>
 			<div class="form-group">
-				<label for="cperiod">Category Period</label>
-				<select id="cperiod" bind:value={categoryPeriod} onchange={() => loadCategory()}>
+				<label for="cperiod">Period</label>
+				<select id="cperiod" bind:value={categoryPeriod} onchange={onPeriodChange}>
 					{#each periodPresets as preset}
 						<option value={preset}>{PERIOD_LABELS[preset]}</option>
 					{/each}
@@ -314,12 +345,12 @@
 			</div>
 			{#if categoryPeriod === 'custom'}
 				<div class="form-group">
-					<label for="cfrom">Category From</label>
-					<input id="cfrom" type="date" bind:value={categoryFrom} onchange={() => loadCategory()} />
+					<label for="cfrom">Period From</label>
+					<input id="cfrom" type="date" bind:value={categoryFrom} onchange={onPeriodChange} />
 				</div>
 				<div class="form-group">
-					<label for="cto">Category To</label>
-					<input id="cto" type="date" bind:value={categoryTo} onchange={() => loadCategory()} />
+					<label for="cto">Period To</label>
+					<input id="cto" type="date" bind:value={categoryTo} onchange={onPeriodChange} />
 				</div>
 			{/if}
 			<div class="form-group">
@@ -349,7 +380,10 @@
 		<div class="search-head">
 			<div>
 				<h2>Search Summary</h2>
-				<p class="search-sub">Totals every transaction whose description matches, across all dates.</p>
+				<p class="search-sub">
+					Totals every transaction whose description matches, {periodPhrase ??
+						'across all dates'}.
+				</p>
 			</div>
 			<input
 				type="search"
@@ -371,7 +405,18 @@
 		{:else if searchLoading}
 			<p class="search-hint">Searching…</p>
 		{:else if searchSummary.length === 0}
-			<p class="search-hint">No transactions match “{searchQuery.trim()}”.</p>
+			{#if periodPhrase}
+				<p class="search-hint">
+					No transactions match “{searchQuery.trim()}” {periodPhrase}.
+					<!-- The term may well match outside the period, which is the whole
+					     point of looking a past trip up. Widening is one click. -->
+					<button type="button" class="link-btn" onclick={searchAllDates}>
+						Search all dates
+					</button>
+				</p>
+			{:else}
+				<p class="search-hint">No transactions match “{searchQuery.trim()}”.</p>
+			{/if}
 		{:else}
 			<table>
 				<thead>
@@ -448,6 +493,18 @@
 		margin: 0;
 		color: var(--text-muted);
 		font-size: 0.9rem;
+	}
+
+	/* Sits inline at the end of the empty-state sentence, so it reads as part
+	   of the prose rather than as a second call to action. */
+	.link-btn {
+		padding: 0;
+		border: 0;
+		background: none;
+		color: var(--primary);
+		font: inherit;
+		text-decoration: underline;
+		cursor: pointer;
 	}
 	.num {
 		text-align: right;

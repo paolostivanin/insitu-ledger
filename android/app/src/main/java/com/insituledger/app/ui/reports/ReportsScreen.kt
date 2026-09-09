@@ -95,16 +95,14 @@ private fun SummaryView(
                 }
             }
 
-            // Date range chips
+            // Date range chips. One control for the whole page: the summary
+            // cards, the category breakdown and the search below all read it.
             item {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm), modifier = Modifier.animateItem()) {
                     DateRangePreset.entries.forEach { preset ->
                         FilterChip(
                             selected = uiState.dateRangePreset == preset,
-                            onClick = {
-                                if (preset != DateRangePreset.CUSTOM) viewModel.setDateRangePreset(preset)
-                                else viewModel.setDateRangePreset(DateRangePreset.CUSTOM)
-                            },
+                            onClick = { viewModel.setDateRangePreset(preset) },
                             label = { Text(presetLabel(preset)) }
                         )
                     }
@@ -233,10 +231,11 @@ private fun SummaryView(
                 }
             }
 
-            // Search summary. Deliberately all-dates and independent of the
-            // range chips above: you look a trip up months after it ended, and
-            // the THIS_MONTH default would silently return nothing.
+            // Search summary, scoped by the range chips above like everything
+            // else on the page. Looking a trip up months after it ended is the
+            // All Time chip, one tap away from the empty state below.
             item {
+                val phrase = periodPhrase(uiState)
                 Column(modifier = Modifier.fillMaxWidth().animateItem()) {
                     Text(
                         "Search Summary",
@@ -248,7 +247,9 @@ private fun SummaryView(
                         onValueChange = { viewModel.setSearchQuery(it) },
                         label = { Text("Search descriptions") },
                         placeholder = { Text("e.g. valencia") },
-                        supportingText = { Text("Totals across all dates, ignoring the range above") },
+                        supportingText = {
+                            Text(if (phrase == null) "Totals across all dates" else "Totals $phrase")
+                        },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -267,12 +268,24 @@ private fun SummaryView(
                     }
                 } else if (uiState.searchSummary.isEmpty()) {
                     item {
-                        Text(
-                            "No transactions match \"${uiState.searchQuery.trim()}\".",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.animateItem()
-                        )
+                        val phrase = periodPhrase(uiState)
+                        Column(modifier = Modifier.animateItem()) {
+                            Text(
+                                if (phrase == null) "No transactions match \"${uiState.searchQuery.trim()}\"."
+                                else "No transactions match \"${uiState.searchQuery.trim()}\" $phrase.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            // The term may well match something outside the
+                            // range, which is the whole point of looking a past
+                            // trip up. Widening is one tap, not a hunt.
+                            if (phrase != null) {
+                                TextButton(
+                                    onClick = { viewModel.setDateRangePreset(DateRangePreset.ALL_TIME) },
+                                    contentPadding = PaddingValues(0.dp)
+                                ) { Text("Search all dates") }
+                            }
+                        }
                     }
                 } else {
                     items(uiState.searchSummary, key = { it.currency }) { row ->
@@ -497,11 +510,29 @@ private fun SummaryCard(title: String, amount: Double, color: Color, modifier: M
 private fun presetLabel(preset: DateRangePreset): String = when (preset) {
     DateRangePreset.THIS_WEEK -> "This Week"
     DateRangePreset.THIS_MONTH -> "This Month"
+    DateRangePreset.THIS_YEAR -> "This Year"
     DateRangePreset.LAST_WEEK -> "Last Week"
     DateRangePreset.LAST_MONTH -> "Last Month"
     DateRangePreset.LAST_3_MONTHS -> "Last 3 Months"
     DateRangePreset.LAST_YEAR -> "Last Year"
+    DateRangePreset.ALL_TIME -> "All Time"
     DateRangePreset.CUSTOM -> "Custom"
+}
+
+/**
+ * The active range as a phrase that slots straight into a sentence ("Totals
+ * this year", "No transactions match "x" between A and B"), or null when it
+ * covers everything — an unbounded CUSTOM is all dates however the chip reads.
+ */
+private fun periodPhrase(state: ReportsUiState): String? = when (state.dateRangePreset) {
+    DateRangePreset.ALL_TIME -> null
+    DateRangePreset.CUSTOM -> when {
+        state.customFrom.isBlank() && state.customTo.isBlank() -> null
+        state.customFrom.isBlank() -> "on or before ${state.customTo}"
+        state.customTo.isBlank() -> "on or after ${state.customFrom}"
+        else -> "between ${state.customFrom} and ${state.customTo}"
+    }
+    else -> presetLabel(state.dateRangePreset).lowercase()
 }
 
 private fun groupingLabel(grouping: CategoryGrouping): String = when (grouping) {
