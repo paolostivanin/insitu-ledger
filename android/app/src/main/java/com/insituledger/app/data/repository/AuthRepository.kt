@@ -73,10 +73,11 @@ class AuthRepository @Inject constructor(
         return try {
             val response = authApi.changePassword(ChangePasswordRequest(currentPassword, newPassword))
             if (response.isSuccessful) {
-                prefs.saveLoginData(
-                    userId = 0, name = "", isAdmin = false,
-                    forcePasswordChange = false, totpEnabled = false
-                )
+                // The server revoked this token too. Retain the local ledger
+                // and sync configuration, but stop advertising a live session.
+                // Settings consumes its own navigation event; avoid also
+                // offering a second Log in action in the global snackbar.
+                prefs.clearAuthSession("Password changed. Sign in with your new password.", notifyLogout = false)
                 Result.success(Unit)
             } else {
                 Result.failure(Exception(response.errorBody()?.string()))

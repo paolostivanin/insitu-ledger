@@ -44,6 +44,13 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    LaunchedEffect(uiState.passwordChanged) {
+        if (uiState.passwordChanged) {
+            viewModel.clearPasswordChanged()
+            onConnectWebapp?.invoke()
+        }
+    }
+
     // SAF launcher for auto backup folder
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()

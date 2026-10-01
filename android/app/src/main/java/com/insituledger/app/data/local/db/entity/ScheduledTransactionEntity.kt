@@ -26,5 +26,6 @@ data class ScheduledTransactionEntity(
     @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,
     @ColumnInfo(name = "sync_version") val syncVersion: Long = 0,
     @ColumnInfo(name = "is_local_only") val isLocalOnly: Boolean = false,
-    @ColumnInfo(name = "created_by_user_id") val createdByUserId: Long? = null
+    @ColumnInfo(name = "created_by_user_id") val createdByUserId: Long? = null,
+    @ColumnInfo(name = "created_by_name") val createdByName: String? = null
 )

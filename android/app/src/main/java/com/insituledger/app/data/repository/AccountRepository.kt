@@ -1,5 +1,7 @@
 package com.insituledger.app.data.repository
 
+import androidx.room.withTransaction
+import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.dao.AccountDao
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
@@ -26,7 +28,8 @@ class AccountRepository @Inject constructor(
     private val accountApi: AccountApi,
     private val gson: Gson,
     private val syncManager: SyncManager,
-    private val prefs: UserPreferences
+    private val prefs: UserPreferences,
+    private val database: AppDatabase
 ) {
     private fun isSyncEnabled() = prefs.getSyncModeImmediate() == "webapp"
 
@@ -102,17 +105,31 @@ class AccountRepository @Inject constructor(
 
     suspend fun delete(id: Long) {
         val existing = accountDao.getById(id) ?: return
-        accountDao.upsert(existing.copy(deletedAt = "deleted"))
-
-        if (isSyncEnabled()) {
-            pendingOpDao.insert(PendingOperationEntity(
-                entityType = "account",
-                operation = "DELETE",
-                entityId = id,
-                serverId = if (id > 0) id else null
-            ))
-            syncManager.triggerImmediateSync()
+        val syncEnabled = isSyncEnabled()
+        database.withTransaction {
+            // Cancel child writes before their rows are tombstoned. The server
+            // cascades the parent DELETE, so no child DELETEs are needed.
+            for (txnId in database.transactionDao().selectIdsByAccountId(id)) {
+                pendingOpDao.deleteByEntity("transaction", txnId)
+            }
+            for (scheduledId in database.scheduledTransactionDao().selectIdsByAccountId(id)) {
+                pendingOpDao.deleteByEntity("scheduled", scheduledId)
+            }
+            database.transactionDao().softDeleteByAccountId(id)
+            database.scheduledTransactionDao().softDeleteByAccountId(id)
+            accountDao.upsert(existing.copy(deletedAt = "deleted"))
+            if (syncEnabled) {
+                // Keep an unsynced parent's CREATE: its subsequent DELETE will
+                // receive the server ID through the normal remapping path.
+                pendingOpDao.insert(PendingOperationEntity(
+                    entityType = "account", operation = "DELETE", entityId = id,
+                    serverId = if (id > 0) id else null
+                ))
+            } else if (existing.isLocalOnly) {
+                pendingOpDao.deleteByEntity("account", id)
+            }
         }
+        if (syncEnabled) syncManager.triggerImmediateSync()
     }
 
     private fun AccountEntity.toDomain() = Account(

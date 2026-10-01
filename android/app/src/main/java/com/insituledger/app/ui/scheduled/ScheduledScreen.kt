@@ -12,8 +12,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EventRepeat
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,6 +22,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.ScheduledTransaction
+import com.insituledger.app.ui.common.entryAttribution
+import com.insituledger.app.ui.common.LocalSnackbarHostState
+import kotlinx.coroutines.launch
 import com.insituledger.app.ui.common.AmountText
 import com.insituledger.app.ui.common.AppCard
 import com.insituledger.app.ui.common.EmptyState
@@ -40,6 +42,34 @@ fun ScheduledScreen(
     viewModel: ScheduledViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    val scope = rememberCoroutineScope()
+    val snackbar = LocalSnackbarHostState.current
+    var deleteTarget by remember { mutableStateOf<ScheduledTransaction?>(null) }
+    var deleting by remember { mutableStateOf(false) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { if (!deleting) deleteTarget = null },
+            title = { Text("Delete scheduled entry?") },
+            text = { Column {
+                Text("Delete \"${target.description?.takeIf { it.isNotBlank() } ?: target.type}\"?")
+                deleteError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            } },
+            confirmButton = { TextButton(enabled = !deleting, onClick = {
+                deleting = true
+                scope.launch {
+                    viewModel.delete(target.id).fold(
+                        onSuccess = { deleteTarget = null },
+                        onFailure = { deleteError = it.message ?: "Could not delete scheduled entry" }
+                    )
+                    deleting = false
+                    if (deleteTarget == null) snackbar.showSnackbar("Scheduled entry deleted")
+                }
+            }) { Text(if (deleting) "Deleting…" else "Delete") } },
+            dismissButton = { TextButton(enabled = !deleting, onClick = { deleteTarget = null }) { Text("Cancel") } }
+        )
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("Scheduled") }) },
@@ -71,8 +101,12 @@ fun ScheduledScreen(
                     items(uiState.items, key = { it.id }) { item ->
                         ScheduledRow(
                             item = item,
+                            attribution = entryAttribution(
+                                uiState.accounts.find { it.id == item.accountId }?.isShared == true,
+                                item.createdByUserId, item.createdByName, uiState.currentUserId
+                            ),
                             onEdit = { onEditClick(item.id) },
-                            onDelete = { viewModel.delete(item.id) },
+                            onDelete = { deleteError = null; deleteTarget = item },
                             modifier = Modifier.animateItem()
                         )
                     }
@@ -85,6 +119,7 @@ fun ScheduledScreen(
 @Composable
 private fun ScheduledRow(
     item: ScheduledTransaction,
+    attribution: String?,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
@@ -153,6 +188,10 @@ private fun ScheduledRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2
                 )
+                attribution?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 if (item.maxOccurrences != null) {
                     Text(
                         text = "${item.occurrenceCount}/${item.maxOccurrences} occurrences",
@@ -164,10 +203,10 @@ private fun ScheduledRow(
             Column(horizontalAlignment = Alignment.End) {
                 AmountText(amount = item.amount, type = item.type)
                 Row {
-                    IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = onEdit, modifier = Modifier.size(48.dp)) {
                         Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(18.dp))
                     }
-                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
                         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                     }
                 }

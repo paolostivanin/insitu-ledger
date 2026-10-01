@@ -11,6 +11,7 @@
 	let showForm = $state(false);
 	let editId = $state<number | null>(null);
 	let error = $state('');
+	let loadError = $state('');
 	let submitting = $state(false);
 
 	let fName = $state('');
@@ -38,10 +39,20 @@
 		await load();
 	});
 
+	let loadSeq = 0;
 	async function load() {
+		const seq = ++loadSeq;
 		loading = true;
-		accts = await accounts.list($sharedOwnerUserId || undefined);
-		loading = false;
+		accts = [];
+		loadError = '';
+		try {
+			const rows = await accounts.list($sharedOwnerUserId || undefined);
+			if (seq === loadSeq) accts = rows;
+		} catch (e) {
+			if (seq === loadSeq) loadError = e instanceof Error ? e.message : 'Failed to load accounts.';
+		} finally {
+			if (seq === loadSeq) loading = false;
+		}
 	}
 
 	function isOwned(a: Account): boolean {
@@ -106,8 +117,10 @@
 		</button>
 	</div>
 
-	{#if error}
-		<p class="error-msg">{error}</p>
+	{#if error}<p class="error-msg" role="alert">{error}</p>{/if}
+	{#if loadError}
+		<p class="error-msg" role="alert">{loadError}</p>
+		<button class="btn-ghost" onclick={() => void load()}>Retry</button>
 	{/if}
 
 	{#if showForm}

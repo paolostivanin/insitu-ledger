@@ -30,6 +30,7 @@ class UserPreferences @Inject constructor(
         val IS_ADMIN = booleanPreferencesKey("is_admin")
         val FORCE_PASSWORD_CHANGE = booleanPreferencesKey("force_password_change")
         val TOTP_ENABLED = booleanPreferencesKey("totp_enabled")
+        val ATTRIBUTION_BACKFILLED = booleanPreferencesKey("attribution_backfilled")
         val LAST_SYNC_VERSION = longPreferencesKey("last_sync_version")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
@@ -58,6 +59,7 @@ class UserPreferences @Inject constructor(
         // observer (AppNavigation) has shown the "you've been signed out"
         // snackbar. Persisted so a 401 during background sync is still
         // surfaced the next time the user opens the app.
+        val AUTH_NOTICE = stringPreferencesKey("auth_notice")
         val AUTO_LOGOUT_PENDING = booleanPreferencesKey("auto_logout_pending")
     }
 
@@ -71,6 +73,7 @@ class UserPreferences @Inject constructor(
     val isAdminFlow: Flow<Boolean> = context.dataStore.data.map { it[IS_ADMIN] ?: false }
     val forcePasswordChangeFlow: Flow<Boolean> = context.dataStore.data.map { it[FORCE_PASSWORD_CHANGE] ?: false }
     val totpEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[TOTP_ENABLED] ?: false }
+    val attributionBackfilledFlow: Flow<Boolean> = context.dataStore.data.map { it[ATTRIBUTION_BACKFILLED] ?: false }
     val lastSyncVersionFlow: Flow<Long> = context.dataStore.data.map { it[LAST_SYNC_VERSION] ?: 0L }
     val themeModeFlow: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "system" }
     val biometricEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[BIOMETRIC_ENABLED] ?: false }
@@ -94,6 +97,7 @@ class UserPreferences @Inject constructor(
     val currencySymbolFlow: Flow<String> = context.dataStore.data.map { it[CURRENCY_SYMBOL] ?: DEFAULT_CURRENCY_SYMBOL }
     val allowCleartextHttpFlow: Flow<Boolean> = context.dataStore.data.map { it[ALLOW_CLEARTEXT_HTTP] ?: false }
     val dashboardHeroModeFlow: Flow<String> = context.dataStore.data.map { it[DASHBOARD_HERO_MODE] ?: "net_worth" }
+    val authNoticeFlow: Flow<String> = context.dataStore.data.map { it[AUTH_NOTICE] ?: "You've been signed out." }
     val autoLogoutPendingFlow: Flow<Boolean> = context.dataStore.data.map { it[AUTO_LOGOUT_PENDING] ?: false }
 
     suspend fun saveToken(token: String) {
@@ -116,6 +120,13 @@ class UserPreferences @Inject constructor(
 
     suspend fun saveLastSyncVersion(version: Long) {
         context.dataStore.edit { it[LAST_SYNC_VERSION] = version }
+    }
+
+    suspend fun saveSyncCheckpoint(version: Long, attributionBackfilled: Boolean) {
+        context.dataStore.edit {
+            it[LAST_SYNC_VERSION] = version
+            if (attributionBackfilled) it[ATTRIBUTION_BACKFILLED] = true
+        }
     }
 
     suspend fun saveThemeMode(mode: String) {
@@ -306,7 +317,8 @@ class UserPreferences @Inject constructor(
     //
     // AUTO_LOGOUT_PENDING is set here (and only here) so the UI observer can
     // tell silent auto-logout apart from an explicit Settings → Disconnect.
-    suspend fun clearAuthSession() {
+    // Password changes suppress this notice because Settings owns navigation.
+    suspend fun clearAuthSession(message: String = "You've been signed out.", notifyLogout: Boolean = true) {
         secureStore.remove(SecureStore.KEY_TOKEN)
         context.dataStore.edit { prefs ->
             prefs.remove(USER_ID)
@@ -315,8 +327,10 @@ class UserPreferences @Inject constructor(
             prefs.remove(FORCE_PASSWORD_CHANGE)
             prefs.remove(TOTP_ENABLED)
             prefs.remove(LAST_SYNC_VERSION)
+            prefs.remove(ATTRIBUTION_BACKFILLED)
             prefs.remove(SHARED_OWNER_ID)
-            prefs[AUTO_LOGOUT_PENDING] = true
+            prefs[AUTH_NOTICE] = message
+            prefs[AUTO_LOGOUT_PENDING] = notifyLogout
         }
     }
 

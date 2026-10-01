@@ -47,6 +47,9 @@ interface ScheduledTransactionDao {
     @Query("UPDATE scheduled_transactions SET category_id = :newId WHERE category_id = :oldId")
     suspend fun updateCategoryId(oldId: Long, newId: Long)
 
+    @Query("UPDATE scheduled_transactions SET deleted_at = 'deleted' WHERE account_id = :accountId AND deleted_at IS NULL")
+    suspend fun softDeleteByAccountId(accountId: Long)
+
     @Query("DELETE FROM scheduled_transactions WHERE account_id = :accountId")
     suspend fun deleteByAccountId(accountId: Long)
 

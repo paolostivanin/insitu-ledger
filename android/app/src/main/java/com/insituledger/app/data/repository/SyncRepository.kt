@@ -453,8 +453,9 @@ class SyncRepository @Inject constructor(
         }
     }
 
-    suspend fun pull(): Result<Unit> = try {
-        val data = fetchSyncData()
+    suspend fun pull(allowBackfill: Boolean = true): Result<Unit> = try {
+        val backfill = allowBackfill && !prefs.attributionBackfilledFlow.first()
+        val data = fetchSyncData(backfill)
         database.withTransaction {
             // Purge access-lost accounts before generic tombstone cleanup. The
             // dependent rows still exist here, so their queued operations can
@@ -486,7 +487,7 @@ class SyncRepository @Inject constructor(
             }
         }
 
-        prefs.saveLastSyncVersion(data.currentVersion)
+        prefs.saveSyncCheckpoint(data.currentVersion, backfill)
         Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)
@@ -506,9 +507,12 @@ class SyncRepository @Inject constructor(
         Result.failure(e)
     }
 
-    private suspend fun fetchSyncData(): SyncResponse {
+    private suspend fun fetchSyncData(backfill: Boolean = false): SyncResponse {
         val lastVersion = prefs.lastSyncVersionFlow.first()
-        val response = syncApi.sync(lastVersion)
+        // Existing installations cached creator IDs but discarded names. A full
+        // snapshot repairs them once; a failed pull leaves the flag unset.
+        val since = if (backfill) 0L else lastVersion
+        val response = syncApi.sync(since)
         if (!response.isSuccessful) {
             throw Exception("Sync failed: ${response.code()}")
         }
@@ -617,7 +621,7 @@ class SyncRepository @Inject constructor(
         val pullResult = when {
             // Permanent operations have left the active queue, so server truth
             // can be applied immediately and future syncs are not wedged.
-            pushError.transientCount == 0 -> pull()
+            pushError.transientCount == 0 -> pull(allowBackfill = false)
             // Preserve active transient edits, but never let them retain data
             // from an account whose access was revoked in the same batch.
             pushError.lostAccessCount > 0 -> pullAccessLossOnly()
@@ -645,7 +649,7 @@ class SyncRepository @Inject constructor(
         userId = userId, type = type, amount = amount, currency = currency,
         description = description, note = note, date = date, createdAt = createdAt,
         updatedAt = updatedAt, deletedAt = deletedAt, syncVersion = syncVersion,
-        createdByUserId = createdByUserId
+        createdByUserId = createdByUserId, createdByName = createdByName
     )
 
     private fun ScheduledTransactionDto.toEntity() = ScheduledTransactionEntity(
@@ -655,6 +659,6 @@ class SyncRepository @Inject constructor(
         active = active, maxOccurrences = maxOccurrences, occurrenceCount = occurrenceCount,
         createdAt = createdAt, updatedAt = updatedAt,
         deletedAt = deletedAt, syncVersion = syncVersion,
-        createdByUserId = createdByUserId
+        createdByUserId = createdByUserId, createdByName = createdByName
     )
 }

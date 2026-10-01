@@ -69,6 +69,7 @@ class SyncRepositoryTest {
 
     @Before
     fun setUp() {
+        coEvery { prefs.attributionBackfilledFlow } returns kotlinx.coroutines.flow.flowOf(true)
         queue.clear()
         nextOpId = 1L
         // Route Room's withTransaction block straight through so remap*Id
@@ -548,7 +549,7 @@ class SyncRepositoryTest {
         assertTrue(result.isFailure)
         assertEquals(PendingOperationEntity.STATE_FAILED, queue.single().state)
         coVerify(exactly = 1) { syncApi.sync(0L) }
-        coVerify(exactly = 1) { prefs.saveLastSyncVersion(1L) }
+        coVerify(exactly = 1) { prefs.saveSyncCheckpoint(1L, false) }
     }
 
     @Test
@@ -574,7 +575,7 @@ class SyncRepositoryTest {
 
         assertTrue(result.isFailure)
         coVerify(exactly = 1) { transactionDao.deleteByAccountId(7L) }
-        coVerify(exactly = 0) { prefs.saveLastSyncVersion(any()) }
+        coVerify(exactly = 0) { prefs.saveSyncCheckpoint(any(), any()) }
     }
 
     @Test
@@ -598,7 +599,7 @@ class SyncRepositoryTest {
 
         assertTrue("confirmed tombstone purge should remove the failed revoked op", queue.isEmpty())
         coVerify(exactly = 1) { syncApi.sync(5L) }
-        coVerify(exactly = 1) { prefs.saveLastSyncVersion(9L) }
+        coVerify(exactly = 1) { prefs.saveSyncCheckpoint(9L, false) }
     }
 
     @Test
@@ -880,4 +881,44 @@ class SyncRepositoryTest {
         assertEquals(1, ex.transientCount)
         assertTrue(ex.canRetry)
     }
+    @Test
+    fun fullBackfillCachesCreatorNamesAndCommitsCheckpoint() = runTest {
+        coEvery { prefs.attributionBackfilledFlow } returns kotlinx.coroutines.flow.flowOf(false)
+        coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(42L)
+        val transaction = com.insituledger.app.data.remote.dto.TransactionDto(
+            id = 1, accountId = 7, categoryId = 2, userId = 1, type = "expense",
+            amount = 10.0, currency = "EUR", description = "Food", date = "2026-10-01",
+            createdAt = "", updatedAt = "", deletedAt = null, syncVersion = 2,
+            createdByUserId = 3, createdByName = "Guest"
+        )
+        val scheduled = com.insituledger.app.data.remote.dto.ScheduledTransactionDto(
+            id = 2, accountId = 7, categoryId = 2, userId = 1, type = "expense",
+            amount = 10.0, currency = "EUR", description = "Rent", rrule = "FREQ=MONTHLY",
+            nextOccurrence = "2030-01-01", active = true,
+            createdAt = "", updatedAt = "", deletedAt = null, syncVersion = 3,
+            createdByUserId = 3, createdByName = "Guest"
+        )
+        coEvery { syncApi.sync(0L) } returns Response.success(
+            com.insituledger.app.data.remote.dto.SyncResponse(
+                currentVersion = 42, transactions = listOf(transaction), categories = emptyList(),
+                accounts = emptyList(), scheduledTransactions = listOf(scheduled)
+            )
+        )
+        assertTrue(newRepository().pull().isSuccess)
+        coVerify { transactionDao.upsertAll(match { it.single().createdByName == "Guest" && it.single().createdByUserId == 3L }) }
+        coVerify { scheduledDao.upsertAll(match { it.single().createdByName == "Guest" }) }
+        coVerify { prefs.saveSyncCheckpoint(42L, true) }
+    }
+
+    @Test
+    fun failedBackfillDoesNotCommitAndNextPullRetriesFullSnapshot() = runTest {
+        coEvery { prefs.attributionBackfilledFlow } returns kotlinx.coroutines.flow.flowOf(false)
+        coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(42L)
+        coEvery { syncApi.sync(0L) } returns errorBody(503)
+        assertTrue(newRepository().pull().isFailure)
+        assertTrue(newRepository().pull().isFailure)
+        coVerify(exactly = 2) { syncApi.sync(0L) }
+        coVerify(exactly = 0) { prefs.saveSyncCheckpoint(any(), any()) }
+    }
+
 }

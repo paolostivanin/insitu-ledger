@@ -88,9 +88,11 @@ interface TransactionDao {
     @Query("DELETE FROM transactions WHERE id = :id")
     suspend fun deleteById(id: Long)
 
-    // Hard-delete every transaction belonging to the given account. Used by
-    // SyncRepository.pull when the server tombstones a shared-account grant
-    // (revoked_account_ids).
+    // Hide dependent entries atomically with a local account deletion.
+    @Query("UPDATE transactions SET deleted_at = 'deleted' WHERE account_id = :accountId AND deleted_at IS NULL")
+    suspend fun softDeleteByAccountId(accountId: Long)
+
+    // Hard-delete dependents when sync reports a revoked account grant.
     @Query("DELETE FROM transactions WHERE account_id = :accountId")
     suspend fun deleteByAccountId(accountId: Long)
 

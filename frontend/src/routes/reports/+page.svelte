@@ -11,6 +11,10 @@
 
 	let echarts: typeof EChartsType;
 
+	let chartError = $state('');
+	let reportErrors = $state({ category: '', month: '', trend: '' });
+	let reportLoading = $state({ category: false, month: false, trend: false });
+	let categorySeq = 0, monthSeq = 0, trendSeq = 0;
 	let categoryData = $state<CategoryReport[]>([]);
 	let monthData = $state<MonthReport[]>([]);
 	let trendData = $state<TrendReport[]>([]);
@@ -75,9 +79,9 @@
 	let barChartEl: HTMLDivElement;
 	let trendChartEl: HTMLDivElement;
 
-	let pieChart: EChartsType.ECharts;
-	let barChart: EChartsType.ECharts;
-	let trendChart: EChartsType.ECharts;
+	let pieChart: EChartsType.ECharts | undefined;
+	let barChart: EChartsType.ECharts | undefined;
+	let trendChart: EChartsType.ECharts | undefined;
 	let themeTimer: ReturnType<typeof setTimeout>;
 
 	function getCssVar(name: string): string {
@@ -128,6 +132,8 @@
 	}
 
 	onDestroy(() => {
+		mounted = false;
+		categorySeq++; monthSeq++; trendSeq++; searchSeq++;
 		clearTimeout(themeTimer);
 		clearTimeout(searchTimer);
 		unsubTheme();
@@ -144,47 +150,94 @@
 		const oid = $sharedOwnerUserId;
 		if (mounted && oid !== prevOwnerId) {
 			prevOwnerId = oid;
+			categorySeq++; monthSeq++; trendSeq++;
+			categoryData = []; monthData = []; trendData = []; searchSummary = [];
+			searchSeq++;
+			clearTimeout(searchTimer);
+			renderPie(); renderBar(); renderTrend();
 			void loadAll();
 		}
 	});
 
-	onMount(async () => {
-		echarts = await import('echarts');
-
-		const echartsTheme = getEchartsTheme();
-		pieChart = echarts.init(pieChartEl, echartsTheme);
-		pieChart.on('click', handlePieClick);
-		barChart = echarts.init(barChartEl, echartsTheme);
-		trendChart = echarts.init(trendChartEl, echartsTheme);
-
+	onMount(() => {
 		window.addEventListener('resize', handleResize);
-
 		prevOwnerId = $sharedOwnerUserId;
 		mounted = true;
-		await loadAll();
+		void loadAll();
 	});
 
+	let initialization: Promise<void> | undefined;
+	async function initializeCharts() {
+		if (pieChart && barChart && trendChart) return;
+		if (!initialization) initialization = (async () => {
+			echarts = await import('echarts');
+			if (!mounted) return;
+			const echartsTheme = getEchartsTheme();
+			pieChart = echarts.init(pieChartEl, echartsTheme);
+			pieChart.on('click', handlePieClick);
+			barChart = echarts.init(barChartEl, echartsTheme);
+			trendChart = echarts.init(trendChartEl, echartsTheme);
+		})();
+		try { await initialization; }
+		catch (e) {
+			pieChart?.dispose(); barChart?.dispose(); trendChart?.dispose();
+			pieChart = undefined; barChart = undefined; trendChart = undefined;
+			throw e;
+		} finally { initialization = undefined; }
+	}
+
 	async function loadAll() {
+		chartError = '';
+		try { await initializeCharts(); }
+		catch { chartError = 'Could not load charts. Please try again.'; return; }
+		if (!mounted) return;
 		await Promise.all([loadCategory(), loadMonth(), loadTrend(), loadSearch()]);
 	}
 
 	async function loadCategory() {
+		const seq = ++categorySeq;
+		reportLoading.category = true;
+		reportErrors.category = '';
+		categoryData = []; renderPie();
 		const oid = $sharedOwnerUserId || undefined;
 		const { from, to } = resolvePeriod(categoryPeriod, categoryFrom, categoryTo);
-		categoryData = await reports.byCategory({ type: reportType, from, to, owner_id: oid });
-		renderPie();
+		try {
+			const rows = await reports.byCategory({ type: reportType, from, to, owner_id: oid });
+			if (seq !== categorySeq) return;
+			categoryData = rows; renderPie();
+		} catch (e) {
+			if (seq === categorySeq) reportErrors.category = e instanceof Error ? e.message : 'Could not load category report.';
+		} finally { if (seq === categorySeq) reportLoading.category = false; }
 	}
 
 	async function loadMonth() {
+		const seq = ++monthSeq;
+		reportLoading.month = true;
+		reportErrors.month = '';
+		monthData = []; renderBar();
 		const oid = $sharedOwnerUserId || undefined;
-		monthData = await reports.byMonth({ year, owner_id: oid });
-		renderBar();
+		try {
+			const rows = await reports.byMonth({ year, owner_id: oid });
+			if (seq !== monthSeq) return;
+			monthData = rows; renderBar();
+		} catch (e) {
+			if (seq === monthSeq) reportErrors.month = e instanceof Error ? e.message : 'Could not load monthly report.';
+		} finally { if (seq === monthSeq) reportLoading.month = false; }
 	}
 
 	async function loadTrend() {
+		const seq = ++trendSeq;
+		reportLoading.trend = true;
+		reportErrors.trend = '';
+		trendData = []; renderTrend();
 		const oid = $sharedOwnerUserId || undefined;
-		trendData = await reports.trend({ from: trendFrom, to: trendTo, group_by: trendGroupBy, owner_id: oid });
-		renderTrend();
+		try {
+			const rows = await reports.trend({ from: trendFrom, to: trendTo, group_by: trendGroupBy, owner_id: oid });
+			if (seq !== trendSeq) return;
+			trendData = rows; renderTrend();
+		} catch (e) {
+			if (seq === trendSeq) reportErrors.trend = e instanceof Error ? e.message : 'Could not load trend report.';
+		} finally { if (seq === trendSeq) reportLoading.trend = false; }
 	}
 
 	// The period drives the category chart and the search summary alike, so one
@@ -203,10 +256,11 @@
 
 	function onSearchInput() {
 		clearTimeout(searchTimer);
+		searchSeq++;
+		searchSummary = [];
 		if (searchQuery.trim() === '') {
 			// Clear straight away rather than after the debounce — a stale total
 			// under an empty box reads as a result for "everything".
-			searchSeq++;
 			searchSummary = [];
 			searchLoading = false;
 			searchError = '';
@@ -219,7 +273,7 @@
 
 	async function loadSearch() {
 		const q = searchQuery.trim();
-		if (q === '') return;
+		if (q === '') { searchSeq++; searchSummary = []; searchLoading = false; searchError = ''; return; }
 		const seq = ++searchSeq;
 		searchLoading = true;
 		const { from, to } = resolvePeriod(categoryPeriod, categoryFrom, categoryTo);
@@ -318,6 +372,18 @@
 
 <div class="page">
 	<h1>Reports</h1>
+	{#if chartError}
+		<p class="error-msg" role="alert">{chartError}</p>
+		<button class="btn-ghost" onclick={() => void loadAll()}>Retry charts</button>
+	{/if}
+	{#each ['category', 'month', 'trend'] as kind}
+		{@const key = kind as keyof typeof reportErrors}
+		{#if reportLoading[key]}<p role="status">Loading {kind} report…</p>{/if}
+		{#if reportErrors[key]}
+			<p class="error-msg" role="alert">{kind}: {reportErrors[key]}</p>
+			<button class="btn-ghost" onclick={() => void (key === 'category' ? loadCategory() : key === 'month' ? loadMonth() : loadTrend())}>Retry {kind} report</button>
+		{/if}
+	{/each}
 
 	<div class="controls card">
 		<div class="form-row">

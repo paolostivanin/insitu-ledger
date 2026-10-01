@@ -83,6 +83,7 @@ class SharedOwnerViewModel @Inject constructor(
     val accessibleOwners = sharedAccessState.accessibleOwners
     val ownerFilter = sharedAccessState.ownerFilter
     val syncMode = prefs.syncModeFlow
+    val authNotice = prefs.authNoticeFlow
     val autoLogoutPending = prefs.autoLogoutPendingFlow
 
     suspend fun clearAutoLogoutPending() {
@@ -174,7 +175,7 @@ fun AppNavigation(
             .filter { it }
             .collect {
                 val result = snackbarHostState.showSnackbar(
-                    message = "You've been signed out.",
+                    message = sharedOwnerViewModel.authNotice.first(),
                     actionLabel = "Log in",
                     duration = SnackbarDuration.Indefinite,
                     withDismissAction = true,

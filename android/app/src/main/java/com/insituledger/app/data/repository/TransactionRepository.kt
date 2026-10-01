@@ -53,9 +53,8 @@ class TransactionRepository @Inject constructor(
         list.map { it.toDomain() }
     }
 
-    fun getRecent(limit: Int = 10): Flow<List<Transaction>> = transactionDao.getRecent(limit).map { list ->
-        list.map { it.toDomain() }
-    }
+    fun getRecent(limit: Int = 10, accountIds: Set<Long>? = null): Flow<List<Transaction>> =
+        getSorted(limit = limit, accountIds = accountIds)
 
     fun getSorted(
         from: String? = null,
@@ -65,7 +64,8 @@ class TransactionRepository @Inject constructor(
         sortBy: String = "date",
         sortDir: String = "desc",
         limit: Int = 100,
-        offset: Int = 0
+        offset: Int = 0,
+        accountIds: Set<Long>? = null
     ): Flow<List<Transaction>> {
         val columnMap = mapOf(
             "date" to "date",
@@ -78,6 +78,13 @@ class TransactionRepository @Inject constructor(
         val sb = StringBuilder("SELECT * FROM transactions WHERE deleted_at IS NULL")
         val args = mutableListOf<Any>()
 
+        if (accountIds != null) {
+            if (accountIds.isEmpty()) sb.append(" AND 0")
+            else {
+                sb.append(" AND account_id IN (${accountIds.joinToString { "?" }})")
+                args.addAll(accountIds.sorted())
+            }
+        }
         if (from != null) {
             sb.append(" AND date >= ?")
             args.add(from)
@@ -186,7 +193,8 @@ class TransactionRepository @Inject constructor(
                 note = note,
                 date = date,
                 isLocalOnly = true,
-                createdByUserId = currentUserId
+                createdByUserId = currentUserId,
+                createdByName = prefs.userNameFlow.first()
             )
             transactionDao.upsert(entity)
             val delta = if (type == "income") amount else -amount
@@ -244,23 +252,23 @@ class TransactionRepository @Inject constructor(
     }
 
     suspend fun delete(id: Long) {
-        database.withTransaction {
-            val existing = transactionDao.getById(id) ?: return@withTransaction
+        val syncEnabled = isSyncEnabled()
+        val changed = database.withTransaction {
+            val existing = transactionDao.getById(id) ?: return@withTransaction false
+            if (existing.deletedAt != null) return@withTransaction false
             // Reverse the transaction's effect on account balance
             val delta = if (existing.type == "income") existing.amount else -existing.amount
             accountDao.adjustBalance(existing.accountId, -delta)
             transactionDao.upsert(existing.copy(deletedAt = "deleted"))
+            if (syncEnabled) {
+                pendingOpDao.insert(PendingOperationEntity(
+                    entityType = "transaction", operation = "DELETE", entityId = id,
+                    serverId = if (id > 0) id else null
+                ))
+            }
+            true
         }
-
-        if (isSyncEnabled()) {
-            pendingOpDao.insert(PendingOperationEntity(
-                entityType = "transaction",
-                operation = "DELETE",
-                entityId = id,
-                serverId = if (id > 0) id else null
-            ))
-            syncManager.triggerImmediateSync()
-        }
+        if (changed && syncEnabled) syncManager.triggerImmediateSync()
     }
 
     suspend fun getFilteredSync(from: String?, to: String?, categoryId: Long?): List<Transaction> =
@@ -282,6 +290,6 @@ class TransactionRepository @Inject constructor(
         userId = userId, type = type, amount = amount,
         currency = currency, description = description, note = note, date = date,
         isLocalOnly = isLocalOnly,
-        createdByUserId = createdByUserId
+        createdByUserId = createdByUserId, createdByName = createdByName
     )
 }

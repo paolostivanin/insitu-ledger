@@ -19,6 +19,7 @@
 	let showForm = $state(false);
 	let editId = $state<number | null>(null);
 	let error = $state('');
+	let loadError = $state('');
 	let submitting = $state(false);
 
 	// Confirm dialog
@@ -163,30 +164,43 @@
 	function onShortcutNew() { resetForm(); showForm = true; }
 	function onShortcutClose() { showForm = false; showBatchCategoryPicker = false; }
 
+	let referenceSeq = 0;
+	let pageLoadSeq = 0;
 	async function loadReferenceData() {
+		const seq = ++referenceSeq;
+		cats = []; accts = [];
 		const oid = $sharedOwnerUserId || undefined;
 		const [c, a] = await Promise.all([categories.list(oid), accounts.list(oid)]);
+		if (seq !== referenceSeq) return;
 		cats = c;
 		accts = a;
-		if (accts.length && !fAccountId) fAccountId = getDefaultAccountId();
-		if (cats.length && !fCategoryId) fCategoryId = cats[0].id;
+		if (!accts.some(a => a.id === fAccountId)) fAccountId = getDefaultAccountId();
+		if (!cats.some(c => c.id === fCategoryId)) fCategoryId = cats[0]?.id ?? 0;
 	}
 
 	async function loadAll() {
+		const seq = ++pageLoadSeq;
 		loading = true;
+		txns = [];
+		loadError = '';
 		try {
-			await Promise.all([loadTransactions(), loadReferenceData()]);
+			const results = await Promise.allSettled([loadTransactions(), loadReferenceData()]);
+			const failure = results.find(result => result.status === 'rejected');
+			if (failure?.status === 'rejected') throw failure.reason;
 		} catch (e: any) {
-			error = e.message;
+			if (seq === pageLoadSeq) loadError = e.message;
+		} finally {
+			if (seq === pageLoadSeq) loading = false;
 		}
-		loading = false;
 	}
 
 	async function load() {
+		const seq = loadSeq + 1;
+		loadError = '';
 		try {
 			await loadTransactions();
 		} catch (e: any) {
-			error = e.message;
+			if (seq === loadSeq) loadError = e.message;
 		}
 	}
 
@@ -194,7 +208,13 @@
 		const oid = $sharedOwnerUserId || undefined;
 		const aid = $currentAccountId !== null ? $currentAccountId.toString() : undefined;
 		const seq = ++loadSeq;
-		const rows = await transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat, q: filterQ, account_id: aid, limit: PAGE_SIZE.toString(), sort_by: sortBy, sort_dir: sortDir, owner_id: oid });
+		let rows: Transaction[];
+		try {
+			rows = await transactions.list({ from: filterFrom, to: filterTo, category_id: filterCat, q: filterQ, account_id: aid, limit: PAGE_SIZE.toString(), sort_by: sortBy, sort_dir: sortDir, owner_id: oid });
+		} catch (e) {
+			if (seq !== loadSeq) return;
+			throw e;
+		}
 		// A newer request has already been issued — drop this stale response.
 		if (seq !== loadSeq) return;
 		txns = rows;
@@ -224,7 +244,7 @@
 			txns = [...txns, ...more];
 			hasMore = more.length === PAGE_SIZE;
 		} catch (e: any) {
-			error = e.message;
+			if (seq === loadSeq) loadError = e.message;
 		} finally {
 			loadingMore = false;
 		}
@@ -388,13 +408,8 @@
 	function batchDelete() {
 		confirmMessage = `Delete ${selectedIds.size} transaction(s)?`;
 		confirmAction = async () => {
-			error = '';
-			try {
-				await batch.deleteTransactions([...selectedIds]);
-				await load();
-			} catch (e: any) {
-				error = e.message;
-			}
+			await batch.deleteTransactions([...selectedIds]);
+			await load();
 		};
 		confirmOpen = true;
 	}
@@ -457,8 +472,10 @@
 		</div>
 	</div>
 
-	{#if error}
-		<p class="error-msg">{error}</p>
+	{#if error}<p class="error-msg" role="alert">{error}</p>{/if}
+	{#if loadError}
+		<p class="error-msg" role="alert">{loadError}</p>
+		<button class="btn-ghost" onclick={() => void loadAll()}>Retry</button>
 	{/if}
 
 	{#if showForm}

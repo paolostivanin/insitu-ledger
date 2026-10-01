@@ -6,6 +6,7 @@ import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.domain.model.Account
+import com.insituledger.app.domain.model.isOwnedBy
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -33,13 +34,10 @@ class AccountsViewModel @Inject constructor(
         AccountsUiState(accounts = filtered, isLoading = false, currentUserId = currentUserId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AccountsUiState())
 
-    fun delete(id: Long) {
-        // Owner-only mutations: silently ignore deletes targeting accounts the
-        // current user merely co-owns (the UI hides the affordance, but guard
-        // here in case of stale state). The backend also enforces this.
-        val current = uiState.value
-        val target = current.accounts.find { it.id == id } ?: return
-        if (target.userId != current.currentUserId) return
-        viewModelScope.launch { accountRepository.delete(id) }
+    suspend fun delete(id: Long): Result<Unit> = runCatching {
+        val target = uiState.value.accounts.find { it.id == id }
+            ?: error("Account no longer exists")
+        check(target.isOwnedBy(uiState.value.currentUserId)) { "Only the owner can delete this account" }
+        accountRepository.delete(id)
     }
 }

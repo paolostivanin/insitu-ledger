@@ -295,6 +295,10 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun clearPasswordChanged() {
+        _uiState.update { it.copy(passwordChanged = false) }
+    }
+
     fun disconnect() {
         viewModelScope.launch {
             authRepository.logout()

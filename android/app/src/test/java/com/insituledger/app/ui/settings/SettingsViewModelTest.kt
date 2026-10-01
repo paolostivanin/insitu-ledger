@@ -26,6 +26,7 @@ import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -88,6 +89,20 @@ class SettingsViewModelTest {
         pendingOpDao, okHttpClient, clientCertKeyManager, accountRepository,
         sharedRepository, sharedAccessState, preferencesRepository
     )
+
+    @Test
+    fun passwordChangeNavigationIsAcknowledgedBeforeReturningToSettings() = runTest {
+        coEvery { authRepository.changePassword(any(), any()) } returns Result.success(Unit)
+        val vm = viewModel()
+        vm.changePassword("old password", "new password")
+        assertTrue(vm.uiState.value.passwordChanged)
+        vm.clearPasswordChanged()
+        assertFalse(vm.uiState.value.passwordChanged)
+        vm.clearSyncError()
+        assertFalse(vm.uiState.value.passwordChanged)
+        vm.changePassword("new password", "next password")
+        assertTrue(vm.uiState.value.passwordChanged)
+    }
 
     @Test
     fun manualSyncFailureIsSurfaced() = runTest {

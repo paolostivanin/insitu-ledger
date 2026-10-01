@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/pstivanin/insitu-ledger/backend/internal/auth"
 )
@@ -131,23 +132,33 @@ func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Username != nil {
-		_, err := s.DB.Exec("UPDATE users SET username = ? WHERE id = ?", *req.Username, id)
-		if err != nil {
-			http.Error(w, "username already in use", http.StatusConflict)
+	sets := []string{}
+	args := []any{}
+	for _, field := range []struct {
+		column string
+		value  *string
+		limit  int
+	}{
+		{"username", req.Username, 100}, {"email", req.Email, 255}, {"name", req.Name, 100},
+	} {
+		if field.value == nil {
+			continue
+		}
+		if err := validateLength(field.column, *field.value, field.limit); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		sets = append(sets, field.column+" = ?")
+		args = append(args, *field.value)
 	}
-	if req.Email != nil {
-		_, err := s.DB.Exec("UPDATE users SET email = ? WHERE id = ?", *req.Email, id)
-		if err != nil {
-			http.Error(w, "email already in use", http.StatusConflict)
-			return
-		}
-	}
-	if req.Name != nil {
-		if _, err := s.DB.Exec("UPDATE users SET name = ? WHERE id = ?", *req.Name, id); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+	if len(sets) > 0 {
+		args = append(args, id)
+		if _, err := s.DB.Exec("UPDATE users SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil {
+			if strings.Contains(err.Error(), "UNIQUE constraint") {
+				http.Error(w, "username or email already in use", http.StatusConflict)
+			} else {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
 			return
 		}
 	}

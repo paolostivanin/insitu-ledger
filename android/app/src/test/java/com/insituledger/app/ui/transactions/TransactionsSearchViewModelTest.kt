@@ -41,7 +41,7 @@ class TransactionsSearchViewModelTest {
         every { accountRepository.getAll() } returns flowOf(emptyList())
         every { prefs.userIdFlow } returns flowOf(1L)
         every {
-            transactionRepository.getSorted(any(), any(), any(), any(), any(), any(), any(), any())
+            transactionRepository.getSorted(any(), any(), any(), any(), any(), any(), any(), any(), any())
         } returns flowOf(emptyList())
     }
 
@@ -70,7 +70,7 @@ class TransactionsSearchViewModelTest {
             transactionRepository.getSorted(
                 from = "2026-08-01", to = "2026-08-31", categoryId = 3L,
                 search = "valencia", sortBy = "amount", sortDir = "asc",
-                limit = 100, offset = 0
+                limit = 101, offset = 0
             )
         }
     }
@@ -85,7 +85,7 @@ class TransactionsSearchViewModelTest {
         verify {
             transactionRepository.getSorted(
                 from = null, to = null, categoryId = null, search = null,
-                sortBy = "date", sortDir = "desc", limit = 100, offset = 0
+                sortBy = "date", sortDir = "desc", limit = 101, offset = 0
             )
         }
     }
@@ -95,8 +95,8 @@ class TransactionsSearchViewModelTest {
         // A full page is what enables loadMore; the repo returns an empty list
         // by default, so drive hasMore through a filled page instead.
         every {
-            transactionRepository.getSorted(any(), any(), any(), any(), any(), any(), any(), any())
-        } returns flowOf(List(100) { mockk(relaxed = true) })
+            transactionRepository.getSorted(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        } returns flowOf(List(101) { mockk(relaxed = true) })
 
         val vm = viewModel()
         vm.setSearchQuery("valencia")
@@ -108,7 +108,7 @@ class TransactionsSearchViewModelTest {
         verify {
             transactionRepository.getSorted(
                 from = null, to = null, categoryId = null, search = "valencia",
-                sortBy = "date", sortDir = "desc", limit = 200, offset = 0
+                sortBy = "date", sortDir = "desc", limit = 201, offset = 0
             )
         }
     }
@@ -136,8 +136,32 @@ class TransactionsSearchViewModelTest {
         verify {
             transactionRepository.getSorted(
                 from = null, to = null, categoryId = null, search = null,
-                sortBy = "amount", sortDir = "asc", limit = 100, offset = 0
+                sortBy = "amount", sortDir = "asc", limit = 101, offset = 0
             )
         }
     }
+    @Test
+    fun `owner scope reaches the paginated query and switching resets selection`() = runTest(dispatcher) {
+        val account = com.insituledger.app.domain.model.Account(7, 2, "Shared", "EUR", 0.0)
+        every { accountRepository.getAll() } returns flowOf(listOf(account))
+        val vm = viewModel()
+        vm.toggleSelect(50)
+        sharedAccessState.setOwnerFilter(2)
+        advanceUntilIdle()
+        assertEquals(emptySet<Long>(), vm.uiState.value.selectedIds)
+        verify { transactionRepository.getSorted(limit = 101, accountIds = setOf(7)) }
+        sharedAccessState.setOwnerFilter(99)
+        advanceUntilIdle()
+        verify { transactionRepository.getSorted(limit = 101, accountIds = emptySet()) }
+    }
+
+    @Test
+    fun `a full page without a lookahead row has no more results`() = runTest(dispatcher) {
+        every { transactionRepository.getSorted(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns flowOf(List(100) { mockk(relaxed = true) })
+        val vm = viewModel()
+        advanceUntilIdle()
+        assertEquals(100, vm.uiState.value.transactions.size)
+        assertFalse(vm.uiState.value.hasMore)
+    }
+
 }

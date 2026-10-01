@@ -9,6 +9,7 @@
 	let showForm = $state(false);
 	let editId = $state<number | null>(null);
 	let error = $state('');
+	let loadError = $state('');
 	let submitting = $state(false);
 
 	// Confirm dialog
@@ -39,12 +40,20 @@
 		await load();
 	});
 
+	let loadSeq = 0;
 	async function load() {
+		const seq = ++loadSeq;
 		loading = true;
-		// In aggregate mode the list mixes own + co-owners' categories; each
-		// row carries its own read_only flag (true for foreign categories).
-		cats = await categories.list($sharedOwnerUserId || undefined);
-		loading = false;
+		cats = [];
+		loadError = '';
+		try {
+			const rows = await categories.list($sharedOwnerUserId || undefined);
+			if (seq === loadSeq) cats = rows;
+		} catch (e) {
+			if (seq === loadSeq) loadError = e instanceof Error ? e.message : 'Failed to load categories.';
+		} finally {
+			if (seq === loadSeq) loading = false;
+		}
 	}
 
 	function parentCats(): Category[] {
@@ -107,12 +116,8 @@
 	function remove(id: number) {
 		confirmMessage = 'Delete this category?';
 		confirmAction = async () => {
-			try {
-				await categories.delete(id);
-				await load();
-			} catch (e: any) {
-				error = e.message;
-			}
+			await categories.delete(id);
+			await load();
 		};
 		confirmOpen = true;
 	}
@@ -126,8 +131,10 @@
 		</button>
 	</div>
 
-	{#if error}
-		<p class="error-msg">{error}</p>
+	{#if error}<p class="error-msg" role="alert">{error}</p>{/if}
+	{#if loadError}
+		<p class="error-msg" role="alert">{loadError}</p>
+		<button class="btn-ghost" onclick={() => void load()}>Retry</button>
 	{/if}
 
 	{#if showForm}

@@ -1,6 +1,8 @@
 package com.insituledger.app.data.repository
 
 import com.insituledger.app.data.local.datastore.UserPreferences
+import androidx.room.withTransaction
+import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.ScheduledTransactionDao
 import com.insituledger.app.data.local.db.entity.PendingOperationEntity
@@ -24,7 +26,8 @@ class ScheduledRepository @Inject constructor(
     private val scheduledApi: ScheduledApi,
     private val gson: Gson,
     private val syncManager: SyncManager,
-    private val prefs: UserPreferences
+    private val prefs: UserPreferences,
+    private val database: AppDatabase
 ) {
     private fun isSyncEnabled() = prefs.getSyncModeImmediate() == "webapp"
 
@@ -71,7 +74,8 @@ class ScheduledRepository @Inject constructor(
             nextOccurrence = nextOccurrence,
             maxOccurrences = maxOccurrences,
             isLocalOnly = true,
-            createdByUserId = currentUserId
+            createdByUserId = currentUserId,
+            createdByName = prefs.userNameFlow.first()
         )
         scheduledDao.upsert(entity)
 
@@ -117,18 +121,20 @@ class ScheduledRepository @Inject constructor(
     }
 
     suspend fun delete(id: Long) {
-        val existing = scheduledDao.getById(id) ?: return
-        scheduledDao.upsert(existing.copy(deletedAt = "deleted"))
-
-        if (isSyncEnabled()) {
-            pendingOpDao.insert(PendingOperationEntity(
-                entityType = "scheduled",
-                operation = "DELETE",
-                entityId = id,
-                serverId = if (id > 0) id else null
-            ))
-            syncManager.triggerImmediateSync()
+        val syncEnabled = isSyncEnabled()
+        val changed = database.withTransaction {
+            val existing = scheduledDao.getById(id) ?: return@withTransaction false
+            if (existing.deletedAt != null) return@withTransaction false
+            scheduledDao.upsert(existing.copy(deletedAt = "deleted"))
+            if (syncEnabled) {
+                pendingOpDao.insert(PendingOperationEntity(
+                    entityType = "scheduled", operation = "DELETE", entityId = id,
+                    serverId = if (id > 0) id else null
+                ))
+            }
+            true
         }
+        if (changed && syncEnabled) syncManager.triggerImmediateSync()
     }
 
     private fun ScheduledTransactionEntity.toDomain() = ScheduledTransaction(
@@ -138,6 +144,6 @@ class ScheduledRepository @Inject constructor(
         rrule = rrule, nextOccurrence = nextOccurrence,
         active = active, maxOccurrences = maxOccurrences,
         occurrenceCount = occurrenceCount, isLocalOnly = isLocalOnly,
-        createdByUserId = createdByUserId
+        createdByUserId = createdByUserId, createdByName = createdByName
     )
 }

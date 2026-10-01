@@ -72,3 +72,7 @@ data class DashboardData(
     val recentTransactions: List<Transaction>,
     val accounts: List<Account>
 )
+
+// Unsynced accounts belong to this device even before there is a server user.
+fun Account.isOwnedBy(currentUserId: Long?): Boolean =
+    isLocalOnly || (currentUserId != null && currentUserId > 0 && userId == currentUserId)

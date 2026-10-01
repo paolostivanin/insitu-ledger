@@ -26,6 +26,7 @@
 	let showForm = $state(false);
 	let editId = $state<number | null>(null);
 	let error = $state('');
+	let loadError = $state('');
 	let submitting = $state(false);
 
 	// Confirm dialog
@@ -76,20 +77,26 @@
 		await load();
 	});
 
+	let loadSeq = 0;
 	async function load() {
+		const seq = ++loadSeq;
 		loading = true;
+		items = []; cats = []; accts = [];
+		loadError = '';
 		const oid = $sharedOwnerUserId || undefined;
-		const [s, c, a] = await Promise.all([
-			scheduled.list({ owner_id: oid }),
-			categories.list(oid),
-			accounts.list(oid)
-		]);
-		items = s;
-		cats = c;
-		accts = a;
-		if (accts.length && !fAccountId) fAccountId = accts[0].id;
-		if (cats.length && !fCategoryId) fCategoryId = cats[0].id;
-		loading = false;
+		try {
+			const [s, c, a] = await Promise.all([
+				scheduled.list({ owner_id: oid }), categories.list(oid), accounts.list(oid)
+			]);
+			if (seq !== loadSeq) return;
+			items = s; cats = c; accts = a;
+			if (!accts.some(a => a.id === fAccountId)) fAccountId = accts[0]?.id || 0;
+			if (!cats.some(c => c.id === fCategoryId)) fCategoryId = cats[0]?.id || 0;
+		} catch (e) {
+			if (seq === loadSeq) loadError = e instanceof Error ? e.message : 'Failed to load scheduled entries.';
+		} finally {
+			if (seq === loadSeq) loading = false;
+		}
 	}
 
 	function isSharedAcct(accountId: number): boolean {
@@ -244,8 +251,10 @@
 		</button>
 	</div>
 
-	{#if error}
-		<p class="error-msg">{error}</p>
+	{#if error}<p class="error-msg" role="alert">{error}</p>{/if}
+	{#if loadError}
+		<p class="error-msg" role="alert">{loadError}</p>
+		<button class="btn-ghost" onclick={() => void load()}>Retry</button>
 	{/if}
 
 	{#if showForm}

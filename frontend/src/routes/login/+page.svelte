@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { auth, setToken } from '$lib/api/client';
 	import { setAuthUser } from '$lib/stores/auth';
@@ -56,6 +57,9 @@
 		<h1>InSitu Ledger</h1>
 		<p class="subtitle">{needsTOTP ? 'Enter your 2FA code' : 'Sign in to your account'}</p>
 
+		{#if $page.url.searchParams.get('password_changed') === '1'}
+			<p role="status">Password changed. Sign in with your new password.</p>
+		{/if}
 		{#if error}
 			<p class="error-msg">{error}</p>
 		{/if}

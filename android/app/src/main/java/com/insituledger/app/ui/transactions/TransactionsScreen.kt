@@ -33,6 +33,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
+import com.insituledger.app.ui.common.entryAttribution
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.CurrencyFormatter
 import com.insituledger.app.ui.common.EmptyState
@@ -57,6 +58,7 @@ private data class TxRowDisplay(
     val isIncome: Boolean,
     val title: String,
     val secondary: String,
+    val attribution: String?,
     val amountFormatted: String
 )
 
@@ -376,12 +378,10 @@ private fun buildDisplay(
     symbol: String
 ): TxRowDisplay {
     val account = accountMap[txn.accountId]
-    val attribution = if (account?.isShared == true && txn.createdByUserId != null && txn.createdByUserId != currentUserId) {
-        txn.createdByName?.takeIf { it.isNotBlank() }?.let { "Added by $it" }
-    } else null
+    val attribution = entryAttribution(account?.isShared == true, txn.createdByUserId, txn.createdByName, currentUserId)
     val time = if (txn.date.contains("T")) txn.date.substringAfter("T").take(5) else null
     val categoryName = categoryMap[txn.categoryId]?.name
-    val secondary = listOfNotNull(time, categoryName, attribution).joinToString("  ·  ")
+    val secondary = listOfNotNull(time, categoryName).joinToString("  ·  ")
     val title = txn.description?.takeIf { it.isNotBlank() }
         ?: txn.type.replaceFirstChar { it.uppercase() }
     val sign = if (txn.type == "income") "+" else "-"
@@ -390,6 +390,7 @@ private fun buildDisplay(
         isIncome = txn.type == "income",
         title = title,
         secondary = secondary,
+        attribution = attribution,
         amountFormatted = "$sign${CurrencyFormatter.formatWithSymbol(txn.amount, symbol)}"
     )
 }
@@ -505,6 +506,10 @@ private fun TransactionRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
                     )
+                }
+                row.attribution?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             Text(

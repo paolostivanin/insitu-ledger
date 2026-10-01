@@ -245,51 +245,43 @@ func (s *Server) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Username != "" {
-		if err := validateLength("username", req.Username, 100); err != nil {
+	// Validate everything before writing. One statement makes the update and
+	// joined-metadata sync triggers atomic, including uniqueness failures.
+	sets := []string{}
+	args := []any{}
+	for _, field := range []struct {
+		column, value string
+		limit         int
+	}{
+		{"username", req.Username, 100}, {"email", req.Email, 255}, {"name", req.Name, 100},
+	} {
+		if field.value == "" {
+			continue
+		}
+		if err := validateLength(field.column, field.value, field.limit); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		_, err := s.DB.Exec("UPDATE users SET username = ? WHERE id = ?", req.Username, userID)
-		if err != nil {
-			http.Error(w, "username already in use", http.StatusConflict)
-			return
-		}
+		sets = append(sets, field.column+" = ?")
+		args = append(args, field.value)
 	}
-
-	if req.Email != "" {
-		if err := validateLength("email", req.Email, 255); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		_, err := s.DB.Exec("UPDATE users SET email = ? WHERE id = ?", req.Email, userID)
-		if err != nil {
-			http.Error(w, "email already in use", http.StatusConflict)
-			return
-		}
-	}
-
-	if req.Name != "" {
-		if err := validateLength("name", req.Name, 100); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if _, err := s.DB.Exec("UPDATE users SET name = ? WHERE id = ?", req.Name, userID); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-	}
-
 	if req.CurrencySymbol != nil {
-		// Empty string allowed (renders as no symbol). Cap at 8 chars to fit
-		// any currency glyph or short code without abuse.
 		sym := strings.TrimSpace(*req.CurrencySymbol)
 		if len([]rune(sym)) > 8 {
 			http.Error(w, "currency_symbol too long", http.StatusBadRequest)
 			return
 		}
-		if _, err := s.DB.Exec("UPDATE users SET currency_symbol = ? WHERE id = ?", sym, userID); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+		sets = append(sets, "currency_symbol = ?")
+		args = append(args, sym)
+	}
+	if len(sets) > 0 {
+		args = append(args, userID)
+		if _, err := s.DB.Exec("UPDATE users SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil {
+			if strings.Contains(err.Error(), "UNIQUE constraint") {
+				http.Error(w, "username or email already in use", http.StatusConflict)
+			} else {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
 			return
 		}
 	}
@@ -373,9 +365,9 @@ func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"secret":   key.Secret(),
-		"qr_code":  "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes()),
-		"otpauth":  key.URL(),
+		"secret":  key.Secret(),
+		"qr_code": "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes()),
+		"otpauth": key.URL(),
 	})
 }
 

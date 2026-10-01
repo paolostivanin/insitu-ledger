@@ -8,6 +8,8 @@ import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.domain.model.DashboardData
+import com.insituledger.app.domain.model.Account
+import com.insituledger.app.domain.model.Transaction
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
@@ -37,16 +39,25 @@ class DashboardViewModel @Inject constructor(
     private val _isRefreshing = MutableStateFlow(false)
     private val _refreshTick = MutableStateFlow(0)
 
+    private data class Scope(val accounts: List<Account>, val owner: Long?)
+    private data class ScopedData(val scope: Scope, val recent: List<Transaction>)
+
+    private val scopedData = combine(accountRepository.getAll(), sharedAccessState.ownerFilter) { accounts, owner ->
+        Scope(if (owner == null) accounts else accounts.filter { it.userId == owner }, owner)
+    }.flatMapLatest { scope ->
+        val ids = if (scope.owner == null) null else scope.accounts.map { it.id }.toSet()
+        transactionRepository.getRecent(10, ids).map { ScopedData(scope, it) }
+    }
+
     val uiState: StateFlow<DashboardUiState> = combine(
-        accountRepository.getAll(),
-        transactionRepository.getRecent(10),
-        sharedAccessState.ownerFilter,
+        scopedData,
         prefs.userIdFlow,
         prefs.dashboardHeroModeFlow
-    ) { allAccounts, allRecent, filter, currentUserId, heroMode ->
-        val accounts = if (filter == null) allAccounts else allAccounts.filter { it.userId == filter }
+    ) { data, currentUserId, heroMode ->
+        val accounts = data.scope.accounts
+        val filter = data.scope.owner
         val accountIds = accounts.map { it.id }.toSet()
-        val recent = if (filter == null) allRecent else allRecent.filter { it.accountId in accountIds }
+        val recent = data.recent
 
         val now = LocalDate.now()
         val monthStart = now.withDayOfMonth(1).format(DateTimeFormatter.ISO_LOCAL_DATE)

@@ -103,7 +103,10 @@ class TransactionsViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 _filterAndSort,
-                sharedAccessState.ownerFilter,
+                sharedAccessState.ownerFilter.onEach {
+                    _pageCount.value = 1
+                    clearSelection()
+                },
                 accountRepository.getAll(),
                 _pageCount
             ) { fs, filter, accounts, pages -> PageRequest(fs, filter, accounts, pages) }
@@ -120,12 +123,12 @@ class TransactionsViewModel @Inject constructor(
                         from = req.fs.from, to = req.fs.to, categoryId = req.fs.categoryId,
                         search = req.fs.searchQuery.ifBlank { null },
                         sortBy = req.fs.sortBy, sortDir = req.fs.sortDir,
-                        limit = limit, offset = 0
+                        limit = limit + 1, offset = 0, accountIds = accountIds
                     )
                     txnFlow.map { txns ->
-                        val visible = if (accountIds == null) txns else txns.filter { it.accountId in accountIds }
-                        // hasMore is true when this page filled the LIMIT entirely.
-                        visible to (txns.size >= limit)
+                        val visible = txns.take(limit)
+                        // An extra row determines whether another page is available.
+                        visible to (txns.size > limit)
                     }
                 }
                 .collect { (txns, more) ->

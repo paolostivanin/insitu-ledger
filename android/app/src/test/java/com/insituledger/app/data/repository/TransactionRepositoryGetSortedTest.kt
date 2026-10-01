@@ -114,4 +114,18 @@ class TransactionRepositoryGetSortedTest {
 
         assertEquals("""%50\% \_ a\\b%""", args[0])
     }
+    @Test
+    fun `account scope is applied before pagination with stable bound IDs`() = runTest {
+        val (sql, args) = capture { getSorted(accountIds = setOf(9L, 2L), limit = 101) }
+        assertTrue(sql.indexOf("account_id IN (?, ?)") < sql.indexOf("ORDER BY"))
+        assertEquals(listOf(2L, 9L, 101, 0), args)
+    }
+
+    @Test
+    fun `empty owner account scope matches no transactions`() = runTest {
+        val (sql, args) = capture { getSorted(accountIds = emptySet()) }
+        assertTrue(sql.contains(" AND 0"))
+        assertEquals(listOf(100L, 0L), args)
+    }
+
 }

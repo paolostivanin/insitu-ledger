@@ -16,6 +16,8 @@
 	let monthData = $state<MonthReport[]>([]);
 	let loading = $state(true);
 	let loadError = $state('');
+	let loaded = $state({ accounts: false, transactions: false, category: false, month: false });
+	const hasLoadedData = $derived(Object.values(loaded).some(Boolean));
 	// Rolled up to parents: a top-8 list of scattered subcategories says much
 	// less than the same eight rows grouped into the categories you think in.
 	const topCategories = $derived(rollUpByParent(categoryData).slice(0, 8));
@@ -44,7 +46,12 @@
 		await loadDashboard();
 	});
 
+	let loadSeq = 0;
 	async function loadDashboard() {
+		const seq = ++loadSeq;
+		accts = []; recentTxns = []; categoryData = []; monthData = [];
+		loadError = '';
+		loaded = { accounts: false, transactions: false, category: false, month: false };
 		loading = true;
 		const oid = $sharedOwnerUserId || undefined;
 		const aid = $currentAccountId !== null ? $currentAccountId.toString() : undefined;
@@ -55,26 +62,33 @@
 				reports.byCategory({ type: 'expense', owner_id: oid, account_id: aid }),
 				reports.byMonth({ year: new Date().getFullYear().toString(), owner_id: oid, account_id: aid })
 			]);
+			if (seq !== loadSeq) return;
+			loaded = {
+				accounts: results[0].status === 'fulfilled', transactions: results[1].status === 'fulfilled',
+				category: results[2].status === 'fulfilled', month: results[3].status === 'fulfilled'
+			};
 			if (results[0].status === 'fulfilled') accts = results[0].value;
 			if (results[1].status === 'fulfilled') recentTxns = results[1].value;
 			if (results[2].status === 'fulfilled') categoryData = results[2].value;
 			if (results[3].status === 'fulfilled') monthData = results[3].value;
 
 			const failures = results.filter(r => r.status === 'rejected');
-			if (failures.length === results.length) {
+			if (failures.length > 0) {
 				const reason = (failures[0] as PromiseRejectedResult).reason;
 				if (reason?.status !== 401) {
-					loadError = 'Failed to load dashboard data. Please try refreshing.';
+					loadError = failures.length === results.length
+						? 'Failed to load dashboard data.'
+						: 'Some dashboard data could not be loaded. Available data is shown below.';
 				}
 			} else {
 				loadError = '';
 			}
 		} catch (e: any) {
-			if (e?.status !== 401) {
+			if (seq === loadSeq && e?.status !== 401) {
 				loadError = 'Failed to load dashboard data. Please try refreshing.';
 			}
 		}
-		loading = false;
+		if (seq === loadSeq) loading = false;
 	}
 
 	function totalBalance(): number {
@@ -105,9 +119,14 @@
 <div class="page">
 	{#if loading}
 		<p class="text-muted">Loading...</p>
-	{:else if loadError}
-		<p class="error-msg">{loadError}</p>
+	{:else if loadError && !hasLoadedData}
+		<p class="error-msg" role="alert">{loadError}</p>
+		<button class="btn-ghost" onclick={() => void loadDashboard()}>Retry</button>
 	{:else}
+		{#if loadError}
+			<p class="error-msg" role="alert">{loadError}</p>
+			<button class="btn-ghost" onclick={() => void loadDashboard()}>Retry</button>
+		{/if}
 		<div class="page-header">
 			<h1>Dashboard</h1>
 			<AccountFilterPill accounts={accts} />
@@ -116,26 +135,28 @@
 		<div class="stats-grid">
 			<div class="stat-card card">
 				<span class="stat-label">Total Balance</span>
-				<span class="stat-value">{fmt(totalBalance())}</span>
+				<span class="stat-value">{loaded.accounts ? fmt(totalBalance()) : '—'}</span>
 			</div>
 			<div class="stat-card card">
 				<span class="stat-label">This Month Income</span>
-				<span class="stat-value amount-income">+{fmt(thisMonthIncome())}</span>
+				<span class="stat-value amount-income">{loaded.month ? '+' + fmt(thisMonthIncome()) : '—'}</span>
 			</div>
 			<div class="stat-card card">
 				<span class="stat-label">This Month Expenses</span>
-				<span class="stat-value amount-expense">-{fmt(thisMonthExpenses())}</span>
+				<span class="stat-value amount-expense">{loaded.month ? '-' + fmt(thisMonthExpenses()) : '—'}</span>
 			</div>
 			<div class="stat-card card">
 				<span class="stat-label">Accounts</span>
-				<span class="stat-value">{accts.length}</span>
+				<span class="stat-value">{loaded.accounts ? accts.length : '—'}</span>
 			</div>
 		</div>
 
 		<div class="grid-2" style="margin-top: 1.5rem">
 			<div class="card">
 				<h2>Recent Transactions</h2>
-				{#if recentTxns.length === 0}
+				{#if !loaded.transactions}
+					<p class="text-muted">Recent transactions unavailable</p>
+				{:else if recentTxns.length === 0}
 					<p class="empty-state">No transactions yet</p>
 				{:else}
 					<div class="table-wrap">
@@ -169,7 +190,9 @@
 
 			<div class="card">
 				<h2>Top Expense Categories</h2>
-				{#if topCategories.length === 0}
+				{#if !loaded.category}
+					<p class="text-muted">Expense categories unavailable</p>
+				{:else if topCategories.length === 0}
 					<p class="empty-state">No data yet</p>
 				{:else}
 					<div class="category-list">

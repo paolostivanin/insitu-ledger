@@ -133,6 +133,13 @@ func Open(dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("shared access attribution migration: %w", err)
 	}
 
+	// These triggers depend on attribution columns added by the migrations.
+	// Joined metadata must participate in incremental sync just like row data.
+	if err := InstallMetadataSyncTriggers(conn); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("metadata sync triggers: %w", err)
+	}
+
 	if err := bumpSharedAccountsForAttribution(conn); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("bump shared accounts: %w", err)
@@ -299,4 +306,32 @@ func generateInitialPassword() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// InstallMetadataSyncTriggers versions joined names and sharing flags. Call it
+// after the column migrations, including when preparing an existing database.
+// A rename intentionally re-versions the author's full history, including
+// private rows: their cached names must already be correct if shared later.
+// Row-version triggers also update updated_at; this cost occurs once per rename.
+func InstallMetadataSyncTriggers(conn *sql.DB) error {
+	_, err := conn.Exec(`
+		CREATE TRIGGER IF NOT EXISTS trg_share_account_metadata_insert
+		AFTER INSERT ON shared_account_access BEGIN
+			UPDATE accounts SET name = name WHERE id = NEW.account_id;
+		END;
+		CREATE TRIGGER IF NOT EXISTS trg_share_account_metadata_update
+		AFTER UPDATE OF deleted_at ON shared_account_access
+		WHEN OLD.deleted_at IS NOT NEW.deleted_at BEGIN
+			UPDATE accounts SET name = name WHERE id = NEW.account_id;
+		END;
+		CREATE TRIGGER IF NOT EXISTS trg_user_name_metadata
+		AFTER UPDATE OF name ON users WHEN OLD.name IS NOT NEW.name BEGIN
+			UPDATE accounts SET name = name WHERE user_id = NEW.id;
+			UPDATE transactions SET created_by_user_id = created_by_user_id
+			WHERE created_by_user_id = NEW.id;
+			UPDATE scheduled_transactions SET created_by_user_id = created_by_user_id
+			WHERE created_by_user_id = NEW.id;
+		END;
+	`)
+	return err
 }

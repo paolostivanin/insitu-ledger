@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Transaction
+import com.insituledger.app.ui.common.entryAttribution
 import com.insituledger.app.ui.common.AmountText
 import com.insituledger.app.ui.common.CurrencyFormatter
 import com.insituledger.app.ui.common.DashboardSkeleton
@@ -172,9 +173,7 @@ fun DashboardScreen(
 					val currentUserId = uiState.currentUserId
 					items(data.recentTransactions, key = { "txn_${it.id}" }) { txn ->
 						val account = accountMap[txn.accountId]
-						val attribution = if (account?.isShared == true && txn.createdByUserId != null && txn.createdByUserId != currentUserId) {
-							txn.createdByName?.takeIf { it.isNotBlank() }?.let { "Added by $it" }
-						} else null
+						val attribution = entryAttribution(account?.isShared == true, txn.createdByUserId, txn.createdByName, currentUserId)
 						TransactionRow(
 							txn = txn,
 							attribution = attribution,
@@ -407,12 +406,16 @@ private fun TransactionRow(
 					color = MaterialTheme.colorScheme.onSurface,
 					maxLines = 1
 				)
-				val secondary = listOfNotNull(formatDateLabel(txn.date), attribution).joinToString("  ·  ")
+				val secondary = formatDateLabel(txn.date)
 				Text(
 					text = secondary,
 					style = MaterialTheme.typography.bodySmall,
 					color = MaterialTheme.colorScheme.onSurfaceVariant
 				)
+				attribution?.let {
+					Text(it, style = MaterialTheme.typography.bodySmall,
+						color = MaterialTheme.colorScheme.onSurfaceVariant)
+				}
 			}
 			AmountText(
 				amount = txn.amount,

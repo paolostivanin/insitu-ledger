@@ -36,5 +36,6 @@ data class TransactionEntity(
     @ColumnInfo(name = "is_local_only") val isLocalOnly: Boolean = false,
     // Authenticated creator; differs from userId when a co-owner adds an
     // entry to a shared account. Sticky across edits.
-    @ColumnInfo(name = "created_by_user_id") val createdByUserId: Long? = null
+    @ColumnInfo(name = "created_by_user_id") val createdByUserId: Long? = null,
+    @ColumnInfo(name = "created_by_name") val createdByName: String? = null
 )

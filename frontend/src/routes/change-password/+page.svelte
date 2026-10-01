@@ -1,16 +1,20 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { me } from '$lib/api/client';
-	import { forcePasswordChange, forceTotpSetup, clearForcePasswordChange } from '$lib/stores/auth';
+	import { me, clearToken, clearApiCache } from '$lib/api/client';
+	import { forcePasswordChange, clearAuth } from '$lib/stores/auth';
+	import { clearSharedOwner } from '$lib/stores/shared';
+	import { clearAllAccountFilters } from '$lib/stores/accountFilter';
 
 	let currentPassword = $state('');
 	let newPassword = $state('');
 	let confirmPassword = $state('');
 	let error = $state('');
 	let success = $state(false);
+	let submitting = $state(false);
 
 	async function submit(e: Event) {
 		e.preventDefault();
+		if (submitting) return;
 		error = '';
 
 		if (newPassword.length < 8) {
@@ -22,20 +26,18 @@
 			return;
 		}
 
+		submitting = true;
 		try {
 			await me.changePassword(currentPassword, newPassword);
-			clearForcePasswordChange();
+			clearToken(); clearApiCache(); clearAuth();
+			clearSharedOwner(); clearAllAccountFilters();
+			localStorage.removeItem('lastUsedAccountId');
 			success = true;
-			setTimeout(() => {
-				if ($forceTotpSetup) {
-					goto('/setup-2fa');
-				} else {
-					goto('/');
-				}
-			}, 1500);
+			await goto('/login?password_changed=1', { replaceState: true });
 		} catch (err: any) {
 			error = err.message || 'Failed to change password';
-		}
+		} finally { submitting = false; }
+
 	}
 </script>
 
@@ -66,7 +68,7 @@
 					<label for="confirm">Confirm New Password</label>
 					<input id="confirm" type="password" bind:value={confirmPassword} required minlength="8" />
 				</div>
-				<button class="btn-primary full-width" type="submit">Change Password</button>
+				<button class="btn-primary full-width" type="submit" disabled={submitting}>{submitting ? 'Changing…' : 'Change Password'}</button>
 			</form>
 
 			{#if !$forcePasswordChange}

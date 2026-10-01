@@ -13,9 +13,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Account
+import com.insituledger.app.domain.model.isOwnedBy
 import com.insituledger.app.ui.common.AppCard
 import com.insituledger.app.ui.common.CurrencyFormatter
 import com.insituledger.app.ui.common.EmptyState
@@ -47,6 +46,33 @@ fun AccountsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = LocalSnackbarHostState.current
     val scope = rememberCoroutineScope()
+
+    var deleteTarget by remember { mutableStateOf<Account?>(null) }
+    var deleting by remember { mutableStateOf(false) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { if (!deleting) deleteTarget = null },
+            title = { Text("Delete account?") },
+            text = { Column {
+                Text("Delete \"${target.name}\" and its transactions and schedules?")
+                deleteError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            } },
+            confirmButton = { TextButton(enabled = !deleting, onClick = {
+                deleting = true
+                scope.launch {
+                    viewModel.delete(target.id).fold(
+                        onSuccess = { deleteTarget = null },
+                        onFailure = { deleteError = it.message ?: "Could not delete account" }
+                    )
+                    deleting = false
+                    if (deleteTarget == null) snackbarHostState.showSnackbar("Account deleted")
+                }
+            }) { Text(if (deleting) "Deleting…" else "Delete") } },
+            dismissButton = { TextButton(enabled = !deleting, onClick = { deleteTarget = null }) { Text("Cancel") } }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -86,14 +112,14 @@ fun AccountsScreen(
                     verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
                 ) {
                     items(uiState.accounts, key = { it.id }) { account ->
-                        val isOwn = currentUserId != null && account.userId == currentUserId
+                        val isOwn = account.isOwnedBy(currentUserId)
                         AccountRow(
                             account = account,
                             isOwn = isOwn,
                             onEdit = if (isOwn) {{ onEditClick(account.id) }} else null,
                             onDelete = if (isOwn) {{
-                                viewModel.delete(account.id)
-                                scope.launch { snackbarHostState.showSnackbar("Account deleted") }
+                                deleteError = null
+                                deleteTarget = account
                             }} else null,
                             modifier = Modifier.animateItem()
                         )

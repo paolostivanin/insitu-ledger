@@ -4,7 +4,7 @@
 
 A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, and Android app with offline-first local storage and optional sync.
 
-**Current release:** backend + frontend `v1.22.0` · Android `v1.33.0` · MIT licensed
+**Current release:** backend + frontend `v1.25.0` · Android `v1.36.0` · MIT licensed
 
 ## Contents
 
@@ -46,6 +46,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 
 - **Admin-created users** — no open registration
 - **Per-account sharing** — grant access to individual accounts, not your whole ledger. Since v1.15.0 shares are **co-owner only**: a guest can create and edit transactions on the shared account, but only the original owner may rename, delete, or re-share it
+- **Entry attribution** — shared-account transactions and schedules show who added them in web and Android, including offline viewing after sync
 - **Owner switcher** — web and Android both let you filter the whole UI down to one owner's accounts
 - **Default account** — pick a default in your profile preferences; clients select it on launch for new transactions and persist the choice server-side
 - **Audit logging** — admin actions are logged with timestamps, IP addresses, and target users
@@ -139,7 +140,9 @@ cd frontend && npm test          # Vitest
 cd frontend && npm run check     # svelte-check / TypeScript
 
 # Android
-cd android && ./gradlew compileDebugKotlin
+cd android && ./gradlew testDebugUnitTest lintDebug assembleDebug
+# From the repository root:
+python3 android/tools/check_attribution_migration.py
 ```
 
 ### Configuration
@@ -430,7 +433,7 @@ This project is built for a small, self-hosted, single-trust deployment where ev
 
 - **Backend + frontend** share a single version and are released together (`frontend/package.json`, `backend/internal/version.go`, `backend/internal/api/openapi.yaml`).
 - **Android** versions independently (`versionName` / `versionCode` in `android/app/build.gradle.kts`).
-- Each release gets **one git tag** for the backend+frontend version (e.g. `v1.22.0`); the Android version is noted in the release notes.
+- Each release gets **one git tag** for the backend+frontend version (e.g. `v1.25.0`); the Android version is noted in the release notes.
 
 ## License
 

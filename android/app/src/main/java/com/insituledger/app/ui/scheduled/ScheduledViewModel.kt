@@ -2,6 +2,7 @@ package com.insituledger.app.ui.scheduled
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.ScheduledRepository
 import com.insituledger.app.data.repository.SharedAccessState
@@ -15,30 +16,31 @@ import javax.inject.Inject
 data class ScheduledUiState(
     val items: List<ScheduledTransaction> = emptyList(),
     val accounts: List<Account> = emptyList(),
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val currentUserId: Long? = null
 )
 
 @HiltViewModel
 class ScheduledViewModel @Inject constructor(
     private val scheduledRepository: ScheduledRepository,
     accountRepository: AccountRepository,
-    private val sharedAccessState: SharedAccessState
+    private val sharedAccessState: SharedAccessState,
+    prefs: UserPreferences
 ) : ViewModel() {
 
     val uiState: StateFlow<ScheduledUiState> = combine(
         scheduledRepository.getAll(),
         accountRepository.getAll(),
-        sharedAccessState.ownerFilter
-    ) { items, accounts, filter ->
+        sharedAccessState.ownerFilter,
+        prefs.userIdFlow
+    ) { items, accounts, filter, currentUserId ->
         val filteredItems = if (filter == null) items
         else {
             val ownedIds = accounts.filter { it.userId == filter }.map { it.id }.toSet()
             items.filter { it.accountId in ownedIds }
         }
-        ScheduledUiState(items = filteredItems, accounts = accounts, isLoading = false)
+        ScheduledUiState(items = filteredItems, accounts = accounts, isLoading = false, currentUserId = currentUserId)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ScheduledUiState())
 
-    fun delete(id: Long) {
-        viewModelScope.launch { scheduledRepository.delete(id) }
-    }
+    suspend fun delete(id: Long): Result<Unit> = runCatching { scheduledRepository.delete(id) }
 }
