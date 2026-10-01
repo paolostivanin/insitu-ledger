@@ -15,6 +15,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
   - [Prerequisites](#prerequisites)
   - [Development](#development)
   - [Running Tests](#running-tests)
+  - [Android](#android)
   - [Configuration](#configuration)
   - [First-boot admin](#first-boot-admin)
 - [Deployment](#deployment)
@@ -62,7 +63,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 
 - **Web** — dark/light theme with localStorage persistence and FOUC prevention, keyboard shortcuts (`n` new item, `Escape` close, `?` help), offline banner
 - **PWA** — installable, with offline caching and a service worker
-- **Android** — local-first with optional sync; SQLCipher-encrypted Room database (Keystore-bound), encrypted local backups (PBKDF2 + AES-256-GCM via SAF), optional mTLS client-certificate authentication for sync, home-screen quick-add widget, biometric unlock, swipe-to-delete
+- **Android** — local-first with optional sync; SQLCipher-encrypted Room database (Keystore-bound), encrypted local backups (PBKDF2 + AES-256-GCM via SAF), optional mTLS client-certificate authentication for sync, home-screen quick-add widget, biometric unlock
 - **Mobile sync** — version-based incremental sync API for offline-first clients
 - **API documentation** — interactive Swagger UI at `/api/docs`
 - **Single binary** — the Go binary serves the SvelteKit SPA as static files; no external services
@@ -113,6 +114,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 
 - Go 1.26+
 - Node.js 22+
+- Android app only: JDK 17 and the Android SDK (compile/target SDK 35; the app itself requires Android 14+)
 
 ### Development
 
@@ -145,6 +147,16 @@ cd android && ./gradlew testDebugUnitTest lintDebug assembleDebug
 python3 android/tools/check_attribution_migration.py
 ```
 
+### Android
+
+Prebuilt APKs are attached to each [GitHub release](https://github.com/paolostivanin/insitu-ledger/releases); the release notes list the APK's SHA-256 and signing-certificate fingerprint so you can verify the download. To build it yourself:
+
+```bash
+cd android && ./gradlew assembleDebug
+```
+
+The app works fully offline with no server. To sync with your own instance, open **Settings > Connect to Server** and sign in; file-based JSON backup/restore is always available there too.
+
 ### Configuration
 
 | Flag / Env Var              | Default   | Description                  |
@@ -169,6 +181,8 @@ docker compose up --build
 
 This builds a multi-stage image (Node for the frontend, Go for the backend) and runs the server on port 8080. Data is persisted in a named Docker volume (`<project>_ledger_data`).
 
+The bundled `docker-compose.yml` publishes port 8080 on all interfaces. If your reverse proxy runs on the same host, change the mapping to `127.0.0.1:8080:8080` so the plain-HTTP port isn't reachable directly. Keep `restart: unless-stopped`: the admin Restore feature relies on the orchestrator restarting the container after it swaps the database.
+
 ### Reverse proxy (required)
 
 InSitu Ledger does **not** handle TLS. You must run it behind a reverse proxy such as [Caddy](https://caddyserver.com/) or nginx for HTTPS termination. Example Caddyfile:
@@ -188,11 +202,13 @@ InSitu Ledger fits comfortably in a small unprivileged LXC container on Proxmox 
 | Resource    | Alpine 3.21 | Debian 12  | Notes |
 |-------------|-------------|------------|-------|
 | vCPUs       | 1           | 1          | Bursts during CSV import / report generation |
-| RAM         | 256 MB      | 512 MB     | Backend idles around ~30 MB |
+| RAM         | 256 MB      | 512 MB     | The backend itself is light; headroom is for the OS and CSV import |
 | Swap        | 256 MB      | 256 MB     | |
 | Disk        | 4 GB        | 4 GB       | OS + binary + years of data; grows with `data/backups/` retention |
 | Unprivileged| yes         | yes        | |
 | Network     | bridged     | bridged    | Static IP recommended for the reverse-proxy upstream |
+
+Newer Alpine and Debian releases work the same way; the recipes below were written against the versions shown.
 
 #### Option A — Docker-in-LXC (matches the published `Dockerfile`)
 
@@ -397,7 +413,7 @@ Full interactive documentation is available at `/api/docs` (Swagger UI). The spe
 | Categories | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/categories` |
 | Accounts | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/accounts` |
 | Scheduled | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/scheduled` |
-| Sync | `GET /api/sync?since_version=N` |
+| Sync | `GET /api/sync?since=N[&owner_id=ID]` |
 | Reports | `GET /api/reports/summary`, `GET /api/reports/by-category`, `GET /api/reports/by-month`, `GET /api/reports/trend` |
 | Shared access | `GET /api/shared`, `POST /api/shared`, `DELETE /api/shared/{id}`, `GET /api/shared/accessible` |
 
