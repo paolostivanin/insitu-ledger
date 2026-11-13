@@ -4,7 +4,7 @@
 
 A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, and Android app with offline-first local storage and optional sync.
 
-**Current release:** backend + frontend `v1.25.0` · Android `v1.36.0` · MIT licensed
+**Current release:** backend + frontend `v1.26.0` · Android `v1.37.0` · MIT licensed
 
 ## Contents
 
