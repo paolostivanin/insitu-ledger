@@ -8,133 +8,160 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
+/**
+ * Money semantics. `positive` marks income; `negative` is reserved for values
+ * that are actually below zero (overdrawn balance, negative net). Expense rows
+ * render in onSurface with a true minus sign — red is not the default for
+ * spending. Every pair here clears WCAG AA on surface and surfaceContainer.
+ */
 @Immutable
 data class SemanticColors(
-	val income: Color,
-	val expense: Color,
-	val incomeContainer: Color,
-	val expenseContainer: Color
-)
+	val positive: Color,
+	val negative: Color,
+	val positiveContainer: Color,
+	val negativeContainer: Color
+) {
+	// Aliases kept for readability at income/expense call sites.
+	val income: Color get() = positive
+	val expense: Color get() = negative
+}
 
 private val LightSemanticColors = SemanticColors(
-	income = Color(0xFF1B7A3E),
-	expense = Color(0xFFB3261E),
-	incomeContainer = Color(0xFFD7F1DF),
-	expenseContainer = Color(0xFFFADAD7)
+	positive = Color(0xFF1E7B45),
+	negative = Color(0xFFB4372B),
+	positiveContainer = Color(0xFFD9F0E1),
+	negativeContainer = Color(0xFFF9DEDA)
 )
 
 private val DarkSemanticColors = SemanticColors(
-	income = Color(0xFF7FD49C),
-	expense = Color(0xFFFF8A80),
-	incomeContainer = Color(0xFF1F3A28),
-	expenseContainer = Color(0xFF4A1F1C)
+	positive = Color(0xFF7DD3A0),
+	negative = Color(0xFFFF9C8F),
+	positiveContainer = Color(0xFF1D3828),
+	negativeContainer = Color(0xFF47221D)
 )
 
 val LocalSemanticColors = compositionLocalOf { LightSemanticColors }
 
-// Brand: deep teal → emerald
-private val BrandTealLight = Color(0xFF00897B)
-private val BrandTealDark = Color(0xFF80CBC4)
+/** The resolved in-app theme (honours the Light/Dark/System setting). */
+val LocalIsDarkTheme = staticCompositionLocalOf { false }
 
 private val LightColorScheme = lightColorScheme(
-	primary = BrandTealLight,
+	primary = Color(0xFF0B6E63),
 	onPrimary = Color.White,
-	primaryContainer = Color(0xFFA8E5DC),
-	onPrimaryContainer = Color(0xFF002019),
-	inversePrimary = Color(0xFF4FB3A1),
+	primaryContainer = Color(0xFFCDEBE5),
+	onPrimaryContainer = Color(0xFF00201C),
+	inversePrimary = Color(0xFF7FD3C6),
 
-	secondary = Color(0xFF4A6360),
+	secondary = Color(0xFF4D5F5C),
 	onSecondary = Color.White,
-	secondaryContainer = Color(0xFFCDE8E2),
-	onSecondaryContainer = Color(0xFF052020),
+	secondaryContainer = Color(0xFFDDE6E3),
+	onSecondaryContainer = Color(0xFF17201E),
 
-	tertiary = Color(0xFFE57F45),
+	tertiary = Color(0xFF7C5800),
 	onTertiary = Color.White,
-	tertiaryContainer = Color(0xFFFFDBC8),
-	onTertiaryContainer = Color(0xFF361100),
+	tertiaryContainer = Color(0xFFFFDEA6),
+	onTertiaryContainer = Color(0xFF271900),
 
-	error = Color(0xFFB3261E),
+	error = Color(0xFFBA1A1A),
 	onError = Color.White,
-	errorContainer = Color(0xFFFADAD7),
+	errorContainer = Color(0xFFFFDAD6),
 	onErrorContainer = Color(0xFF410002),
 
-	background = Color(0xFFF6FBF9),
-	onBackground = Color(0xFF0E1614),
-	surface = Color(0xFFF6FBF9),
-	onSurface = Color(0xFF0E1614),
+	background = Color(0xFFFBFBFA),
+	onBackground = Color(0xFF1A1C1B),
+	surface = Color(0xFFFBFBFA),
+	onSurface = Color(0xFF1A1C1B),
 
-	surfaceVariant = Color(0xFFDCE5E2),
-	onSurfaceVariant = Color(0xFF3F4946),
+	surfaceVariant = Color(0xFFE3E5E4),
+	onSurfaceVariant = Color(0xFF5B6260),
+	surfaceTint = Color(0xFF0B6E63),
 
 	surfaceContainerLowest = Color(0xFFFFFFFF),
-	surfaceContainerLow = Color(0xFFF0F6F3),
-	surfaceContainer = Color(0xFFEAF1EE),
-	surfaceContainerHigh = Color(0xFFE3ECE8),
-	surfaceContainerHighest = Color(0xFFDDE6E3),
+	surfaceContainerLow = Color(0xFFF5F6F5),
+	surfaceContainer = Color(0xFFEFF1F0),
+	surfaceContainerHigh = Color(0xFFE9EBEA),
+	surfaceContainerHighest = Color(0xFFE3E5E4),
+	surfaceBright = Color(0xFFFBFBFA),
+	surfaceDim = Color(0xFFDBDDDC),
 
-	outline = Color(0xFF6F7976),
-	outlineVariant = Color(0xFFBEC9C5),
+	inverseSurface = Color(0xFF2E3130),
+	inverseOnSurface = Color(0xFFEFF1F0),
+
+	outline = Color(0xFF79807E),
+	outlineVariant = Color(0xFFDADEDC),
 	scrim = Color(0xFF000000)
 )
 
 private val DarkColorScheme = darkColorScheme(
-	primary = BrandTealDark,
+	primary = Color(0xFF7FD3C6),
 	onPrimary = Color(0xFF003731),
-	primaryContainer = Color(0xFF005048),
-	onPrimaryContainer = Color(0xFFA8E5DC),
-	inversePrimary = BrandTealLight,
+	primaryContainer = Color(0xFF0F4F47),
+	onPrimaryContainer = Color(0xFFCDEBE5),
+	inversePrimary = Color(0xFF0B6E63),
 
-	secondary = Color(0xFFB1CCC6),
-	onSecondary = Color(0xFF1C3530),
-	secondaryContainer = Color(0xFF334B46),
-	onSecondaryContainer = Color(0xFFCDE8E2),
+	secondary = Color(0xFFB7C9C5),
+	onSecondary = Color(0xFF223330),
+	secondaryContainer = Color(0xFF34413F),
+	onSecondaryContainer = Color(0xFFD5E2DF),
 
-	tertiary = Color(0xFFFFB68F),
-	onTertiary = Color(0xFF552100),
-	tertiaryContainer = Color(0xFF783200),
-	onTertiaryContainer = Color(0xFFFFDBC8),
+	tertiary = Color(0xFFF1C06A),
+	onTertiary = Color(0xFF412D00),
+	tertiaryContainer = Color(0xFF5E4200),
+	onTertiaryContainer = Color(0xFFFFDEA6),
 
 	error = Color(0xFFFFB4AB),
 	onError = Color(0xFF690005),
 	errorContainer = Color(0xFF93000A),
-	onErrorContainer = Color(0xFFFADAD7),
+	onErrorContainer = Color(0xFFFFDAD6),
 
-	background = Color(0xFF0F1413),
-	onBackground = Color(0xFFE2E4E2),
-	surface = Color(0xFF0F1413),
-	onSurface = Color(0xFFE2E4E2),
+	background = Color(0xFF121413),
+	onBackground = Color(0xFFE3E5E4),
+	surface = Color(0xFF121413),
+	onSurface = Color(0xFFE3E5E4),
 
-	surfaceVariant = Color(0xFF3F4946),
-	onSurfaceVariant = Color(0xFFBEC9C5),
+	surfaceVariant = Color(0xFF3A3F3D),
+	onSurfaceVariant = Color(0xFFBFC6C4),
+	surfaceTint = Color(0xFF7FD3C6),
 
-	surfaceContainerLowest = Color(0xFF0A0F0E),
-	surfaceContainerLow = Color(0xFF161D1B),
-	surfaceContainer = Color(0xFF1A2220),
-	surfaceContainerHigh = Color(0xFF252D2B),
-	surfaceContainerHighest = Color(0xFF303836),
+	surfaceContainerLowest = Color(0xFF0D0F0E),
+	surfaceContainerLow = Color(0xFF1A1C1B),
+	surfaceContainer = Color(0xFF1E2120),
+	surfaceContainerHigh = Color(0xFF282B2A),
+	surfaceContainerHighest = Color(0xFF333635),
+	surfaceBright = Color(0xFF383A39),
+	surfaceDim = Color(0xFF121413),
 
-	outline = Color(0xFF89938F),
-	outlineVariant = Color(0xFF3F4946),
+	inverseSurface = Color(0xFFE3E5E4),
+	inverseOnSurface = Color(0xFF2E3130),
+
+	outline = Color(0xFF899290),
+	outlineVariant = Color(0xFF3A3F3D),
 	scrim = Color(0xFF000000)
 )
 
+/** Resolves the stored theme preference ("light" / "dark" / anything = system). */
+@Composable
+fun resolveDarkTheme(themeMode: String?): Boolean = when (themeMode) {
+	"dark" -> true
+	"light" -> false
+	else -> isSystemInDarkTheme()
+}
+
 @Composable
 fun InSituLedgerTheme(
-	themeMode: String = "system",
+	darkTheme: Boolean,
 	content: @Composable () -> Unit
 ) {
-	val darkTheme = when (themeMode) {
-		"dark" -> true
-		"light" -> false
-		else -> isSystemInDarkTheme()
-	}
-
 	val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
 	val semanticColors = if (darkTheme) DarkSemanticColors else LightSemanticColors
 
-	CompositionLocalProvider(LocalSemanticColors provides semanticColors) {
+	CompositionLocalProvider(
+		LocalSemanticColors provides semanticColors,
+		LocalIsDarkTheme provides darkTheme
+	) {
 		MaterialTheme(
 			colorScheme = colorScheme,
 			typography = AppTypography,

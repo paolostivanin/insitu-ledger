@@ -1,184 +1,193 @@
 package com.insituledger.app.ui.dashboard
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ReceiptLong
-import androidx.compose.material.icons.automirrored.filled.TrendingDown
-import androidx.compose.material.icons.automirrored.filled.TrendingUp
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.domain.model.Account
+import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.Transaction
-import com.insituledger.app.ui.common.entryAttribution
-import com.insituledger.app.ui.common.AmountText
-import com.insituledger.app.ui.common.CurrencyFormatter
-import com.insituledger.app.ui.common.DashboardSkeleton
-import com.insituledger.app.ui.common.EmptyState
+import com.insituledger.app.ui.common.AddFab
+import com.insituledger.app.ui.common.AutoSizeMoneyText
+import com.insituledger.app.ui.common.BalanceText
+import com.insituledger.app.ui.common.DateLabels
+import com.insituledger.app.ui.common.LoadingIndicator
+import com.insituledger.app.ui.common.LocalContentPadding
 import com.insituledger.app.ui.common.LocalCurrencySymbol
+import com.insituledger.app.ui.common.MoneyFormat
+import com.insituledger.app.ui.common.MoneySign
+import com.insituledger.app.ui.common.MoneyText
+import com.insituledger.app.ui.common.NetText
 import com.insituledger.app.ui.common.SectionHeader
+import com.insituledger.app.ui.common.TransactionRow
+import com.insituledger.app.ui.common.TransactionRowModel
+import com.insituledger.app.ui.common.categoryColor
+import com.insituledger.app.ui.common.currencySymbolFor
+import com.insituledger.app.ui.common.entryAttribution
+import com.insituledger.app.ui.common.primaryCurrency
 import com.insituledger.app.ui.theme.AppSpacing
-import com.insituledger.app.ui.theme.BrandGradients
 import com.insituledger.app.ui.theme.LocalSemanticColors
+import com.insituledger.app.ui.theme.amountLarge
+import com.insituledger.app.ui.theme.amountMedium
+import java.time.LocalDate
+import java.time.format.TextStyle
+import java.util.Locale
+
+private const val RECENT_ROWS = 8
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
 	onTransactionClick: (Long) -> Unit,
 	onAddClick: () -> Unit,
+	onSeeAllTransactions: () -> Unit,
+	onManageAccounts: () -> Unit,
 	viewModel: DashboardViewModel = hiltViewModel()
 ) {
 	val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-	val haptic = LocalHapticFeedback.current
+	val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+	val pad = LocalContentPadding.current
 
 	Scaffold(
+		modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
 		topBar = {
-			CenterAlignedTopAppBar(
-				title = {
-					Text(
-						"InSitu Ledger",
-						style = MaterialTheme.typography.titleLarge,
-						fontWeight = FontWeight.SemiBold
-					)
-				},
-				colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-					containerColor = MaterialTheme.colorScheme.surface
-				)
-			)
+			TopAppBar(title = { Text("Overview") }, scrollBehavior = scrollBehavior)
 		},
 		floatingActionButton = {
-			BrandFab(
-				onClick = {
-					haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-					onAddClick()
-				}
-			)
+			AddFab(onClick = onAddClick, contentDescription = "Add transaction")
 		}
 	) { padding ->
-		if (uiState.isLoading) {
-			DashboardSkeleton(modifier = Modifier.padding(padding))
+		val data = uiState.data
+		if (uiState.isLoading || data == null) {
+			LoadingIndicator(modifier = Modifier.padding(padding))
 			return@Scaffold
 		}
-
-		val data = uiState.data ?: return@Scaffold
 
 		PullToRefreshBox(
 			isRefreshing = uiState.isRefreshing,
 			onRefresh = { viewModel.refresh() },
 			modifier = Modifier.fillMaxSize().padding(padding)
 		) {
+			val symbol = LocalCurrencySymbol.current
+			val primary = remember(data.accounts) { primaryCurrency(data.accounts) }
+			val rows = remember(data.recentTransactions, data.accounts, uiState.categories, uiState.currentUserId, symbol) {
+				buildRecentRows(
+					data.recentTransactions.take(RECENT_ROWS),
+					data.accounts,
+					uiState.categories,
+					uiState.currentUserId,
+					symbol,
+					primary
+				)
+			}
+
 			LazyColumn(
 				modifier = Modifier.fillMaxSize(),
-				contentPadding = PaddingValues(
-					start = AppSpacing.lg,
-					end = AppSpacing.lg,
-					top = AppSpacing.md,
-					bottom = 96.dp
-				),
-				verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
+				contentPadding = PaddingValues(bottom = AppSpacing.fabClearance)
 			) {
-				item {
-					HeroNetWorthCard(
-						balance = data.totalBalance,
+				item(key = "balance") {
+					BalanceHeader(
+						heroMode = uiState.heroMode,
+						totalBalance = data.totalBalance,
 						monthNet = data.monthIncome - data.monthExpense,
-						mode = uiState.heroMode,
-						modifier = Modifier.animateItem()
+						horizontalPadding = pad
 					)
 				}
-
-				item {
-					Row(
-						modifier = Modifier.fillMaxWidth().animateItem(),
-						horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
-					) {
-						FlowSummaryCard(
-							label = "Income",
-							amount = data.monthIncome,
-							isIncome = true,
-							modifier = Modifier.weight(1f)
-						)
-						FlowSummaryCard(
-							label = "Expenses",
-							amount = data.monthExpense,
-							isIncome = false,
-							modifier = Modifier.weight(1f)
-						)
-					}
+				item(key = "month") {
+					MonthSummary(
+						income = data.monthIncome,
+						expense = data.monthExpense,
+						modifier = Modifier.padding(horizontal = pad)
+					)
 				}
 
 				if (data.accounts.size > 1) {
-					item {
+					item(key = "accounts-header") {
 						SectionHeader(
 							title = "Accounts",
-							modifier = Modifier
-								.padding(top = AppSpacing.sm)
-								.animateItem()
+							horizontalPadding = pad,
+							actionLabel = "Manage",
+							onAction = onManageAccounts
 						)
 					}
 					items(data.accounts, key = { "account_${it.id}" }) { account ->
-						AccountRow(
-							name = account.name,
-							balance = account.balance,
-							currency = account.currency,
-							modifier = Modifier.animateItem()
+						AccountSummaryRow(
+							account = account,
+							symbol = currencySymbolFor(account.currency, symbol, primary),
+							currentUserId = uiState.currentUserId,
+							horizontalPadding = pad
 						)
 					}
 				}
 
-				item {
+				item(key = "recent-header") {
 					SectionHeader(
-						title = "Recent Transactions",
-						modifier = Modifier
-							.padding(top = AppSpacing.sm)
-							.animateItem()
+						title = "Recent",
+						horizontalPadding = pad,
+						actionLabel = if (rows.isNotEmpty()) "See all" else null,
+						onAction = onSeeAllTransactions
 					)
 				}
 
-				if (data.recentTransactions.isEmpty()) {
-					item {
-						Box(
+				if (rows.isEmpty()) {
+					item(key = "recent-empty") {
+						Column(
 							modifier = Modifier
-								.fillParentMaxHeight(0.5f)
 								.fillMaxWidth()
-								.animateItem()
+								.padding(horizontal = pad, vertical = AppSpacing.lg),
+							verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
 						) {
-							EmptyState(
-								icon = Icons.AutoMirrored.Filled.ReceiptLong,
-								title = "No transactions yet",
-								message = "Tap the + button to record your first transaction.",
-								actionLabel = "Add Transaction",
-								onAction = onAddClick
+							Text(
+								"No transactions yet. Add your first expense or income to see it here.",
+								style = MaterialTheme.typography.bodyMedium,
+								color = MaterialTheme.colorScheme.onSurfaceVariant
 							)
+							FilledTonalButton(onClick = onAddClick) { Text("Add transaction") }
 						}
 					}
 				} else {
-					val accountMap = data.accounts.associateBy { it.id }
-					val currentUserId = uiState.currentUserId
-					items(data.recentTransactions, key = { "txn_${it.id}" }) { txn ->
-						val account = accountMap[txn.accountId]
-						val attribution = entryAttribution(account?.isShared == true, txn.createdByUserId, txn.createdByName, currentUserId)
+					items(rows, key = { "txn_${it.id}" }) { row ->
 						TransactionRow(
-							txn = txn,
-							attribution = attribution,
-							onClick = { onTransactionClick(txn.id) },
-							modifier = Modifier.animateItem()
+							model = row,
+							onClick = { onTransactionClick(row.id) },
+							horizontalPadding = pad
 						)
 					}
 				}
@@ -187,303 +196,192 @@ fun DashboardScreen(
 	}
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun HeroNetWorthCard(
-	balance: Double,
+private fun BalanceHeader(
+	heroMode: String,
+	totalBalance: Double,
 	monthNet: Double,
-	mode: String,
-	modifier: Modifier = Modifier
-) {
-	val gradient = BrandGradients.hero()
-	val symbol = LocalCurrencySymbol.current
-	val netPrefix = if (monthNet >= 0) "+" else ""
-	val isMonthMode = mode == "month_net"
-	val headlineLabel = if (isMonthMode) "THIS MONTH" else "NET WORTH"
-	val headlineValue = if (isMonthMode) {
-		"$netPrefix${CurrencyFormatter.formatWithSymbol(monthNet, symbol)}"
-	} else {
-		CurrencyFormatter.formatWithSymbol(balance, symbol)
-	}
-	Surface(
-		modifier = modifier
-			.fillMaxWidth()
-			.shadow(elevation = 8.dp, shape = RoundedCornerShape(24.dp), clip = false),
-		shape = RoundedCornerShape(24.dp),
-		color = Color.Transparent
-	) {
-		Box(
-			modifier = Modifier
-				.fillMaxWidth()
-				.clip(RoundedCornerShape(24.dp))
-				.background(gradient)
-				.padding(horizontal = AppSpacing.xl, vertical = AppSpacing.xl)
-		) {
-			Column {
-				Text(
-					text = headlineLabel,
-					style = MaterialTheme.typography.labelMedium,
-					color = Color.White.copy(alpha = 0.78f),
-					fontWeight = FontWeight.SemiBold
-				)
-				Spacer(modifier = Modifier.height(AppSpacing.xs))
-				Text(
-					text = headlineValue,
-					style = MaterialTheme.typography.displayMedium.copy(fontFeatureSettings = "tnum"),
-					color = Color.White,
-					fontWeight = FontWeight.Bold
-				)
-				if (!isMonthMode) {
-					Spacer(modifier = Modifier.height(AppSpacing.md))
-					Row(verticalAlignment = Alignment.CenterVertically) {
-						Surface(
-							shape = RoundedCornerShape(50),
-							color = Color.White.copy(alpha = 0.18f)
-						) {
-							Row(
-								modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = 4.dp),
-								verticalAlignment = Alignment.CenterVertically,
-								horizontalArrangement = Arrangement.spacedBy(4.dp)
-							) {
-								Icon(
-									imageVector = if (monthNet >= 0) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
-									contentDescription = null,
-									tint = Color.White,
-									modifier = Modifier.size(14.dp)
-								)
-								Text(
-									text = "$netPrefix${CurrencyFormatter.formatWithSymbol(monthNet, symbol)}",
-									style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
-									color = Color.White,
-									fontWeight = FontWeight.SemiBold
-								)
-							}
-						}
-						Spacer(modifier = Modifier.width(AppSpacing.sm))
-						Text(
-							text = "this month",
-							style = MaterialTheme.typography.labelMedium,
-							color = Color.White.copy(alpha = 0.7f)
-						)
-					}
-				}
-			}
-		}
-	}
-}
-
-@Composable
-private fun FlowSummaryCard(
-	label: String,
-	amount: Double,
-	isIncome: Boolean,
-	modifier: Modifier = Modifier
-) {
-	val semantic = LocalSemanticColors.current
-	val symbol = LocalCurrencySymbol.current
-	val accent = if (isIncome) semantic.income else semantic.expense
-	val container = if (isIncome) semantic.incomeContainer else semantic.expenseContainer
-	val icon = if (isIncome) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown
-	Surface(
-		modifier = modifier,
-		shape = RoundedCornerShape(20.dp),
-		color = MaterialTheme.colorScheme.surfaceContainerLow,
-		tonalElevation = 0.dp,
-		shadowElevation = 1.dp
-	) {
-		Column(modifier = Modifier.padding(AppSpacing.lg)) {
-			Box(
-				modifier = Modifier
-					.size(36.dp)
-					.clip(CircleShape)
-					.background(container),
-				contentAlignment = Alignment.Center
-			) {
-				Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(20.dp))
-			}
-			Spacer(modifier = Modifier.height(AppSpacing.md))
-			Text(
-				text = label,
-				style = MaterialTheme.typography.labelMedium,
-				color = MaterialTheme.colorScheme.onSurfaceVariant
-			)
-			Spacer(modifier = Modifier.height(AppSpacing.xxs))
-			Text(
-				text = CurrencyFormatter.formatWithSymbol(amount, symbol),
-				style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
-				color = accent,
-				fontWeight = FontWeight.Bold
-			)
-		}
-	}
-}
-
-@Composable
-private fun AccountRow(
-	name: String,
-	balance: Double,
-	currency: String,
-	modifier: Modifier = Modifier
+	horizontalPadding: Dp
 ) {
 	val symbol = LocalCurrencySymbol.current
-	Surface(
-		modifier = modifier.fillMaxWidth(),
-		shape = RoundedCornerShape(16.dp),
-		color = MaterialTheme.colorScheme.surfaceContainerLow,
-		shadowElevation = 1.dp
-	) {
-		Row(
-			modifier = Modifier.fillMaxWidth().padding(AppSpacing.md),
-			verticalAlignment = Alignment.CenterVertically
-		) {
-			AccountAvatar(name = name)
-			Spacer(modifier = Modifier.width(AppSpacing.md))
-			Column(modifier = Modifier.weight(1f)) {
-				Text(
-					text = name,
-					style = MaterialTheme.typography.bodyLarge,
-					fontWeight = FontWeight.Medium,
-					color = MaterialTheme.colorScheme.onSurface
-				)
-				Text(
-					text = currency,
-					style = MaterialTheme.typography.labelSmall,
-					color = MaterialTheme.colorScheme.onSurfaceVariant
-				)
-			}
-			Text(
-				text = CurrencyFormatter.formatWithSymbol(balance, symbol),
-				style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
-				fontWeight = FontWeight.SemiBold,
-				color = MaterialTheme.colorScheme.onSurface
-			)
-		}
-	}
-}
+	val monthName = LocalDate.now().month.getDisplayName(TextStyle.FULL, Locale.getDefault())
+	val isMonthMode = heroMode == "month_net"
+	val headline = if (isMonthMode) monthNet else totalBalance
+	val headlineText = if (isMonthMode) MoneyFormat.net(headline, symbol) else MoneyFormat.format(headline, symbol)
+	val headlineColor = if (headline < -0.004) LocalSemanticColors.current.negative
+	else MaterialTheme.colorScheme.onSurface
 
-@Composable
-private fun TransactionRow(
-	txn: Transaction,
-	attribution: String?,
-	onClick: () -> Unit,
-	modifier: Modifier = Modifier
-) {
-	val semantic = LocalSemanticColors.current
-	val isIncome = txn.type == "income"
-	val accent = if (isIncome) semantic.income else semantic.expense
-	val container = if (isIncome) semantic.incomeContainer else semantic.expenseContainer
-	Surface(
-		modifier = modifier.fillMaxWidth(),
-		shape = RoundedCornerShape(16.dp),
-		color = MaterialTheme.colorScheme.surfaceContainerLow,
-		shadowElevation = 1.dp,
-		onClick = onClick
-	) {
-		Row(
-			modifier = Modifier.fillMaxWidth().padding(AppSpacing.md),
-			verticalAlignment = Alignment.CenterVertically
-		) {
-			Box(
-				modifier = Modifier
-					.size(40.dp)
-					.clip(CircleShape)
-					.background(container),
-				contentAlignment = Alignment.Center
-			) {
-				Icon(
-					imageVector = if (isIncome) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
-					contentDescription = null,
-					tint = accent,
-					modifier = Modifier.size(20.dp)
-				)
-			}
-			Spacer(modifier = Modifier.width(AppSpacing.md))
-			Column(modifier = Modifier.weight(1f)) {
-				Text(
-					text = txn.description?.takeIf { it.isNotBlank() }
-						?: txn.type.replaceFirstChar { it.uppercase() },
-					style = MaterialTheme.typography.bodyLarge,
-					fontWeight = FontWeight.Medium,
-					color = MaterialTheme.colorScheme.onSurface,
-					maxLines = 1
-				)
-				val secondary = formatDateLabel(txn.date)
-				Text(
-					text = secondary,
-					style = MaterialTheme.typography.bodySmall,
-					color = MaterialTheme.colorScheme.onSurfaceVariant
-				)
-				attribution?.let {
-					Text(it, style = MaterialTheme.typography.bodySmall,
-						color = MaterialTheme.colorScheme.onSurfaceVariant)
-				}
-			}
-			AmountText(
-				amount = txn.amount,
-				type = txn.type,
-				style = MaterialTheme.typography.titleMedium
-			)
-		}
-	}
-}
-
-@Composable
-private fun AccountAvatar(name: String) {
-	val initials = name.trim().take(1).uppercase().ifEmpty { "•" }
-	val palette = listOf(
-		Color(0xFF26A69A),
-		Color(0xFF42A5F5),
-		Color(0xFFAB47BC),
-		Color(0xFFFFA726),
-		Color(0xFFEF5350),
-		Color(0xFF66BB6A)
-	)
-	val color = palette[(name.hashCode().mod(palette.size) + palette.size) % palette.size]
-	Box(
+	Column(
 		modifier = Modifier
-			.size(40.dp)
-			.clip(CircleShape)
-			.background(color.copy(alpha = 0.18f)),
-		contentAlignment = Alignment.Center
+			.fillMaxWidth()
+			.padding(start = horizontalPadding, end = horizontalPadding, top = AppSpacing.sm, bottom = AppSpacing.lg)
+			.semantics(mergeDescendants = true) {}
 	) {
 		Text(
-			text = initials,
-			style = MaterialTheme.typography.titleMedium,
+			text = if (isMonthMode) "Net this month" else "Net worth",
+			style = MaterialTheme.typography.labelLarge,
+			color = MaterialTheme.colorScheme.onSurfaceVariant
+		)
+		Spacer(Modifier.height(AppSpacing.xs))
+		AutoSizeMoneyText(
+			text = headlineText,
+			style = MaterialTheme.typography.amountLarge,
+			color = headlineColor,
+			modifier = Modifier.fillMaxWidth()
+		)
+		Spacer(Modifier.height(AppSpacing.xs))
+		// Wraps rather than clipping when the figure is long or text is large.
+		FlowRow(verticalArrangement = Arrangement.Center) {
+			if (isMonthMode) {
+				Text(
+					"Net worth ",
+					style = MaterialTheme.typography.bodyMedium,
+					color = MaterialTheme.colorScheme.onSurfaceVariant
+				)
+				BalanceText(
+					value = totalBalance,
+					style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
+					color = MaterialTheme.colorScheme.onSurfaceVariant
+				)
+			} else {
+				NetText(value = monthNet, style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"))
+				Text(
+					" in $monthName",
+					style = MaterialTheme.typography.bodyMedium,
+					color = MaterialTheme.colorScheme.onSurfaceVariant,
+				)
+			}
+		}
+	}
+}
+
+@Composable
+private fun MonthSummary(income: Double, expense: Double, modifier: Modifier = Modifier) {
+	val symbol = LocalCurrencySymbol.current
+	val monthName = LocalDate.now().month.getDisplayName(TextStyle.FULL, Locale.getDefault())
+	Surface(
+		color = MaterialTheme.colorScheme.surfaceContainer,
+		shape = MaterialTheme.shapes.medium,
+		modifier = modifier.fillMaxWidth()
+	) {
+		Column(Modifier.padding(AppSpacing.lg)) {
+			Text(
+				monthName,
+				style = MaterialTheme.typography.titleSmall,
+				color = MaterialTheme.colorScheme.onSurfaceVariant
+			)
+			Spacer(Modifier.height(AppSpacing.md))
+			// Side by side normally; stacked when the effective width (dp ÷ font
+			// scale) is too small for two figures, e.g. 320dp at 2× text.
+			val config = LocalConfiguration.current
+			val incomeText = MoneyFormat.format(income, symbol, MoneySign.NONE)
+			val expenseText = MoneyFormat.format(expense, symbol, MoneySign.NONE)
+			if (config.screenWidthDp / config.fontScale < 260f) {
+				Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+					SummaryFigure("Income", incomeText, LocalSemanticColors.current.positive, Modifier.fillMaxWidth())
+					SummaryFigure("Expenses", expenseText, MaterialTheme.colorScheme.onSurface, Modifier.fillMaxWidth())
+				}
+			} else {
+				Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+					SummaryFigure("Income", incomeText, LocalSemanticColors.current.positive, Modifier.weight(1f))
+					VerticalDivider(
+						color = MaterialTheme.colorScheme.outlineVariant,
+						modifier = Modifier.fillMaxHeight().padding(horizontal = AppSpacing.md)
+					)
+					SummaryFigure("Expenses", expenseText, MaterialTheme.colorScheme.onSurface, Modifier.weight(1f))
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun SummaryFigure(label: String, text: String, color: androidx.compose.ui.graphics.Color, modifier: Modifier) {
+	Column(modifier.semantics(mergeDescendants = true) {}) {
+		Text(
+			label,
+			style = MaterialTheme.typography.labelMedium,
+			color = MaterialTheme.colorScheme.onSurfaceVariant,
+			maxLines = 1,
+			overflow = TextOverflow.Ellipsis
+		)
+		Spacer(Modifier.height(2.dp))
+		AutoSizeMoneyText(
+			text = text,
+			style = MaterialTheme.typography.amountMedium,
 			color = color,
-			fontWeight = FontWeight.Bold
+			steps = listOf(16, 14, 12).map { androidx.compose.ui.unit.TextUnit(it.toFloat(), androidx.compose.ui.unit.TextUnitType.Sp) }
 		)
 	}
 }
 
 @Composable
-private fun BrandFab(onClick: () -> Unit) {
-	val gradient = BrandGradients.hero()
-	Surface(
-		onClick = onClick,
-		shape = CircleShape,
-		color = Color.Transparent,
-		shadowElevation = 8.dp,
-		modifier = Modifier.size(64.dp)
+private fun AccountSummaryRow(
+	account: Account,
+	symbol: String,
+	currentUserId: Long?,
+	horizontalPadding: Dp
+) {
+	val shared = when {
+		account.isShared && account.userId != currentUserId && account.ownerName.isNotEmpty() -> "Shared by ${account.ownerName}"
+		account.isShared -> "Shared"
+		else -> null
+	}
+	Row(
+		modifier = Modifier
+			.fillMaxWidth()
+			.heightIn(min = AppSpacing.rowMinHeight)
+			.semantics(mergeDescendants = true) {}
+			.padding(horizontal = horizontalPadding, vertical = AppSpacing.sm),
+		verticalAlignment = Alignment.CenterVertically
 	) {
-		Box(
-			modifier = Modifier
-				.fillMaxSize()
-				.background(gradient),
-			contentAlignment = Alignment.Center
-		) {
-			Icon(
-				Icons.Default.Add,
-				contentDescription = "Add Transaction",
-				tint = Color.White,
-				modifier = Modifier.size(28.dp)
+		Column(Modifier.weight(1f)) {
+			Text(
+				account.name,
+				style = MaterialTheme.typography.bodyLarge,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis
+			)
+			Text(
+				listOfNotNull(account.currency, shared).joinToString(" · "),
+				style = MaterialTheme.typography.bodyMedium,
+				color = MaterialTheme.colorScheme.onSurfaceVariant,
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis
 			)
 		}
+		Spacer(Modifier.width(AppSpacing.md))
+		BalanceText(value = account.balance, symbol = symbol)
 	}
 }
 
-private fun formatDateLabel(date: String): String {
-	// Input may be "yyyy-MM-dd", "yyyy-MM-ddTHH:mm", or RFC3339-with-offset
-	// "yyyy-MM-ddTHH:mm:ss+02:00". Strip any seconds + offset tail with take(5).
-	val datePart = if (date.contains("T")) date.substringBefore("T") else date
-	val timePart = if (date.contains("T")) date.substringAfter("T").take(5) else null
-	return if (timePart != null) "$datePart  $timePart" else datePart
+private fun buildRecentRows(
+	transactions: List<Transaction>,
+	accounts: List<Account>,
+	categories: List<Category>,
+	currentUserId: Long?,
+	preferredSymbol: String,
+	primary: String?
+): List<TransactionRowModel> {
+	val accountMap = accounts.associateBy { it.id }
+	val categoryMap = categories.associateBy { it.id }
+	val showAccount = accounts.size > 1
+	val today = LocalDate.now()
+	return transactions.map { txn ->
+		val account = accountMap[txn.accountId]
+		val categoryName = categoryMap[txn.categoryId]?.name
+		val day = DateLabels.parseDay(txn.date)?.let { DateLabels.day(it, today) }
+		val supporting = listOfNotNull(day, categoryName, account?.name?.takeIf { showAccount }).joinToString(" · ")
+		TransactionRowModel(
+			id = txn.id,
+			title = txn.description?.takeIf { it.isNotBlank() } ?: categoryName ?: txn.type.replaceFirstChar { it.uppercase() },
+			supporting = supporting,
+			categoryColor = categoryColor(categories, txn.categoryId),
+			attribution = entryAttribution(account?.isShared == true, txn.createdByUserId, txn.createdByName, currentUserId),
+			amount = txn.amount,
+			type = txn.type,
+			symbol = currencySymbolFor(txn.currency, preferredSymbol, primary)
+		)
+	}
 }

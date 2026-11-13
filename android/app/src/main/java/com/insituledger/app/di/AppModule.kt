@@ -12,6 +12,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
+import java.time.Clock
 import javax.inject.Singleton
 
 @Module
@@ -42,4 +43,8 @@ object AppModule {
     @Provides fun provideTransactionDao(db: AppDatabase): TransactionDao = db.transactionDao()
     @Provides fun provideScheduledTransactionDao(db: AppDatabase): ScheduledTransactionDao = db.scheduledTransactionDao()
     @Provides fun providePendingOperationDao(db: AppDatabase): PendingOperationDao = db.pendingOperationDao()
+
+    // Unscoped on purpose: each injection re-reads the device zone, so a
+    // ViewModel created after the user travels sees the new zone.
+    @Provides fun provideClock(): Clock = Clock.systemDefaultZone()
 }

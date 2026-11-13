@@ -170,6 +170,25 @@ class RruleTest {
     }
 
     @Test
+    fun labelsOneTimeSchedules() {
+        assertEquals("One-time", Rrule.label("FREQ=DAILY", 1))
+        assertEquals("Daily", Rrule.label("FREQ=DAILY", null))
+        assertEquals("Daily", Rrule.label("FREQ=DAILY", 5))
+        assertEquals("Every 2 days", Rrule.label("FREQ=DAILY;INTERVAL=2", 1))
+        assertEquals("Weekly", Rrule.label("FREQ=WEEKLY", 1))
+    }
+
+    @Test
+    fun advanceDateUsesTheGivenZone() {
+        val rome = java.time.ZoneId.of("Europe/Rome")
+        // Wall clock is stepped in the zone, and the offset follows DST.
+        assertEquals(
+            "2027-04-20T09:00:00+02:00" to false,
+            Rrule.advanceDate("2027-03-20T09:00:00+01:00", "FREQ=MONTHLY", rome)
+        )
+    }
+
+    @Test
     fun labelNeverLeaksRawString() {
         assertEquals("Daily", Rrule.label("FREQ=DAILY;INTERVAL=1"))
         assertEquals("Monthly", Rrule.label("total garbage"))

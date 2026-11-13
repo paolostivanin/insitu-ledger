@@ -1,693 +1,367 @@
-@file:OptIn(ExperimentalLayoutApi::class)
-
 package com.insituledger.app.ui.common
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.unit.Velocity
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.insituledger.app.ui.theme.AppSpacing
-import com.insituledger.app.ui.theme.LocalSemanticColors
+import androidx.compose.foundation.clickable
 
-@Composable
-fun AmountText(
-    amount: Double,
-    type: String,
-    modifier: Modifier = Modifier,
-    style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.titleMedium
-) {
-    val semanticColors = LocalSemanticColors.current
-    val color = if (type == "income") semanticColors.income else semanticColors.expense
-    val prefix = if (type == "income") "+" else "-"
-    val symbol = LocalCurrencySymbol.current
-    val formatted = CurrencyFormatter.formatWithSymbol(amount, symbol)
-    Text(
-        text = "$prefix$formatted",
-        color = color,
-        style = style.copy(fontFeatureSettings = "tnum"),
-        fontWeight = FontWeight.SemiBold,
-        modifier = modifier
-    )
-}
-
+/** Thin top progress bar for first loads; data comes from Room in milliseconds. */
 @Composable
 fun LoadingIndicator(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .semantics { contentDescription = "Loading" }
+    ) {
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter))
     }
 }
 
+/** Restrained empty state: small icon, short title, one line, optional action. */
 @Composable
 fun EmptyState(
     message: String,
     modifier: Modifier = Modifier,
-    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    icon: ImageVector? = null,
     title: String? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null
 ) {
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = BiasAlignment(0f, -0.35f)) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(horizontal = AppSpacing.xl)
+            modifier = Modifier
+                .widthIn(max = 360.dp)
+                .padding(horizontal = AppSpacing.xl)
         ) {
             if (icon != null) {
-                Box(
-                    modifier = Modifier
-                        .size(96.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-                Spacer(modifier = Modifier.height(AppSpacing.lg))
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.size(AppSpacing.md))
             }
             if (title != null) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(AppSpacing.xs))
+                Spacer(modifier = Modifier.size(AppSpacing.xs))
             }
             Text(
                 text = message,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                textAlign = TextAlign.Center
             )
             if (actionLabel != null && onAction != null) {
-                Spacer(modifier = Modifier.height(AppSpacing.xl))
+                Spacer(modifier = Modifier.size(AppSpacing.lg))
                 FilledTonalButton(onClick = onAction) { Text(actionLabel) }
             }
         }
     }
 }
 
+/** Expense / Income selector. Neutral colours: the type is not a warning. */
 @Composable
-fun ErrorMessage(message: String, onRetry: (() -> Unit)? = null, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.error
-        )
-        if (onRetry != null) {
-            Spacer(modifier = Modifier.height(AppSpacing.lg))
-            Button(onClick = onRetry) { Text("Retry") }
-        }
-    }
-}
-
-@Composable
-fun IncomeExpenseToggle(
+fun TypeToggle(
     selected: String,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val semanticColors = LocalSemanticColors.current
-    Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-        OutlinedButton(
-            onClick = { onSelect("expense") },
-            modifier = Modifier.weight(1f).height(44.dp),
-            colors = if (selected == "expense") ButtonDefaults.outlinedButtonColors(
-                containerColor = semanticColors.expense.copy(alpha = 0.12f),
-                contentColor = semanticColors.expense
-            ) else ButtonDefaults.outlinedButtonColors(),
-            border = BorderStroke(
-                width = if (selected == "expense") 2.dp else 1.dp,
-                color = if (selected == "expense") semanticColors.expense else MaterialTheme.colorScheme.outline
-            )
-        ) { Text("Expense", fontWeight = if (selected == "expense") FontWeight.Bold else FontWeight.Normal) }
-
-        OutlinedButton(
-            onClick = { onSelect("income") },
-            modifier = Modifier.weight(1f).height(44.dp),
-            colors = if (selected == "income") ButtonDefaults.outlinedButtonColors(
-                containerColor = semanticColors.income.copy(alpha = 0.12f),
-                contentColor = semanticColors.income
-            ) else ButtonDefaults.outlinedButtonColors(),
-            border = BorderStroke(
-                width = if (selected == "income") 2.dp else 1.dp,
-                color = if (selected == "income") semanticColors.income else MaterialTheme.colorScheme.outline
-            )
-        ) { Text("Income", fontWeight = if (selected == "income") FontWeight.Bold else FontWeight.Normal) }
-    }
-}
-
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CategoryDropdownWithAdd(
-    categories: List<com.insituledger.app.domain.model.Category>,
-    selectedId: Long?,
-    type: String,
-    onSelect: (Long) -> Unit,
-    onCreateCategory: (name: String, type: String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val filteredCats = categories.filter { it.type == type }
-    val selectedCat = categories.find { it.id == selectedId }
-    val parentCat = selectedCat?.parentId?.let { pid -> categories.find { it.id == pid } }
-
-    var showModal by remember { mutableStateOf(false) }
-    var showAddDialog by remember { mutableStateOf(false) }
-
-    // Compact clickable text trigger (matches date/time style)
-    val displayText = if (parentCat != null) {
-        "${parentCat.name} > ${selectedCat?.name ?: ""}"
-    } else {
-        selectedCat?.name ?: "Category"
-    }
-    Row(
-        modifier = modifier.fillMaxWidth().clickable { showModal = true },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(ColorUtils.parseHex(parentCat?.color ?: selectedCat?.color))
-        )
-        Text(
-            text = displayText,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.primary
-        )
-    }
-
-    // Bottom sheet modal
-    if (showModal) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        // Absorb leftover scroll/fling from the inner LazyColumn so scrolling at the
-        // top of the list doesn't get forwarded to the sheet's drag handler. Direct
-        // drag on the sheet's drag handle / non-scrollable areas still dismisses.
-        val absorbScrollConnection = remember {
-            object : NestedScrollConnection {
-                override fun onPostScroll(
-                    consumed: Offset,
-                    available: Offset,
-                    source: NestedScrollSource
-                ): Offset = available
-                override suspend fun onPostFling(
-                    consumed: Velocity,
-                    available: Velocity
-                ): Velocity = available
-            }
-        }
-        var searchQuery by remember { mutableStateOf("") }
-
-        val topLevel = remember(filteredCats) { filteredCats.filter { it.parentId == null } }
-
-        fun matchesSearch(cat: com.insituledger.app.domain.model.Category): Boolean {
-            if (searchQuery.isBlank()) return true
-            return cat.name.contains(searchQuery, ignoreCase = true)
-        }
-
-        val filteredGroups = remember(topLevel, searchQuery) {
-            topLevel.filter { parent ->
-                matchesSearch(parent) || filteredCats.any { it.parentId == parent.id && matchesSearch(it) }
-            }
-        }
-
-        ModalBottomSheet(
-            onDismissRequest = { showModal = false },
-            sheetState = sheetState,
-            containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = AppSpacing.xl)
+    val options = listOf("expense" to "Expense", "income" to "Income")
+    SingleChoiceSegmentedButtonRow(modifier = modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, (value, label) ->
+            SegmentedButton(
+                selected = selected == value,
+                onClick = { onSelect(value) },
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                icon = {},
+                modifier = Modifier.heightIn(min = 48.dp)
             ) {
-                // Header
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = AppSpacing.lg),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "Select Category",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    IconButton(onClick = { showModal = false }) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
-                    }
-                }
-
-                // Search + New row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.sm),
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = { Text("Search") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    FilledTonalButton(
-                        onClick = { showModal = false; showAddDialog = true }
-                    ) {
-                        Text("New")
-                    }
-                }
-
-                // Category groups
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 400.dp)
-                        .nestedScroll(absorbScrollConnection),
-                    contentPadding = PaddingValues(horizontal = AppSpacing.lg, vertical = AppSpacing.sm),
-                    verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
-                ) {
-                    items(filteredGroups, key = { it.id }) { parent ->
-                        val allChildren = remember(filteredCats, searchQuery, parent.id) {
-                            val children = filteredCats.filter { it.parentId == parent.id && matchesSearch(it) }
-                            if (searchQuery.isBlank()) {
-                                filteredCats.filter { it.parentId == parent.id }
-                            } else {
-                                children.ifEmpty {
-                                    filteredCats.filter { it.parentId == parent.id }
-                                }
-                            }
-                        }
-
-                        if (allChildren.isNotEmpty()) {
-                            // Parent as group header
-                            Column {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
-                                    modifier = Modifier.padding(bottom = 6.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .clip(CircleShape)
-                                            .background(ColorUtils.parseHex(parent.color))
-                                    )
-                                    Text(
-                                        text = parent.name,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                // Subcategory chips
-                                FlowRow(
-                                    modifier = Modifier.padding(start = AppSpacing.sm),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    allChildren.forEach { child ->
-                                        val isSelected = child.id == selectedId
-                                        Surface(
-                                            onClick = {
-                                                onSelect(child.id)
-                                                showModal = false
-                                            },
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = if (isSelected)
-                                                MaterialTheme.colorScheme.primaryContainer
-                                            else
-                                                MaterialTheme.colorScheme.surfaceVariant,
-                                            border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
-                                        ) {
-                                            Text(
-                                                text = child.name,
-                                                modifier = Modifier.padding(horizontal = AppSpacing.md, vertical = 6.dp),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = if (isSelected)
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                                else
-                                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            // Standalone parent (no children)
-                            val isSelected = parent.id == selectedId
-                            Surface(
-                                onClick = {
-                                    onSelect(parent.id)
-                                    showModal = false
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isSelected)
-                                    MaterialTheme.colorScheme.primaryContainer
-                                else
-                                    Color.Transparent
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
-                                    modifier = Modifier.padding(vertical = 6.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .clip(CircleShape)
-                                            .background(ColorUtils.parseHex(parent.color))
-                                    )
-                                    Text(
-                                        text = parent.name,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = if (isSelected)
-                                            MaterialTheme.colorScheme.onPrimaryContainer
-                                        else
-                                            MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    if (filteredGroups.isEmpty()) {
-                        item {
-                            Text(
-                                "No matching categories",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = AppSpacing.xl),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
-                    }
-                }
+                Text(label, maxLines = 1)
             }
         }
-    }
-
-    // Create category dialog
-    if (showAddDialog) {
-        var newName by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showAddDialog = false },
-            title = { Text("New ${type.replaceFirstChar { it.uppercase() }} Category") },
-            text = {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    label = { Text("Category name") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (newName.isNotBlank()) {
-                            onCreateCategory(newName.trim(), type)
-                            showAddDialog = false
-                        }
-                    },
-                    enabled = newName.isNotBlank()
-                ) { Text("Create") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddDialog = false }) { Text("Cancel") }
-            }
-        )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** The single primary FAB used on list screens. */
 @Composable
-fun CompactAccountChip(
-    accountDisplays: List<com.insituledger.app.ui.transactions.AccountDisplay>,
-    selectedId: Long?,
-    onSelect: (id: Long, currency: String) -> Unit,
-    onCreateAccount: (name: String, currency: String) -> Unit,
+fun AddFab(
+    onClick: () -> Unit,
+    contentDescription: String,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    var showAddDialog by remember { mutableStateOf(false) }
-
-    val selectedDisplay = accountDisplays.find { it.account.id == selectedId }
-
-    // Compact clickable text trigger (matches date/time style)
-    val chipLabel = if (selectedDisplay != null) {
-        "${selectedDisplay.label} (${selectedDisplay.account.currency})"
-    } else {
-        "Account"
-    }
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
-        Text(
-            text = chipLabel,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.clickable { expanded = true }.menuAnchor(MenuAnchorType.PrimaryNotEditable)
+    FloatingActionButton(
+        onClick = onClick,
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        elevation = FloatingActionButtonDefaults.elevation(
+            defaultElevation = 2.dp,
+            pressedElevation = 4.dp,
+            focusedElevation = 2.dp,
+            hoveredElevation = 3.dp
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            accountDisplays.forEach { display ->
-                DropdownMenuItem(
-                    text = {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                display.label,
-                                fontWeight = if (display.account.id == selectedId) FontWeight.SemiBold else FontWeight.Normal
-                            )
-                            Text(
-                                display.account.currency,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    },
-                    onClick = {
-                        onSelect(display.account.id, display.account.currency)
-                        expanded = false
-                    }
-                )
-            }
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                        Text("New account", color = MaterialTheme.colorScheme.primary)
-                    }
-                },
-                onClick = { expanded = false; showAddDialog = true }
-            )
-        }
-    }
-
-    if (showAddDialog) {
-        var newName by remember { mutableStateOf("") }
-        var newCurrency by remember { mutableStateOf("EUR") }
-        var currencyExpanded by remember { mutableStateOf(false) }
-        val currencies = listOf("EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD", "BRL", "CNY", "INR")
-
-        AlertDialog(
-            onDismissRequest = { showAddDialog = false },
-            title = { Text("New Account") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("Account name") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    ExposedDropdownMenuBox(
-                        expanded = currencyExpanded,
-                        onExpandedChange = { currencyExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = newCurrency,
-                            onValueChange = {}, readOnly = true,
-                            label = { Text("Currency") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = currencyExpanded) },
-                            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                        )
-                        ExposedDropdownMenu(expanded = currencyExpanded, onDismissRequest = { currencyExpanded = false }) {
-                            currencies.forEach { cur ->
-                                DropdownMenuItem(
-                                    text = { Text(cur) },
-                                    onClick = { newCurrency = cur; currencyExpanded = false }
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (newName.isNotBlank()) {
-                            onCreateAccount(newName.trim(), newCurrency)
-                            showAddDialog = false
-                        }
-                    },
-                    enabled = newName.isNotBlank()
-                ) { Text("Create") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddDialog = false }) { Text("Cancel") }
-            }
-        )
+    ) {
+        Icon(Icons.Default.Add, contentDescription = contentDescription)
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** Confirmation dialog; the confirm action is error-coloured when destructive. */
 @Composable
-fun AccountDropdownWithAdd(
-    accountDisplays: List<com.insituledger.app.ui.transactions.AccountDisplay>,
-    selectedId: Long?,
-    onSelect: (id: Long, currency: String) -> Unit,
-    onCreateAccount: (name: String, currency: String) -> Unit,
-    modifier: Modifier = Modifier
+fun ConfirmDialog(
+    title: String,
+    text: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    destructive: Boolean = true,
+    dismissLabel: String = "Cancel",
+    working: Boolean = false
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    var showAddDialog by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = { if (!working) onDismiss() },
+        title = { Text(title) },
+        text = { Text(text) },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                enabled = !working,
+                colors = if (destructive) androidx.compose.material3.ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                ) else androidx.compose.material3.ButtonDefaults.textButtonColors()
+            ) { Text(confirmLabel) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !working) { Text(dismissLabel) }
+        }
+    )
+}
 
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
-        OutlinedTextField(
-            value = accountDisplays.find { it.account.id == selectedId }?.label ?: "",
-            onValueChange = {}, readOnly = true, label = { Text("Account") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
+/**
+ * A form row that opens a picker: leading icon, value (or placeholder), and a
+ * trailing chevron. 56dp tall, announced as a button with its label.
+ */
+@Composable
+fun SelectorRow(
+    icon: ImageVector,
+    label: String,
+    value: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = label,
+    valueLeading: (@Composable () -> Unit)? = null,
+    supporting: String? = null,
+    isError: Boolean = false,
+    trailing: (@Composable () -> Unit)? = {
+        Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            accountDisplays.forEach { display ->
-                DropdownMenuItem(
-                    text = { Text("${display.label} (${display.account.currency})") },
-                    onClick = {
-                        onSelect(display.account.id, display.account.currency)
-                        expanded = false
-                    }
+    }
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = AppSpacing.rowMinHeight)
+            .clickable(role = Role.Button, onClickLabel = "Change $label", onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$label: ${value ?: "not set"}"
+            }
+            .padding(horizontal = AppSpacing.screenH),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.size(AppSpacing.lg))
+        Column(modifier = Modifier.weight(1f).padding(vertical = AppSpacing.sm)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (valueLeading != null && value != null) {
+                    valueLeading()
+                    Spacer(Modifier.size(AppSpacing.sm))
+                }
+                Text(
+                    text = value ?: placeholder,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = when {
+                        isError -> MaterialTheme.colorScheme.error
+                        value == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                        Text("New account", color = MaterialTheme.colorScheme.primary)
-                    }
-                },
-                onClick = { expanded = false; showAddDialog = true }
-            )
+            if (supporting != null) {
+                Text(
+                    text = supporting,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (trailing != null) {
+            Spacer(Modifier.size(AppSpacing.sm))
+            trailing()
         }
     }
+}
 
-    if (showAddDialog) {
-        var newName by remember { mutableStateOf("") }
-        var newCurrency by remember { mutableStateOf("EUR") }
-        var currencyExpanded by remember { mutableStateOf(false) }
-        val currencies = listOf("EUR", "USD", "GBP", "CHF", "JPY", "CAD", "AUD", "BRL", "CNY", "INR")
-
-        AlertDialog(
-            onDismissRequest = { showAddDialog = false },
-            title = { Text("New Account") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("Account name") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    ExposedDropdownMenuBox(
-                        expanded = currencyExpanded,
-                        onExpandedChange = { currencyExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = newCurrency,
-                            onValueChange = {}, readOnly = true,
-                            label = { Text("Currency") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = currencyExpanded) },
-                            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                        )
-                        ExposedDropdownMenu(expanded = currencyExpanded, onDismissRequest = { currencyExpanded = false }) {
-                            currencies.forEach { cur ->
-                                DropdownMenuItem(
-                                    text = { Text(cur) },
-                                    onClick = { newCurrency = cur; currencyExpanded = false }
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
+/**
+ * The primary form action, pinned to the bottom and lifted above the keyboard.
+ * Handles navigation-bar and IME insets itself.
+ */
+@Composable
+fun FormActionBar(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    loading: Boolean = false,
+    enabled: Boolean = true
+) {
+    Surface(color = MaterialTheme.colorScheme.surface, modifier = modifier.fillMaxWidth()) {
+        Column {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Box(
+                modifier = Modifier
+                    .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                    .padding(horizontal = AppSpacing.screenH, vertical = AppSpacing.md)
+            ) {
                 Button(
-                    onClick = {
-                        if (newName.isNotBlank()) {
-                            onCreateAccount(newName.trim(), newCurrency)
-                            showAddDialog = false
-                        }
-                    },
-                    enabled = newName.isNotBlank()
-                ) { Text("Create") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddDialog = false }) { Text("Cancel") }
+                    onClick = onClick,
+                    enabled = enabled && !loading,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 52.dp)
+                ) {
+                    if (loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(Modifier.size(AppSpacing.sm))
+                    } else if (icon != null) {
+                        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(AppSpacing.sm))
+                    }
+                    Text(label, textAlign = TextAlign.Center)
+                }
             }
-        )
+        }
+    }
+}
+
+/**
+ * Lays out [content] with [trailing] (an amount) at the end. The trailing slot
+ * is measured first at its natural width so money is never truncated; when it
+ * would take more than [maxTrailingFraction] of the width, it drops below the
+ * content instead, aligned to the end.
+ */
+@Composable
+fun AdaptiveTrailingRow(
+    modifier: Modifier = Modifier,
+    gap: androidx.compose.ui.unit.Dp = AppSpacing.md,
+    maxTrailingFraction: Float = 0.45f,
+    content: @Composable () -> Unit,
+    trailing: @Composable () -> Unit
+) {
+    Layout(
+        contents = listOf(content, trailing),
+        modifier = modifier
+    ) { (contentMeasurables, trailingMeasurables), constraints ->
+        val maxWidth = constraints.maxWidth
+        val gapPx = gap.roundToPx()
+        val trailingPlaceables = trailingMeasurables.map {
+            it.measure(Constraints(maxWidth = Constraints.Infinity))
+        }
+        val trailingWidth = trailingPlaceables.maxOfOrNull { it.width } ?: 0
+        val trailingHeight = trailingPlaceables.sumOf { it.height }
+        val stacked = maxWidth != Constraints.Infinity &&
+            trailingWidth > (maxWidth * maxTrailingFraction).toInt()
+
+        if (!stacked) {
+            val contentMax = (maxWidth - trailingWidth - gapPx).coerceAtLeast(0)
+            val contentPlaceables = contentMeasurables.map {
+                it.measure(constraints.copy(minWidth = 0, maxWidth = contentMax))
+            }
+            val contentHeight = contentPlaceables.sumOf { it.height }
+            val height = maxOf(contentHeight, trailingHeight).coerceAtLeast(constraints.minHeight)
+            layout(maxWidth, height) {
+                var y = (height - contentHeight) / 2
+                contentPlaceables.forEach { it.placeRelative(0, y); y += it.height }
+                var ty = (height - trailingHeight) / 2
+                trailingPlaceables.forEach { it.placeRelative(maxWidth - it.width, ty); ty += it.height }
+            }
+        } else {
+            val contentPlaceables = contentMeasurables.map {
+                it.measure(constraints.copy(minWidth = 0, minHeight = 0))
+            }
+            val contentHeight = contentPlaceables.sumOf { it.height }
+            val height = (contentHeight + trailingHeight).coerceAtLeast(constraints.minHeight)
+            layout(maxWidth, height) {
+                var y = 0
+                contentPlaceables.forEach { it.placeRelative(0, y); y += it.height }
+                trailingPlaceables.forEach {
+                    it.placeRelative((maxWidth - it.width).coerceAtLeast(0), y); y += it.height
+                }
+            }
+        }
     }
 }

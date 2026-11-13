@@ -9,6 +9,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	// Embedded IANA database so INSITU_TIMEZONE resolves on the alpine image,
+	// which ships no /usr/share/zoneinfo.
+	_ "time/tzdata"
 
 	"github.com/pstivanin/insitu-ledger/backend/internal"
 	"github.com/pstivanin/insitu-ledger/backend/internal/api"
@@ -30,6 +33,19 @@ func main() {
 	}
 	if v := os.Getenv("INSITU_DATA_DIR"); v != "" {
 		*dataDir = v
+	}
+
+	// Optional home time zone for recurring schedules (IANA name, e.g.
+	// Europe/Rome). Unset or invalid keeps the fixed-offset stepping.
+	var homeLoc *time.Location
+	if v := os.Getenv("INSITU_TIMEZONE"); v != "" {
+		loc, err := time.LoadLocation(v)
+		if err != nil {
+			log.Printf("ignoring invalid INSITU_TIMEZONE=%q: %v (scheduled transactions keep their fixed offsets)", v, err)
+		} else {
+			homeLoc = loc
+			log.Printf("home time zone: %s", loc)
+		}
 	}
 
 	conn, err := db.Open(*dataDir)
@@ -61,7 +77,7 @@ func main() {
 	// Check for due scheduled transactions every minute
 	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
 	defer schedulerCancel()
-	scheduler.Start(schedulerCtx, conn, 1*time.Minute)
+	scheduler.Start(schedulerCtx, conn, 1*time.Minute, homeLoc)
 
 	// Check for due backups every hour
 	scheduler.StartBackup(schedulerCtx, conn, *dataDir, 1*time.Hour)

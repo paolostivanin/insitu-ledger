@@ -1,124 +1,127 @@
 package com.insituledger.app.ui.scheduled
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Calculate
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.insituledger.app.ui.common.AppCard
+import com.insituledger.app.ui.common.AccountSelectorRow
+import com.insituledger.app.ui.common.AmountField
 import com.insituledger.app.ui.common.CalculatorDialog
-import com.insituledger.app.ui.common.CategoryDropdownWithAdd
-import com.insituledger.app.ui.common.CompactAccountChip
-import com.insituledger.app.ui.common.IncomeExpenseToggle
+import com.insituledger.app.ui.common.CategorySelectorRow
+import com.insituledger.app.ui.common.ConfirmDialog
+import com.insituledger.app.ui.common.DatePickerDialogHost
+import com.insituledger.app.ui.common.DescriptionField
+import com.insituledger.app.ui.common.FormActionBar
 import com.insituledger.app.ui.common.LoadingIndicator
-import com.insituledger.app.ui.common.LocalSnackbarHostState
+import com.insituledger.app.ui.common.LocalContentPadding
+import com.insituledger.app.ui.common.NoteField
+import com.insituledger.app.ui.common.RecurrenceEditor
+import com.insituledger.app.ui.common.SectionHeader
+import com.insituledger.app.ui.common.TimePickerDialogHost
+import com.insituledger.app.ui.common.TypeToggle
 import com.insituledger.app.ui.theme.AppSpacing
-import com.insituledger.app.ui.theme.InterFontFamily
-import com.insituledger.app.util.Freq
-import com.insituledger.app.util.Rrule
-import kotlinx.coroutines.launch
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
+import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduledFormScreen(
     onBack: () -> Unit,
+    onSaved: (message: String) -> Unit = { onBack() },
     viewModel: ScheduledFormViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = LocalSnackbarHostState.current
-    val scope = rememberCoroutineScope()
-    val haptics = LocalHapticFeedback.current
-    val nameFocusRequester = remember { FocusRequester() }
-    val keyboardController = LocalSoftwareKeyboardController.current
-    var didAutoFocus by remember { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val amountFocus = remember { FocusRequester() }
+    var showDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showTimePicker by rememberSaveable { mutableStateOf(false) }
+    var showCalculator by rememberSaveable { mutableStateOf(false) }
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    val pad = LocalContentPadding.current
+    val isEdit = uiState.id != null
+    val locale = Locale.getDefault()
 
-    LaunchedEffect(uiState.saved) {
-        if (uiState.saved) {
-            scope.launch {
-                snackbarHostState.showSnackbar(if (uiState.id != null) "Scheduled updated" else "Scheduled created")
-            }
-            onBack()
+    LaunchedEffect(uiState.saved, uiState.deleted) {
+        if (uiState.saved || uiState.deleted) {
+            onSaved(uiState.savedMessage ?: if (isEdit) "Schedule updated" else "Schedule created")
         }
     }
 
-    LaunchedEffect(uiState.isLoading, uiState.id) {
-        if (!didAutoFocus && !uiState.isLoading && uiState.id == null) {
-            didAutoFocus = true
-            nameFocusRequester.requestFocus()
-            keyboardController?.show()
-        }
-    }
-
-    var showDatePicker by remember { mutableStateOf(false) }
-    var showTimePicker by remember { mutableStateOf(false) }
-    var showEndDatePicker by remember { mutableStateOf(false) }
-    var showCalculator by remember { mutableStateOf(false) }
-
-    val formattedNextDate = try {
-        LocalDate.parse(uiState.nextDate, DateTimeFormatter.ISO_LOCAL_DATE)
-            .format(DateTimeFormatter.ofPattern("d MMM yyyy"))
-    } catch (_: Exception) { uiState.nextDate }
-    val nextHour = uiState.nextTime.substringBefore(":").toIntOrNull() ?: 9
-    val nextMinute = uiState.nextTime.substringAfter(":").toIntOrNull() ?: 0
+    val startDate = runCatching { LocalDate.parse(uiState.nextDate) }.getOrNull() ?: LocalDate.now()
+    val startTime = runCatching { LocalTime.parse(uiState.nextTime) }.getOrNull() ?: LocalTime.of(9, 0)
+    val start = LocalDateTime.of(startDate, startTime)
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (uiState.id != null) "Edit Scheduled" else "New Scheduled") },
+                title = { Text(if (isEdit) "Edit schedule" else "New schedule") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
+                },
+                actions = {
+                    if (isEdit) {
+                        IconButton(onClick = { confirmDelete = true }) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "Delete schedule")
+                        }
+                    }
                 }
             )
         },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = {
-                    if (!uiState.isSaving) {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.save()
-                    }
-                },
-                icon = {
-                    if (uiState.isSaving) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    } else {
-                        Icon(Icons.Default.Check, contentDescription = null)
-                    }
-                },
-                text = { Text(if (uiState.id != null) "Update" else "Create") }
-            )
+        bottomBar = {
+            if (!uiState.isLoading) {
+                FormActionBar(
+                    label = if (isEdit) "Save changes" else "Create schedule",
+                    loading = uiState.isSaving,
+                    onClick = viewModel::save
+                )
+            }
         }
     ) { padding ->
         if (uiState.isLoading) {
@@ -130,513 +133,157 @@ fun ScheduledFormScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = AppSpacing.screenPadding)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = AppSpacing.lg)
         ) {
-            Spacer(modifier = Modifier.height(AppSpacing.xs))
+            TypeToggle(
+                selected = uiState.type,
+                onSelect = viewModel::updateType,
+                modifier = Modifier.padding(start = pad, end = pad, top = AppSpacing.sm)
+            )
+            DescriptionField(
+                value = uiState.description,
+                suggestions = uiState.suggestions,
+                showSuggestions = uiState.showSuggestions,
+                categories = uiState.categories,
+                error = uiState.descriptionError,
+                onValueChange = viewModel::updateDescription,
+                onSuggestion = viewModel::selectSuggestion,
+                onDismissSuggestions = viewModel::dismissSuggestions,
+                focusRequester = remember { FocusRequester() },
+                onNext = { amountFocus.requestFocus() },
+                modifier = Modifier.padding(start = pad, end = pad, top = AppSpacing.lg)
+            )
+            AmountField(
+                amount = uiState.amount,
+                currency = uiState.currency,
+                error = null,
+                onAmountChange = viewModel::updateAmount,
+                onCalculator = { showCalculator = true },
+                onDone = { focusManager.clearFocus(); keyboard?.hide() },
+                modifier = Modifier
+                    .padding(start = pad, end = pad, top = AppSpacing.md)
+                    .focusRequester(amountFocus)
+            )
 
-            PlainCard {
-                ExposedDropdownMenuBox(
-                    expanded = uiState.showSuggestions,
-                    onExpandedChange = { if (!it) viewModel.dismissSuggestions() }
-                ) {
-                    OutlinedTextField(
-                        value = uiState.description,
-                        onValueChange = viewModel::updateDescription,
-                        label = { Text("Name") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(nameFocusRequester)
-                            .menuAnchor(MenuAnchorType.PrimaryEditable)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(top = AppSpacing.lg))
+            CategorySelectorRow(
+                categories = uiState.categories,
+                selectedId = uiState.categoryId,
+                type = uiState.type,
+                onSelect = viewModel::updateCategoryId,
+                onCreateCategory = viewModel::createCategory
+            )
+            AccountSelectorRow(
+                accountDisplays = uiState.accountDisplays,
+                selectedId = uiState.accountId,
+                onSelect = { id, currency ->
+                    viewModel.updateAccountId(id)
+                    viewModel.updateCurrency(currency)
+                },
+                onCreateAccount = viewModel::createAccount
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            SectionHeader("When", horizontalPadding = pad, topPadding = AppSpacing.md)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = AppSpacing.rowMinHeight)
+                    .padding(start = pad, end = pad),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Outlined.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.size(AppSpacing.xs))
+                val valueColors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                TextButton(onClick = { showDatePicker = true }, colors = valueColors) {
+                    Text(
+                        (if (isEdit) "Next " else "Starts ") +
+                            startDate.format(DateTimeFormatter.ofPattern("EEE, d MMM yyyy", locale)),
+                        style = MaterialTheme.typography.bodyLarge
                     )
-                    if (uiState.suggestions.isNotEmpty()) {
-                        ExposedDropdownMenu(
-                            expanded = uiState.showSuggestions,
-                            onDismissRequest = { viewModel.dismissSuggestions() }
-                        ) {
-                            uiState.suggestions.forEach { suggestion ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(suggestion.description)
-                                            val catName = uiState.categories.find { it.id == suggestion.categoryId }?.name ?: ""
-                                            if (catName.isNotEmpty()) {
-                                                Text(
-                                                    catName,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onClick = { viewModel.selectSuggestion(suggestion) }
-                                )
-                            }
-                        }
-                    }
                 }
+                TextButton(onClick = { showTimePicker = true }, colors = valueColors) {
+                    Text(startTime.format(DateTimeFormatter.ofPattern("HH:mm", locale)), style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+            RecurrenceEditor(
+                draft = uiState.recurrence,
+                onDraftChange = viewModel::updateRecurrence,
+                start = start,
+                upcoming = uiState.recurrence.upcoming(start, 3, after = LocalDateTime.now()),
+                alreadyCreated = if (isEdit) uiState.occurrenceCount else null,
+                modifier = Modifier.padding(start = pad, end = pad, top = AppSpacing.sm, bottom = AppSpacing.lg)
+            )
 
-                CategoryDropdownWithAdd(
-                    categories = uiState.categories,
-                    selectedId = uiState.categoryId,
-                    type = uiState.type,
-                    onSelect = viewModel::updateCategoryId,
-                    onCreateCategory = viewModel::createCategory
-                )
-
+            if (isEdit) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(value = uiState.active, role = Role.Switch, onValueChange = viewModel::updateActive)
+                        .heightIn(min = 72.dp)
+                        .padding(horizontal = pad),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = formattedNextDate,
-                        modifier = Modifier
-                            .clickable { showDatePicker = true }
-                            .padding(vertical = 6.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "·",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = uiState.nextTime,
-                        modifier = Modifier
-                            .clickable { showTimePicker = true }
-                            .padding(vertical = 6.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            SectionCard(title = "Type & Amount") {
-                IncomeExpenseToggle(selected = uiState.type, onSelect = viewModel::updateType)
-                AmountInput(
-                    amount = uiState.amount,
-                    currency = uiState.currency,
-                    onAmountChange = viewModel::updateAmount,
-                    onCalculatorClick = { showCalculator = true }
-                )
-            }
-
-            SectionCard(title = "Account") {
-                CompactAccountChip(
-                    accountDisplays = uiState.accountDisplays,
-                    selectedId = uiState.accountId,
-                    onSelect = { id, currency ->
-                        viewModel.updateAccountId(id)
-                        viewModel.updateCurrency(currency)
-                    },
-                    onCreateAccount = viewModel::createAccount
-                )
-            }
-
-            SectionCard(title = "Recurrence") {
-                FrequencyDropdown(
-                    selected = uiState.frequency,
-                    onSelect = viewModel::updateFrequency
-                )
-
-                if (uiState.frequency == Rrule.CUSTOM_KEY) {
-                    CustomIntervalRow(
-                        interval = uiState.customInterval,
-                        unit = uiState.customUnit,
-                        onIntervalChange = viewModel::updateCustomInterval,
-                        onUnitChange = viewModel::updateCustomUnit
-                    )
-                }
-
-                EndsSelector(
-                    endMode = uiState.endMode,
-                    onChange = viewModel::updateEndMode
-                )
-
-                when (uiState.endMode) {
-                    "count" -> OutlinedTextField(
-                        value = uiState.maxOccurrences,
-                        onValueChange = viewModel::updateMaxOccurrences,
-                        label = { Text("Stop after N occurrences") },
-                        placeholder = { Text("e.g. 12") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    "date" -> {
-                        val formattedEndDate = if (uiState.endDate.isBlank()) "Pick a date"
-                        else try {
-                            LocalDate.parse(uiState.endDate, DateTimeFormatter.ISO_LOCAL_DATE)
-                                .format(DateTimeFormatter.ofPattern("d MMM yyyy"))
-                        } catch (_: Exception) { uiState.endDate }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Ends on:",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.width(AppSpacing.sm))
-                            Text(
-                                text = formattedEndDate,
-                                modifier = Modifier
-                                    .clickable { showEndDatePicker = true }
-                                    .padding(vertical = 6.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                    Column(Modifier.weight(1f)) {
+                        Text("Active", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (uiState.active) "Entries are created automatically" else "Paused: no entries are created",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                }
-
-                if (uiState.previewOccurrences.isNotEmpty()) {
-                    Text(
-                        text = "Next: " + uiState.previewOccurrences.joinToString("  ·  "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Switch(checked = uiState.active, onCheckedChange = null)
                 }
             }
 
-            if (uiState.id != null) {
-                SectionCard(title = "Status") {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Active",
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Text(
-                                text = if (uiState.active) "This schedule is currently running"
-                                else "Paused — no new transactions will be created",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(checked = uiState.active, onCheckedChange = viewModel::updateActive)
-                    }
-                }
-            }
-
-            SectionCard(title = "Note") {
-                OutlinedTextField(
-                    value = uiState.note,
-                    onValueChange = viewModel::updateNote,
-                    label = { Text("Note (optional)") },
-                    singleLine = false,
-                    minLines = 3,
-                    maxLines = 8,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    shape = RoundedCornerShape(12.dp),
-                    supportingText = if (uiState.note.isNotEmpty()) {
-                        { Text("${uiState.note.length}/2000") }
-                    } else null,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            NoteField(note = uiState.note, error = uiState.noteError, onNoteChange = viewModel::updateNote, pad = pad)
 
             uiState.error?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .padding(horizontal = pad, vertical = AppSpacing.sm)
+                        .semantics { liveRegion = LiveRegionMode.Polite }
+                )
             }
-
-            // FAB clearance: 56dp button + 16dp margin + breathing room
-            Spacer(modifier = Modifier.height(96.dp))
         }
     }
 
     if (showDatePicker) {
-        val initialMillis = try {
-            LocalDate.parse(uiState.nextDate, DateTimeFormatter.ISO_LOCAL_DATE)
-                .atStartOfDay(ZoneId.of("UTC"))
-                .toInstant().toEpochMilli()
-        } catch (_: Exception) {
-            System.currentTimeMillis()
-        }
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { millis ->
-                        val selectedDate = Instant.ofEpochMilli(millis)
-                            .atZone(ZoneId.of("UTC"))
-                            .toLocalDate()
-                            .format(DateTimeFormatter.ISO_LOCAL_DATE)
-                        viewModel.updateNextDate(selectedDate)
-                    }
-                    showDatePicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
-            }
-        ) {
-            DatePicker(state = datePickerState)
-        }
+        DatePickerDialogHost(
+            initial = startDate,
+            onPick = { viewModel.updateNextDate(it.toString()) },
+            onDismiss = { showDatePicker = false }
+        )
     }
-
-    if (showEndDatePicker) {
-        val initialMillis = try {
-            LocalDate.parse(uiState.endDate, DateTimeFormatter.ISO_LOCAL_DATE)
-                .atStartOfDay(ZoneId.of("UTC"))
-                .toInstant().toEpochMilli()
-        } catch (_: Exception) {
-            System.currentTimeMillis()
-        }
-        val endDateState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-        DatePickerDialog(
-            onDismissRequest = { showEndDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    endDateState.selectedDateMillis?.let { millis ->
-                        val selected = Instant.ofEpochMilli(millis)
-                            .atZone(ZoneId.of("UTC"))
-                            .toLocalDate()
-                            .format(DateTimeFormatter.ISO_LOCAL_DATE)
-                        viewModel.updateEndDate(selected)
-                    }
-                    showEndDatePicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEndDatePicker = false }) { Text("Cancel") }
-            }
-        ) {
-            DatePicker(state = endDateState)
-        }
+    if (showTimePicker) {
+        TimePickerDialogHost(
+            initial = startTime,
+            onPick = { viewModel.updateNextTime(it.format(DateTimeFormatter.ofPattern("HH:mm"))) },
+            onDismiss = { showTimePicker = false }
+        )
     }
-
     if (showCalculator) {
         CalculatorDialog(
             initialValue = uiState.amount,
             onDismiss = { showCalculator = false },
-            onConfirm = { result ->
-                viewModel.updateAmount(result)
-                showCalculator = false
-            }
+            onConfirm = { viewModel.updateAmount(it); showCalculator = false }
         )
     }
-
-    if (showTimePicker) {
-        val timePickerState = rememberTimePickerState(initialHour = nextHour, initialMinute = nextMinute)
-        AlertDialog(
-            onDismissRequest = { showTimePicker = false },
-            title = { Text("Select Time") },
-            text = { TimePicker(state = timePickerState) },
-            confirmButton = {
-                TextButton(onClick = {
-                    val newTime = "%02d:%02d".format(timePickerState.hour, timePickerState.minute)
-                    viewModel.updateNextTime(newTime)
-                    showTimePicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
-            }
+    if (confirmDelete) {
+        ConfirmDialog(
+            title = "Delete this schedule?",
+            text = "Future entries won't be created. Entries already recorded stay as they are.",
+            confirmLabel = "Delete",
+            onConfirm = { confirmDelete = false; viewModel.delete() },
+            onDismiss = { confirmDelete = false }
         )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun FrequencyDropdown(
-    selected: String,
-    onSelect: (String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val label = if (selected == Rrule.CUSTOM_KEY) "Custom…"
-    else Rrule.preset(selected)?.label ?: selected
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
-        OutlinedTextField(
-            value = label,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Frequency") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            Rrule.PRESETS.forEach { preset ->
-                DropdownMenuItem(text = { Text(preset.label) }, onClick = {
-                    onSelect(preset.key)
-                    expanded = false
-                })
-            }
-            DropdownMenuItem(text = { Text("Custom…") }, onClick = {
-                onSelect(Rrule.CUSTOM_KEY)
-                expanded = false
-            })
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun CustomIntervalRow(
-    interval: String,
-    unit: Freq,
-    onIntervalChange: (String) -> Unit,
-    onUnitChange: (Freq) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val count = interval.toIntOrNull() ?: 1
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        OutlinedTextField(
-            value = interval,
-            onValueChange = onIntervalChange,
-            label = { Text("Every") },
-            placeholder = { Text("e.g. 2") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.weight(1f)
-        )
-        ExposedDropdownMenuBox(
-            expanded = expanded,
-            onExpandedChange = { expanded = it },
-            modifier = Modifier.weight(1.4f)
-        ) {
-            OutlinedTextField(
-                value = Rrule.unitLabel(unit, count).replaceFirstChar { it.uppercase() },
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Unit") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
-            )
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                Freq.entries.forEach { freq ->
-                    DropdownMenuItem(
-                        text = { Text(Rrule.unitLabel(freq, count).replaceFirstChar { it.uppercase() }) },
-                        onClick = {
-                            onUnitChange(freq)
-                            expanded = false
-                        }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun EndsSelector(
-    endMode: String,
-    onChange: (String) -> Unit
-) {
-    val options = listOf("never" to "Never", "count" to "After N", "date" to "On date")
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        options.forEachIndexed { index, (key, label) ->
-            SegmentedButton(
-                selected = endMode == key,
-                onClick = { onChange(key) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
-            ) {
-                Text(label)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SectionCard(
-    title: String,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = title.uppercase(),
-            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = AppSpacing.sm, bottom = AppSpacing.xs)
-        )
-        AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(AppSpacing.lg),
-                verticalArrangement = Arrangement.spacedBy(AppSpacing.md),
-                content = content
-            )
-        }
-    }
-}
-
-@Composable
-private fun PlainCard(content: @Composable ColumnScope.() -> Unit) {
-    AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(AppSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.sm),
-            content = content
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AmountInput(
-    amount: String,
-    currency: String,
-    onAmountChange: (String) -> Unit,
-    onCalculatorClick: () -> Unit
-) {
-    val amountError = amount.isNotEmpty() && amount.toDoubleOrNull().let { it == null || it <= 0 }
-    OutlinedTextField(
-        value = amount,
-        onValueChange = onAmountChange,
-        label = { Text("Amount") },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        singleLine = true,
-        textStyle = TextStyle(
-            fontFamily = InterFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = 28.sp,
-            fontFeatureSettings = "tnum"
-        ),
-        prefix = {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text(
-                    text = currency,
-                    modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = 4.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-        },
-        isError = amountError,
-        supportingText = if (amountError) {{ Text("Enter a valid amount") }} else null,
-        trailingIcon = {
-            IconButton(onClick = onCalculatorClick) {
-                Icon(Icons.Default.Calculate, contentDescription = "Calculator")
-            }
-        },
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
-    )
-}
+private val Int.dp get() = androidx.compose.ui.unit.Dp(this.toFloat())

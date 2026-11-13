@@ -1,96 +1,153 @@
 package com.insituledger.app.ui.transactions
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Calculate
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.insituledger.app.ui.common.AppCard
+import com.insituledger.app.R
+import com.insituledger.app.ui.common.AccountSelectorRow
 import com.insituledger.app.ui.common.CalculatorDialog
-import com.insituledger.app.ui.common.CategoryDropdownWithAdd
-import com.insituledger.app.ui.common.CompactAccountChip
-import com.insituledger.app.ui.common.IncomeExpenseToggle
+import com.insituledger.app.ui.common.AmountField
+import com.insituledger.app.ui.common.CategorySelectorRow
+import com.insituledger.app.ui.common.DescriptionField
+import com.insituledger.app.ui.common.NoteField
+import com.insituledger.app.ui.common.DatePickerDialogHost
+import com.insituledger.app.ui.common.FormActionBar
 import com.insituledger.app.ui.common.LoadingIndicator
-import com.insituledger.app.ui.common.LocalSnackbarHostState
+import com.insituledger.app.ui.common.LocalContentPadding
+import com.insituledger.app.ui.common.TimePickerDialogHost
+import com.insituledger.app.ui.common.TypeToggle
 import com.insituledger.app.ui.theme.AppSpacing
-import com.insituledger.app.ui.theme.InterFontFamily
-import kotlinx.coroutines.launch
-import java.time.Instant
+import com.insituledger.app.ui.theme.amountEntry
+import com.insituledger.app.util.DateTimeUtil
+import kotlinx.coroutines.delay
 import java.time.LocalDate
-import java.time.ZoneId
+import java.time.LocalTime
+import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransactionFormScreen(
     onBack: () -> Unit,
+    onSaved: (message: String, offerScheduled: Boolean) -> Unit = { _, _ -> onBack() },
     viewModel: TransactionFormViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = LocalSnackbarHostState.current
-    val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
-    val nameFocusRequester = remember { FocusRequester() }
-    val keyboardController = LocalSoftwareKeyboardController.current
-    var didAutoFocus by remember { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val descriptionFocus = remember { FocusRequester() }
+    val amountFocus = remember { FocusRequester() }
+    var didAutoFocus by rememberSaveable { mutableStateOf(false) }
+    var showDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showTimePicker by rememberSaveable { mutableStateOf(false) }
+    var showCalculator by rememberSaveable { mutableStateOf(false) }
+    val pad = LocalContentPadding.current
+    val isEdit = uiState.id != null
 
-    LaunchedEffect(uiState.saved) {
-        if (uiState.saved) {
-            scope.launch { snackbarHostState.showSnackbar(if (uiState.id != null) "Transaction updated" else "Transaction created") }
-            onBack()
+    // Re-evaluate the primary action every minute: a one-time schedule set a
+    // minute ahead must not keep promising "Schedule" once it has passed.
+    val now by produceState(viewModel.now()) {
+        while (true) {
+            delay(60_000L - (System.currentTimeMillis() % 60_000L))
+            value = viewModel.now()
         }
     }
+    val mode = formMode(uiState, now)
 
-    LaunchedEffect(uiState.isLoading, uiState.id) {
-        if (!didAutoFocus && !uiState.isLoading && uiState.id == null) {
+    LaunchedEffect(uiState.outcome) {
+        val outcome = uiState.outcome ?: return@LaunchedEffect
+        onSaved(
+            outcome.message,
+            outcome is SaveOutcome.ScheduledOnce || outcome is SaveOutcome.ScheduledRecurring
+        )
+    }
+
+    LaunchedEffect(uiState.isLoading) {
+        if (!didAutoFocus && !uiState.isLoading && !isEdit) {
             didAutoFocus = true
-            nameFocusRequester.requestFocus()
-            keyboardController?.show()
+            descriptionFocus.requestFocus()
+            keyboard?.show()
         }
     }
 
-    var showDatePicker by remember { mutableStateOf(false) }
-    var showTimePicker by remember { mutableStateOf(false) }
-    var showCalculator by remember { mutableStateOf(false) }
-
-    // .take(5) bounds the time portion to "HH:mm" so the picker prefill and
-    // the chip render correctly even when uiState.date carries an offset/
-    // seconds tail like "08:41:00+02:00".
-    val datePart = if (uiState.date.contains("T")) uiState.date.substringBefore("T") else uiState.date
-    val timePart = if (uiState.date.contains("T")) uiState.date.substringAfter("T").take(5) else "00:00"
-    val formattedDate = try {
-        LocalDate.parse(datePart, DateTimeFormatter.ISO_LOCAL_DATE)
-            .format(DateTimeFormatter.ofPattern("d MMM yyyy"))
-    } catch (_: Exception) { datePart }
-    val hour = timePart.substringBefore(":").toIntOrNull() ?: 0
-    val minute = timePart.substringAfter(":").toIntOrNull() ?: 0
+    val title = when {
+        isEdit -> "Edit transaction"
+        uiState.type == "income" -> "New income"
+        else -> "New expense"
+    }
+    val isScheduling = mode == FormMode.SCHEDULE_ONCE || mode == FormMode.SCHEDULE_RECURRING ||
+        mode == FormMode.ADD_AND_REPEAT
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (uiState.id != null) "Edit Transaction" else "New Transaction") },
+                title = { Text(title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -98,27 +155,18 @@ fun TransactionFormScreen(
                 }
             )
         },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = {
-                    if (!uiState.isSaving) {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        bottomBar = {
+            if (!uiState.isLoading) {
+                FormActionBar(
+                    label = mode.primaryLabel(uiState.type),
+                    icon = if (isScheduling) null else Icons.Default.Check,
+                    loading = uiState.isSaving,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         viewModel.save()
                     }
-                },
-                icon = {
-                    if (uiState.isSaving) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    } else {
-                        Icon(Icons.Default.Check, contentDescription = null)
-                    }
-                },
-                text = { Text(if (uiState.id != null) "Update" else "Create") }
-            )
+                )
+            }
         }
     ) { padding ->
         if (uiState.isLoading) {
@@ -130,178 +178,146 @@ fun TransactionFormScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = AppSpacing.screenPadding)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = AppSpacing.lg)
         ) {
-            Spacer(modifier = Modifier.height(AppSpacing.xs))
+            TypeToggle(
+                selected = uiState.type,
+                onSelect = viewModel::updateType,
+                modifier = Modifier.padding(start = pad, end = pad, top = AppSpacing.sm)
+            )
 
-            PlainCard {
-                ExposedDropdownMenuBox(
-                    expanded = uiState.showSuggestions,
-                    onExpandedChange = { if (!it) viewModel.dismissSuggestions() }
-                ) {
-                    OutlinedTextField(
-                        value = uiState.description,
-                        onValueChange = viewModel::updateDescription,
-                        label = { Text("Name") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(nameFocusRequester)
-                            .menuAnchor(MenuAnchorType.PrimaryEditable)
-                    )
-                    if (uiState.suggestions.isNotEmpty()) {
-                        ExposedDropdownMenu(
-                            expanded = uiState.showSuggestions,
-                            onDismissRequest = { viewModel.dismissSuggestions() }
-                        ) {
-                            uiState.suggestions.forEach { suggestion ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(suggestion.description)
-                                            val catName = uiState.categories.find { it.id == suggestion.categoryId }?.name ?: ""
-                                            if (catName.isNotEmpty()) {
-                                                Text(
-                                                    catName,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onClick = { viewModel.selectSuggestion(suggestion) }
-                                )
-                            }
-                        }
-                    }
+            DescriptionField(
+                value = uiState.description,
+                suggestions = uiState.suggestions,
+                showSuggestions = uiState.showSuggestions,
+                categories = uiState.categories,
+                error = uiState.descriptionError,
+                onValueChange = viewModel::updateDescription,
+                onSuggestion = viewModel::selectSuggestion,
+                onDismissSuggestions = viewModel::dismissSuggestions,
+                focusRequester = descriptionFocus,
+                onNext = { amountFocus.requestFocus() },
+                modifier = Modifier.padding(start = pad, end = pad, top = AppSpacing.lg)
+            )
+
+            AmountField(
+                amount = uiState.amount,
+                currency = uiState.currency,
+                error = uiState.amountError,
+                onAmountChange = viewModel::updateAmount,
+                onCalculator = { showCalculator = true },
+                onDone = { focusManager.clearFocus(); keyboard?.hide() },
+                modifier = Modifier
+                    .padding(start = pad, end = pad, top = AppSpacing.md)
+                    .focusRequester(amountFocus)
+            )
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant,
+                modifier = Modifier.padding(top = AppSpacing.lg)
+            )
+
+            val missing = uiState.error == TransactionFormViewModel.MSG_REQUIRED
+            CategorySelectorRow(
+                categories = uiState.categories,
+                selectedId = uiState.categoryId,
+                type = uiState.type,
+                onSelect = viewModel::updateCategoryId,
+                onCreateCategory = viewModel::createCategory,
+                isError = missing && uiState.categoryId == null,
+                supporting = if (missing && uiState.categoryId == null) "Choose a category" else null
+            )
+            AccountSelectorRow(
+                accountDisplays = uiState.accountDisplays,
+                selectedId = uiState.accountId,
+                onSelect = { id, currency ->
+                    viewModel.updateAccountId(id)
+                    viewModel.updateCurrency(currency)
+                },
+                onCreateAccount = viewModel::createAccount,
+                isError = missing && uiState.accountId == null
+            )
+
+            WhenRow(
+                date = uiState.date,
+                pad = pad,
+                scheduleActive = isScheduling,
+                showScheduleButton = !isEdit,
+                onDateClick = {
+                    if (uiState.recurrence != null) viewModel.openScheduleSheet() else showDatePicker = true
+                },
+                onTimeClick = {
+                    if (uiState.recurrence != null) viewModel.openScheduleSheet() else showTimePicker = true
+                },
+                onScheduleClick = {
+                    keyboard?.hide()
+                    focusManager.clearFocus()
+                    viewModel.openScheduleSheet()
                 }
-
-                CategoryDropdownWithAdd(
-                    categories = uiState.categories,
-                    selectedId = uiState.categoryId,
-                    type = uiState.type,
-                    onSelect = viewModel::updateCategoryId,
-                    onCreateCategory = viewModel::createCategory
+            )
+            if (!isEdit && isScheduling) {
+                ScheduleSummary(
+                    uiState = uiState,
+                    mode = mode,
+                    now = now,
+                    pad = pad,
+                    onEdit = { keyboard?.hide(); viewModel.openScheduleSheet() },
+                    onRemove = viewModel::removeSchedule
                 )
+            }
+            if (uiState.dstAdjusted) {
+                InsetNote("Adjusted for daylight saving", pad)
+            }
 
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            NoteField(
+                note = uiState.note,
+                error = uiState.noteError,
+                onNoteChange = viewModel::updateNote,
+                pad = pad
+            )
+
+            val showGeneralError = uiState.error != null &&
+                (!missing || (uiState.categoryId != null && uiState.accountId != null))
+            if (showGeneralError) {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = pad, vertical = AppSpacing.sm)
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = formattedDate,
-                        modifier = Modifier
-                            .clickable { showDatePicker = true }
-                            .padding(vertical = 6.dp),
+                        uiState.error.orEmpty(),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f)
                     )
-                    Text(
-                        text = "·",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = timePart,
-                        modifier = Modifier
-                            .clickable { showTimePicker = true }
-                            .padding(vertical = 6.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (uiState.canAddNow) {
+                        TextButton(onClick = viewModel::addNow) { Text("Add now") }
+                    }
                 }
             }
-
-            SectionCard(title = "Type & Amount") {
-                IncomeExpenseToggle(selected = uiState.type, onSelect = viewModel::updateType)
-                AmountInput(
-                    amount = uiState.amount,
-                    currency = uiState.currency,
-                    onAmountChange = viewModel::updateAmount,
-                    onCalculatorClick = { showCalculator = true }
-                )
-            }
-
-            SectionCard(title = "Account") {
-                CompactAccountChip(
-                    accountDisplays = uiState.accountDisplays,
-                    selectedId = uiState.accountId,
-                    onSelect = { id, currency ->
-                        viewModel.updateAccountId(id)
-                        viewModel.updateCurrency(currency)
-                    },
-                    onCreateAccount = viewModel::createAccount
-                )
-            }
-
-            SectionCard(title = "Note") {
-                OutlinedTextField(
-                    value = uiState.note,
-                    onValueChange = viewModel::updateNote,
-                    label = { Text("Note (optional)") },
-                    singleLine = false,
-                    minLines = 3,
-                    maxLines = 8,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    shape = RoundedCornerShape(12.dp),
-                    supportingText = if (uiState.note.isNotEmpty()) {
-                        { Text("${uiState.note.length}/2000") }
-                    } else null,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            uiState.error?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
-
-            // FAB clearance: 56dp button + 16dp margin + breathing room
-            Spacer(modifier = Modifier.height(96.dp))
         }
     }
 
+    val wallDate = DateTimeUtil.parseFormDateOrNull(uiState.date)?.toLocalDateTime()
     if (showDatePicker) {
-        val initialMillis = try {
-            LocalDate.parse(datePart, DateTimeFormatter.ISO_LOCAL_DATE)
-                .atStartOfDay(ZoneId.of("UTC"))
-                .toInstant().toEpochMilli()
-        } catch (_: Exception) {
-            System.currentTimeMillis()
-        }
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { millis ->
-                        val selected = Instant.ofEpochMilli(millis)
-                            .atZone(ZoneId.of("UTC"))
-                            .toLocalDate()
-                        // Rebuild through parseFormDate so we preserve the
-                        // existing offset on the rest of the string (the prior
-                        // string-concat would downgrade RFC3339 to naive).
-                        val base = com.insituledger.app.util.DateTimeUtil.parseFormDate(uiState.date)
-                        val updated = base.with(selected)
-                        viewModel.updateDate(updated.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
-                    }
-                    showDatePicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
-            }
-        ) {
-            DatePicker(state = datePickerState)
-        }
+        DatePickerDialogHost(
+            initial = wallDate?.toLocalDate() ?: LocalDate.now(),
+            onPick = viewModel::setDate,
+            onDismiss = { showDatePicker = false }
+        )
     }
-
+    if (showTimePicker) {
+        TimePickerDialogHost(
+            initial = wallDate?.toLocalTime() ?: LocalTime.now(),
+            onPick = viewModel::setTime,
+            onDismiss = { showTimePicker = false }
+        )
+    }
     if (showCalculator) {
         CalculatorDialog(
             initialValue = uiState.amount,
@@ -312,113 +328,123 @@ fun TransactionFormScreen(
             }
         )
     }
-
-    if (showTimePicker) {
-        val timePickerState = rememberTimePickerState(initialHour = hour, initialMinute = minute)
-        AlertDialog(
-            onDismissRequest = { showTimePicker = false },
-            title = { Text("Select Time") },
-            text = { TimePicker(state = timePickerState) },
-            confirmButton = {
-                TextButton(onClick = {
-                    // Preserve the existing offset by rebuilding through parseFormDate.
-                    val base = com.insituledger.app.util.DateTimeUtil.parseFormDate(uiState.date)
-                    val updated = base
-                        .withHour(timePickerState.hour)
-                        .withMinute(timePickerState.minute)
-                        .truncatedTo(java.time.temporal.ChronoUnit.MINUTES)
-                    viewModel.updateDate(updated.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
-                    showTimePicker = false
-                }) { Text("OK") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
-            }
+    uiState.scheduleSheet?.let { sheet ->
+        ScheduleSheet(
+            state = sheet,
+            today = now.toLocalDate(),
+            onModeChange = viewModel::setSheetMode,
+            onDateChange = viewModel::setSheetDate,
+            onTimeChange = viewModel::setSheetTime,
+            onQuickPick = viewModel::applyQuickPick,
+            onDraftChange = viewModel::updateSheetDraft,
+            onApply = viewModel::applySchedule,
+            onDismiss = viewModel::dismissScheduleSheet,
+            onRemove = viewModel::removeSchedule
         )
     }
 }
 
 @Composable
-private fun SectionCard(
-    title: String,
-    content: @Composable ColumnScope.() -> Unit
+private fun WhenRow(
+    date: String,
+    pad: Dp,
+    scheduleActive: Boolean,
+    showScheduleButton: Boolean,
+    onDateClick: () -> Unit,
+    onTimeClick: () -> Unit,
+    onScheduleClick: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = title.uppercase(),
-            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = AppSpacing.sm, bottom = AppSpacing.xs)
-        )
-        AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(AppSpacing.lg),
-                verticalArrangement = Arrangement.spacedBy(AppSpacing.md),
-                content = content
-            )
+    val locale = Locale.getDefault()
+    val wall = DateTimeUtil.parseFormDateOrNull(date)?.toLocalDateTime()
+    val dateText = wall?.toLocalDate()?.format(DateTimeFormatter.ofPattern("EEE, d MMM yyyy", locale)) ?: date.take(10)
+    val timeText = wall?.toLocalTime()?.format(DateTimeFormatter.ofPattern("HH:mm", locale)) ?: ""
+    val valueColors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = AppSpacing.rowMinHeight)
+            .padding(start = pad, end = pad - AppSpacing.xs),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Outlined.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.size(AppSpacing.xs))
+        TextButton(onClick = onDateClick, colors = valueColors) {
+            Text(dateText, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+        }
+        TextButton(onClick = onTimeClick, colors = valueColors) {
+            Text(timeText, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+        }
+        Spacer(Modifier.weight(1f))
+        if (showScheduleButton) {
+            val description = if (scheduleActive) "Edit schedule" else "Schedule"
+            if (scheduleActive) {
+                FilledTonalIconButton(onClick = onScheduleClick) {
+                    Icon(painterResource(R.drawable.ic_calendar_clock), contentDescription = description)
+                }
+            } else {
+                IconButton(onClick = onScheduleClick) {
+                    Icon(
+                        painterResource(R.drawable.ic_calendar_clock),
+                        contentDescription = description,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun PlainCard(content: @Composable ColumnScope.() -> Unit) {
-    AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(AppSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.sm),
-            content = content
+private fun ScheduleSummary(
+    uiState: TransactionFormUiState,
+    mode: FormMode,
+    now: OffsetDateTime,
+    pad: Dp,
+    onEdit: () -> Unit,
+    onRemove: () -> Unit
+) {
+    val locale = Locale.getDefault()
+    val start = DateTimeUtil.parseFormDateOrNull(uiState.date)?.toLocalDateTime() ?: return
+    val recurrence = uiState.recurrence
+    val text = if (recurrence != null) {
+        val summary = recurrence.summary(start, locale)
+        val head = summary.substringBefore(" · ").replaceFirstChar { it.lowercase(locale) }
+        val tail = summary.substringAfter(" · ", "").takeIf { it.isNotEmpty() }
+        val anchor = recurrence.anchorHint(start, locale).takeIf { it.isNotEmpty() }
+        val firstPart = if (mode == FormMode.ADD_AND_REPEAT) {
+            val n = recurrence.pastOccurrences(start, now.toLocalDateTime(), 367).size
+            if (n <= 1) "first entry added on save" else "adds $n past entries"
+        } else "starts ${start.format(DateTimeFormatter.ofPattern("d MMM", locale))}"
+        listOfNotNull("Repeats $head" + (anchor?.let { " $it" } ?: ""), tail, firstPart).joinToString(" · ")
+    } else {
+        "One-time · added ${start.format(DateTimeFormatter.ofPattern("EEE, d MMM 'at' HH:mm", locale))}"
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClickLabel = "Edit schedule", onClick = onEdit)
+            .padding(start = pad + 24.dp + AppSpacing.lg, end = pad - AppSpacing.xs),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f).padding(vertical = AppSpacing.xs)
         )
+        IconButton(onClick = onRemove) {
+            Icon(Icons.Default.Close, contentDescription = "Remove schedule", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AmountInput(
-    amount: String,
-    currency: String,
-    onAmountChange: (String) -> Unit,
-    onCalculatorClick: () -> Unit
-) {
-    val amountError = amount.isNotEmpty() && amount.toDoubleOrNull().let { it == null || it <= 0 }
-    OutlinedTextField(
-        value = amount,
-        onValueChange = onAmountChange,
-        label = { Text("Amount") },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        singleLine = true,
-        textStyle = TextStyle(
-            fontFamily = InterFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = 28.sp,
-            fontFeatureSettings = "tnum"
-        ),
-        prefix = {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text(
-                    text = currency,
-                    modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = 4.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-        },
-        isError = amountError,
-        supportingText = if (amountError) {{ Text("Enter a valid amount") }} else null,
-        trailingIcon = {
-            IconButton(onClick = onCalculatorClick) {
-                Icon(Icons.Default.Calculate, contentDescription = "Calculator")
-            }
-        },
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
+private fun InsetNote(text: String, pad: Dp) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = pad + 24.dp + AppSpacing.lg, end = pad, bottom = AppSpacing.sm)
     )
 }
-

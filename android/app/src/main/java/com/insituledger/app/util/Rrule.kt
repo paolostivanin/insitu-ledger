@@ -41,6 +41,7 @@ object Rrule {
     /** Matches the backend's validateRRule bound (helpers.go). */
     const val MAX_INTERVAL = 999
     const val CUSTOM_KEY = "custom"
+    const val ONE_TIME_LABEL = "One-time"
 
     // Order is the dropdown order. Every entry must round-trip through [build]
     // to the exact string that shipped clients have always written.
@@ -116,9 +117,14 @@ object Rrule {
      * Human label for a stored rrule, e.g. "Biweekly" or "Every 2 months". UNTIL
      * is ignored when preset-matching, so a schedule with an end date still
      * reads "Biweekly" instead of leaking the raw string.
+     *
+     * A one-time schedule is stored as `FREQ=DAILY` with max_occurrences 1 (the
+     * future-dated transaction path); pass [maxOccurrences] so it reads
+     * "One-time" instead of "Daily".
      */
-    fun label(rrule: String): String {
+    fun label(rrule: String, maxOccurrences: Int? = null): String {
         val (freq, interval, _) = parse(rrule)
+        if (freq == Freq.DAILY && interval == 1 && maxOccurrences == 1) return ONE_TIME_LABEL
         val preset = PRESETS.find { it.freq == freq && it.interval == interval }
         if (preset != null) return preset.label
         return "Every $interval ${unitLabel(freq, interval)}"
@@ -144,11 +150,12 @@ object Rrule {
      * Preserves the input's shape: a datetime comes back as RFC3339 with the
      * system zone's offset so the backend's TZ-aware comparison stays correct
      * after a local sync push; a date-only value stays date-only (TZ-agnostic by
-     * design).
+     * design). [zone] is the wall clock the recurrence steps in (the device
+     * zone; injectable for tests).
      */
-    fun advanceDate(current: String, rrule: String): Pair<String, Boolean> {
+    fun advanceDate(current: String, rrule: String, zone: ZoneId = ZoneId.systemDefault()): Pair<String, Boolean> {
         val hasTime = current.contains('T') || current.contains(' ')
-        val dateTime = DateTimeUtil.parseFlexibleLocalDateTime(current)
+        val dateTime = DateTimeUtil.parseFlexibleLocalDateTime(current, zone)
 
         val (freq, interval, _) = parse(rrule)
         val next = advance(dateTime, freq, interval)
@@ -162,7 +169,7 @@ object Rrule {
         val pastUntil = untilStr?.let { parseUntil(it) }?.let { next.isAfter(it) } ?: false
 
         val nextStr = if (hasTime) {
-            next.atZone(ZoneId.systemDefault())
+            next.atZone(zone)
                 .toOffsetDateTime()
                 .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
         } else {

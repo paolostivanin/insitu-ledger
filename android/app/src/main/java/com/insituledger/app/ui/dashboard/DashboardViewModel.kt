@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AccountRepository
+import com.insituledger.app.data.repository.CategoryRepository
+import com.insituledger.app.domain.model.Category
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.data.sync.SyncManager
@@ -23,7 +25,8 @@ data class DashboardUiState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val heroMode: String = "net_worth",
-    val currentUserId: Long? = null
+    val currentUserId: Long? = null,
+    val categories: List<Category> = emptyList()
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -33,11 +36,11 @@ class DashboardViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val sharedAccessState: SharedAccessState,
     private val syncManager: SyncManager,
-    private val prefs: UserPreferences
+    private val prefs: UserPreferences,
+    private val categoryRepository: CategoryRepository
 ) : ViewModel() {
 
     private val _isRefreshing = MutableStateFlow(false)
-    private val _refreshTick = MutableStateFlow(0)
 
     private data class Scope(val accounts: List<Account>, val owner: Long?)
     private data class ScopedData(val scope: Scope, val recent: List<Transaction>)
@@ -81,7 +84,10 @@ class DashboardViewModel @Inject constructor(
         )
     }
         .combine(_isRefreshing) { state, refreshing -> state.copy(isRefreshing = refreshing) }
-        .combine(_refreshTick) { state, _ -> state }
+        // Categories only decorate rows (name + colour); never block the first frame on them.
+        .combine(categoryRepository.getAll().onStart { emit(emptyList()) }) { state, cats ->
+            state.copy(categories = cats)
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardUiState())
 
     fun refresh() {
@@ -89,7 +95,6 @@ class DashboardViewModel @Inject constructor(
             _isRefreshing.value = true
             syncManager.syncNow()
             _isRefreshing.value = false
-            _refreshTick.update { it + 1 }
         }
     }
 }
