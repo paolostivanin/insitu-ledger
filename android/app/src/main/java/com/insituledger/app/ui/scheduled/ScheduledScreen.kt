@@ -1,38 +1,53 @@
 package com.insituledger.app.ui.scheduled
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.EventRepeat
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.outlined.EventRepeat
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.domain.model.Account
+import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.ScheduledTransaction
-import com.insituledger.app.ui.common.entryAttribution
-import com.insituledger.app.ui.common.LocalSnackbarHostState
-import kotlinx.coroutines.launch
-import com.insituledger.app.ui.common.AmountText
-import com.insituledger.app.ui.common.AppCard
+import com.insituledger.app.ui.common.AddFab
+import com.insituledger.app.ui.common.ConfirmDialog
 import com.insituledger.app.ui.common.EmptyState
+import com.insituledger.app.ui.common.ListRow
 import com.insituledger.app.ui.common.LoadingIndicator
+import com.insituledger.app.ui.common.LocalContentPadding
+import com.insituledger.app.ui.common.LocalCurrencySymbol
+import com.insituledger.app.ui.common.LocalSnackbarController
+import com.insituledger.app.ui.common.RowAction
+import com.insituledger.app.ui.common.SectionHeader
+import com.insituledger.app.ui.common.TransactionAmount
+import com.insituledger.app.ui.common.currencySymbolFor
+import com.insituledger.app.ui.common.entryAttribution
+import com.insituledger.app.ui.common.primaryCurrency
 import com.insituledger.app.ui.theme.AppSpacing
-import com.insituledger.app.ui.theme.BrandGradients
-import com.insituledger.app.ui.theme.LocalSemanticColors
+import com.insituledger.app.util.DateTimeUtil
 import com.insituledger.app.util.Rrule
+import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,73 +57,72 @@ fun ScheduledScreen(
     viewModel: ScheduledViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-
+    val snackbar = LocalSnackbarController.current
     val scope = rememberCoroutineScope()
-    val snackbar = LocalSnackbarHostState.current
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val pad = LocalContentPadding.current
+    val preferredSymbol = LocalCurrencySymbol.current
+
     var deleteTarget by remember { mutableStateOf<ScheduledTransaction?>(null) }
     var deleting by remember { mutableStateOf(false) }
-    var deleteError by remember { mutableStateOf<String?>(null) }
+
     deleteTarget?.let { target ->
-        AlertDialog(
-            onDismissRequest = { if (!deleting) deleteTarget = null },
-            title = { Text("Delete scheduled entry?") },
-            text = { Column {
-                Text("Delete \"${target.description?.takeIf { it.isNotBlank() } ?: target.type}\"?")
-                deleteError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            } },
-            confirmButton = { TextButton(enabled = !deleting, onClick = {
+        val name = target.description?.takeIf { it.isNotBlank() } ?: "this schedule"
+        ConfirmDialog(
+            title = "Delete “$name”?",
+            text = "Future entries won't be created. Entries already recorded stay as they are.",
+            confirmLabel = if (deleting) "Deleting…" else "Delete",
+            working = deleting,
+            onConfirm = {
                 deleting = true
                 scope.launch {
                     viewModel.delete(target.id).fold(
-                        onSuccess = { deleteTarget = null },
-                        onFailure = { deleteError = it.message ?: "Could not delete scheduled entry" }
+                        onSuccess = { snackbar.show("Schedule deleted") },
+                        onFailure = { snackbar.show(it.message ?: "Could not delete schedule") }
                     )
                     deleting = false
-                    if (deleteTarget == null) snackbar.showSnackbar("Scheduled entry deleted")
+                    deleteTarget = null
                 }
-            }) { Text(if (deleting) "Deleting…" else "Delete") } },
-            dismissButton = { TextButton(enabled = !deleting, onClick = { deleteTarget = null }) { Text("Cancel") } }
+            },
+            onDismiss = { deleteTarget = null }
         )
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Scheduled") }) },
-        floatingActionButton = {
-            BrandFab(onClick = onAddClick, contentDescription = "Add Scheduled")
-        }
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        topBar = { TopAppBar(title = { Text("Scheduled") }, scrollBehavior = scrollBehavior) },
+        floatingActionButton = { AddFab(onClick = onAddClick, contentDescription = "Add schedule") }
     ) { padding ->
         when {
             uiState.isLoading -> LoadingIndicator(modifier = Modifier.padding(padding))
             uiState.items.isEmpty() -> EmptyState(
-                icon = Icons.Default.EventRepeat,
-                title = "No scheduled transactions",
-                message = "Set up recurring transactions for rent, salary, subscriptions and more.",
-                actionLabel = "Add scheduled",
+                icon = Icons.Outlined.EventRepeat,
+                title = "Nothing scheduled",
+                message = "Schedule rent, salary or subscriptions and they'll be recorded automatically.",
+                actionLabel = "Add schedule",
                 onAction = onAddClick,
                 modifier = Modifier.padding(padding)
             )
             else -> {
+                val now = LocalDateTime.now()
+                val primary = primaryCurrency(uiState.accounts)
+                val active = uiState.items.filter { it.active }.sortedBy { nextLocal(it.nextOccurrence) }
+                val paused = uiState.items.filterNot { it.active }
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
-                    contentPadding = PaddingValues(
-                        start = AppSpacing.screenPadding,
-                        end = AppSpacing.screenPadding,
-                        top = AppSpacing.sm,
-                        bottom = AppSpacing.xxl
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+                    contentPadding = PaddingValues(bottom = AppSpacing.fabClearance)
                 ) {
-                    items(uiState.items, key = { it.id }) { item ->
-                        ScheduledRow(
-                            item = item,
-                            attribution = entryAttribution(
-                                uiState.accounts.find { it.id == item.accountId }?.isShared == true,
-                                item.createdByUserId, item.createdByName, uiState.currentUserId
-                            ),
-                            onEdit = { onEditClick(item.id) },
-                            onDelete = { deleteError = null; deleteTarget = item },
-                            modifier = Modifier.animateItem()
-                        )
+                    if (active.isNotEmpty()) {
+                        item(key = "h-upcoming") { SectionHeader("Upcoming", horizontalPadding = pad, topPadding = AppSpacing.sm) }
+                        items(active, key = { it.id }) { item ->
+                            ScheduledRow(item, uiState, now, preferredSymbol, primary, pad, onEditClick) { deleteTarget = item }
+                        }
+                    }
+                    if (paused.isNotEmpty()) {
+                        item(key = "h-paused") { SectionHeader("Paused", horizontalPadding = pad) }
+                        items(paused, key = { it.id }) { item ->
+                            ScheduledRow(item, uiState, now, preferredSymbol, primary, pad, onEditClick) { deleteTarget = item }
+                        }
                     }
                 }
             }
@@ -119,124 +133,72 @@ fun ScheduledScreen(
 @Composable
 private fun ScheduledRow(
     item: ScheduledTransaction,
-    attribution: String?,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    modifier: Modifier = Modifier
+    uiState: ScheduledUiState,
+    now: LocalDateTime,
+    preferredSymbol: String,
+    primary: String?,
+    pad: androidx.compose.ui.unit.Dp,
+    onEditClick: (Long) -> Unit,
+    onDelete: () -> Unit
 ) {
-    val semantic = LocalSemanticColors.current
-    val isIncome = item.type == "income"
-    val accent = if (isIncome) semantic.income else semantic.expense
-    val container = if (isIncome) semantic.incomeContainer else semantic.expenseContainer
-
-    AppCard(modifier = modifier.fillMaxWidth(), level = 1) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(AppSpacing.md),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(container),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.EventRepeat,
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(AppSpacing.md))
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                    Text(
-                        text = item.description ?: item.type.replaceFirstChar { it.uppercase() },
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    if (!item.active) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.errorContainer
-                        ) {
-                            Text(
-                                "Inactive",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-                // .take(5) bounds the displayed time to "HH:mm" so post-1.18
-                // strings like "08:41:00+02:00" don't leak as raw chip text.
-                val (nextDate, nextTime) = if (item.nextOccurrence.contains("T")) {
-                    val parts = item.nextOccurrence.split("T", limit = 2)
-                    parts[0] to parts[1].take(5)
-                } else {
-                    item.nextOccurrence to null
-                }
-                val rruleLabel = Rrule.label(item.rrule)
-                val nextLabel = "Next: $nextDate" + (nextTime?.let { " · $it" } ?: "")
-                Text(
-                    text = "$rruleLabel  ·  $nextLabel",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2
-                )
-                attribution?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (item.maxOccurrences != null) {
-                    Text(
-                        text = "${item.occurrenceCount}/${item.maxOccurrences} occurrences",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                AmountText(amount = item.amount, type = item.type)
-                Row {
-                    IconButton(onClick = onEdit, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(18.dp))
-                    }
-                    IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
-                    }
-                }
-            }
-        }
-    }
+    val account = uiState.accounts.find { it.id == item.accountId }
+    val category = uiState.categories.find { it.id == item.categoryId }
+    val next = nextLocal(item.nextOccurrence)
+    val overdue = item.active && next != null && !next.isAfter(now)
+    val attribution = entryAttribution(account?.isShared == true, item.createdByUserId, item.createdByName, uiState.currentUserId)
+    val supporting = buildSupporting(item, next, overdue, category, account, uiState.accounts.size > 1)
+    ListRow(
+        headline = item.description?.takeIf { it.isNotBlank() } ?: category?.name ?: "Scheduled ${item.type}",
+        supporting = listOfNotNull(supporting, attribution).joinToString("\n"),
+        supportingColor = if (overdue) MaterialTheme.colorScheme.tertiary else androidx.compose.ui.graphics.Color.Unspecified,
+        trailing = {
+            TransactionAmount(
+                amount = item.amount,
+                type = item.type,
+                symbol = currencySymbolFor(item.currency, preferredSymbol, primary)
+            )
+        },
+        onClick = { onEditClick(item.id) },
+        actions = listOf(
+            RowAction("Edit") { onEditClick(item.id) },
+            RowAction("Delete", destructive = true, onClick = onDelete)
+        ),
+        horizontalPadding = pad,
+        modifier = Modifier
+    )
 }
 
-@Composable
-private fun BrandFab(onClick: () -> Unit, contentDescription: String) {
-    val gradient = BrandGradients.hero()
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        color = Color.Transparent,
-        shadowElevation = 8.dp,
-        modifier = Modifier.size(64.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(gradient),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.Add,
-                contentDescription = contentDescription,
-                tint = Color.White,
-                modifier = Modifier.size(28.dp)
-            )
-        }
+private fun nextLocal(stored: String): LocalDateTime? =
+    DateTimeUtil.parseFormDateOrNull(stored)?.toLocalDateTime()
+        ?: runCatching { LocalDate.parse(stored.take(10)).atStartOfDay() }.getOrNull()
+
+private fun buildSupporting(
+    item: ScheduledTransaction,
+    next: LocalDateTime?,
+    overdue: Boolean,
+    category: Category?,
+    account: Account?,
+    showAccount: Boolean
+): String {
+    val locale = Locale.getDefault()
+    val today = LocalDate.now()
+    val dayFmt = DateTimeFormatter.ofPattern(
+        if (next != null && next.year != today.year) "EEE, d MMM yyyy" else "EEE, d MMM", locale
+    )
+    val hasTime = item.nextOccurrence.contains('T')
+    val label = Rrule.label(item.rrule, item.maxOccurrences)
+    val oneTime = label == "One-time"
+    // The time matters for a one-off; for a series the day is what you scan for.
+    val whenText = next?.let {
+        it.format(dayFmt) + if (hasTime && oneTime) " at " + it.format(DateTimeFormatter.ofPattern("HH:mm", locale)) else ""
+    } ?: item.nextOccurrence
+    val until = Rrule.parse(item.rrule).until.takeIf { it.isNotEmpty() }?.let {
+        runCatching { LocalDate.parse(it).format(DateTimeFormatter.ofPattern("d MMM yyyy", locale)) }.getOrNull()
     }
+    val parts = mutableListOf<String>()
+    parts += if (overdue) "$label · due now" else if (oneTime) "$label · $whenText" else "$label · next $whenText"
+    if (!oneTime && item.maxOccurrences != null) parts += "${item.occurrenceCount} of ${item.maxOccurrences}"
+    if (until != null) parts += "until $until"
+    // Category only: the account is one tap away and made every row wrap.
+    return (parts + listOfNotNull(category?.name)).joinToString(" · ")
 }

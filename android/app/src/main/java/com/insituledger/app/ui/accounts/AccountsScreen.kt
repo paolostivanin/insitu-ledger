@@ -1,38 +1,48 @@
 package com.insituledger.app.ui.accounts
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AccountBalanceWallet
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.isOwnedBy
-import com.insituledger.app.ui.common.AppCard
-import com.insituledger.app.ui.common.CurrencyFormatter
+import com.insituledger.app.ui.common.AddFab
+import com.insituledger.app.ui.common.BalanceText
 import com.insituledger.app.ui.common.EmptyState
+import com.insituledger.app.ui.common.ListRow
 import com.insituledger.app.ui.common.LoadingIndicator
+import com.insituledger.app.ui.common.LocalContentPadding
 import com.insituledger.app.ui.common.LocalCurrencySymbol
-import com.insituledger.app.ui.common.LocalSnackbarHostState
+import com.insituledger.app.ui.common.LocalSnackbarController
+import com.insituledger.app.ui.common.RowAction
+import com.insituledger.app.ui.common.currencySymbolFor
+import com.insituledger.app.ui.common.primaryCurrency
 import com.insituledger.app.ui.theme.AppSpacing
-import com.insituledger.app.ui.theme.BrandGradients
-import com.insituledger.app.ui.theme.TabularNumStyle
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,8 +54,11 @@ fun AccountsScreen(
     viewModel: AccountsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = LocalSnackbarHostState.current
+    val snackbar = LocalSnackbarController.current
     val scope = rememberCoroutineScope()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val pad = LocalContentPadding.current
+    val preferredSymbol = LocalCurrencySymbol.current
 
     var deleteTarget by remember { mutableStateOf<Account?>(null) }
     var deleting by remember { mutableStateOf(false) }
@@ -54,27 +67,35 @@ fun AccountsScreen(
     deleteTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { if (!deleting) deleteTarget = null },
-            title = { Text("Delete account?") },
-            text = { Column {
-                Text("Delete \"${target.name}\" and its transactions and schedules?")
-                deleteError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            } },
-            confirmButton = { TextButton(enabled = !deleting, onClick = {
-                deleting = true
-                scope.launch {
-                    viewModel.delete(target.id).fold(
-                        onSuccess = { deleteTarget = null },
-                        onFailure = { deleteError = it.message ?: "Could not delete account" }
-                    )
-                    deleting = false
-                    if (deleteTarget == null) snackbarHostState.showSnackbar("Account deleted")
-                }
-            }) { Text(if (deleting) "Deleting…" else "Delete") } },
+            title = { Text("Delete “${target.name}”?") },
+            text = {
+                Text(
+                    deleteError ?: "This also deletes all of its transactions and schedules. This can't be undone.",
+                    color = if (deleteError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !deleting,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    onClick = {
+                        deleting = true
+                        scope.launch {
+                            viewModel.delete(target.id).fold(
+                                onSuccess = { deleteTarget = null; snackbar.show("Account deleted") },
+                                onFailure = { deleteError = it.message ?: "Could not delete account" }
+                            )
+                            deleting = false
+                        }
+                    }
+                ) { Text(if (deleting) "Deleting…" else "Delete") }
+            },
             dismissButton = { TextButton(enabled = !deleting, onClick = { deleteTarget = null }) { Text("Cancel") } }
         )
     }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
                 title = { Text("Accounts") },
@@ -82,45 +103,55 @@ fun AccountsScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                scrollBehavior = scrollBehavior
             )
         },
-        floatingActionButton = {
-            BrandFab(onClick = onAddClick, contentDescription = "Add Account")
-        }
+        floatingActionButton = { AddFab(onClick = onAddClick, contentDescription = "Add account") }
     ) { padding ->
         when {
             uiState.isLoading -> LoadingIndicator(modifier = Modifier.padding(padding))
             uiState.accounts.isEmpty() -> EmptyState(
-                icon = Icons.Default.AccountBalanceWallet,
+                icon = Icons.Outlined.AccountBalanceWallet,
                 title = "No accounts yet",
-                message = "Add your first account to start tracking transactions.",
+                message = "Add an account to start recording transactions.",
                 actionLabel = "Add account",
                 onAction = onAddClick,
                 modifier = Modifier.padding(padding)
             )
             else -> {
                 val currentUserId = uiState.currentUserId
+                val primary = primaryCurrency(uiState.accounts)
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
-                    contentPadding = PaddingValues(
-                        start = AppSpacing.screenPadding,
-                        end = AppSpacing.screenPadding,
-                        top = AppSpacing.sm,
-                        bottom = AppSpacing.xxl
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+                    contentPadding = PaddingValues(top = AppSpacing.xs, bottom = AppSpacing.fabClearance)
                 ) {
                     items(uiState.accounts, key = { it.id }) { account ->
                         val isOwn = account.isOwnedBy(currentUserId)
-                        AccountRow(
-                            account = account,
-                            isOwn = isOwn,
-                            onEdit = if (isOwn) {{ onEditClick(account.id) }} else null,
-                            onDelete = if (isOwn) {{
-                                deleteError = null
-                                deleteTarget = account
-                            }} else null,
+                        val sharing = when {
+                            account.isShared && !isOwn && account.ownerName.isNotEmpty() -> "Shared by ${account.ownerName}"
+                            account.isShared && isOwn -> "Shared with co-owners"
+                            account.isShared -> "Shared"
+                            else -> null
+                        }
+                        ListRow(
+                            headline = account.name,
+                            supporting = listOfNotNull(account.currency, sharing).joinToString(" · "),
+                            trailing = {
+                                BalanceText(
+                                    value = account.balance,
+                                    symbol = currencySymbolFor(account.currency, preferredSymbol, primary)
+                                )
+                            },
+                            onClick = if (isOwn) ({ onEditClick(account.id) }) else null,
+                            actions = if (isOwn) listOf(
+                                RowAction("Edit") { onEditClick(account.id) },
+                                RowAction("Delete", destructive = true) {
+                                    deleteError = null
+                                    deleteTarget = account
+                                }
+                            ) else emptyList(),
+                            horizontalPadding = pad,
                             modifier = Modifier.animateItem()
                         )
                     }
@@ -129,132 +160,3 @@ fun AccountsScreen(
         }
     }
 }
-
-@Composable
-private fun AccountRow(
-    account: Account,
-    isOwn: Boolean,
-    onEdit: (() -> Unit)?,
-    onDelete: (() -> Unit)?,
-    modifier: Modifier = Modifier
-) {
-    val symbol = LocalCurrencySymbol.current
-    AppCard(modifier = modifier.fillMaxWidth(), level = 1) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(AppSpacing.md),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AccountAvatar(name = account.name)
-            Spacer(modifier = Modifier.width(AppSpacing.md))
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                    Text(
-                        account.name,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest
-                    ) {
-                        Text(
-                            account.currency,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-                Text(
-                    text = CurrencyFormatter.formatWithSymbol(account.balance, symbol),
-                    style = MaterialTheme.typography.titleMedium.merge(TabularNumStyle),
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                if (account.isShared) {
-                    val badge = if (isOwn) {
-                        "Shared with others"
-                    } else {
-                        account.ownerName.takeIf { it.isNotBlank() }?.let { "Shared by $it" } ?: "Shared"
-                    }
-                    Text(
-                        text = badge,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.tertiary
-                    )
-                }
-            }
-            if (onEdit != null || onDelete != null) {
-                Row {
-                    if (onEdit != null) {
-                        IconButton(onClick = onEdit) {
-                            Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(20.dp))
-                        }
-                    }
-                    if (onDelete != null) {
-                        IconButton(onClick = onDelete) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AccountAvatar(name: String) {
-    val initials = name.trim().take(1).uppercase().ifEmpty { "•" }
-    val palette = listOf(
-        Color(0xFF26A69A),
-        Color(0xFF42A5F5),
-        Color(0xFFAB47BC),
-        Color(0xFFFFA726),
-        Color(0xFFEF5350),
-        Color(0xFF66BB6A)
-    )
-    val color = palette[(name.hashCode().mod(palette.size) + palette.size) % palette.size]
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(color.copy(alpha = 0.18f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = initials,
-            style = MaterialTheme.typography.titleMedium,
-            color = color,
-            fontWeight = FontWeight.Bold
-        )
-    }
-}
-
-@Composable
-private fun BrandFab(onClick: () -> Unit, contentDescription: String) {
-    val gradient = BrandGradients.hero()
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        color = Color.Transparent,
-        shadowElevation = 8.dp,
-        modifier = Modifier.size(64.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(gradient),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.Add,
-                contentDescription = contentDescription,
-                tint = Color.White,
-                modifier = Modifier.size(28.dp)
-            )
-        }
-    }
-}
-

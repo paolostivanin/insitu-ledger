@@ -1,15 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 1x1 quick-add tile: brand surface with the system widget corner radius. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:gravity="center">
+    android:background="@drawable/widget_background"
+    android:clipToOutline="true">
 
     <ImageView
         android:id="@+id/widget_icon"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
         android:layout_gravity="center"
-        android:scaleType="fitCenter"
         android:src="@drawable/ic_widget_add_transaction"
         android:contentDescription="@string/widget_description" />
 </FrameLayout>

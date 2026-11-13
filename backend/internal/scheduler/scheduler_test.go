@@ -109,7 +109,7 @@ func TestProcessDuePreservesCoOwnerAttribution(t *testing.T) {
 		t.Fatalf("seed scheduled: %v", err)
 	}
 
-	processDue(db)
+	processDue(db, nil)
 
 	var userID int64
 	var createdBy sql.NullInt64
@@ -152,7 +152,7 @@ func TestProcessDueForwardsNullCreatedBy(t *testing.T) {
 		t.Fatalf("seed scheduled: %v", err)
 	}
 
-	processDue(db)
+	processDue(db, nil)
 
 	var createdBy sql.NullInt64
 	if err := db.QueryRow(
@@ -195,10 +195,12 @@ func TestProcessDueWritesClientID(t *testing.T) {
 	}
 	schedID, _ := res.LastInsertId()
 
-	processDue(db)
+	processDue(db, nil)
 
+	// Catch-up also materializes the follow-up occurrence (pastDate + 1 day =
+	// now, truncated to the minute) in the same call, so check the first row.
 	var clientID sql.NullString
-	if err := db.QueryRow(`SELECT client_id FROM transactions ORDER BY id DESC LIMIT 1`).Scan(&clientID); err != nil {
+	if err := db.QueryRow(`SELECT client_id FROM transactions ORDER BY id ASC LIMIT 1`).Scan(&clientID); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
 	wantPrefix := "sched-"
@@ -250,7 +252,7 @@ func TestProcessDueRefireDeduplicates(t *testing.T) {
 		t.Fatalf("pre-seed: %v", err)
 	}
 
-	processDue(db)
+	processDue(db, nil)
 
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM transactions`).Scan(&count); err != nil {
@@ -293,14 +295,16 @@ func TestProcessDueDateOnlySchedule(t *testing.T) {
 		t.Fatalf("seed scheduled: %v", err)
 	}
 
-	processDue(db)
+	processDue(db, nil)
 
+	// Count only yesterday's occurrence: catch-up may also materialize today's
+	// (date-only today is due from 00:00 UTC) in the same call.
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM transactions`).Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM transactions WHERE date = ?`, yesterday).Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if count != 1 {
-		t.Errorf("transactions count = %d, want 1 (date-only schedule materialized)", count)
+		t.Errorf("transactions count for %s = %d, want 1 (date-only schedule materialized)", yesterday, count)
 	}
 }
 
@@ -321,7 +325,7 @@ func TestAdvanceDateFormatMatrix(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _ := advanceDate(tc.input, "FREQ=MONTHLY")
+			got, _ := advanceDate(tc.input, "FREQ=MONTHLY", nil)
 			if len(got) < len(tc.wantPattern) || got[:len(tc.wantPattern)] != tc.wantPattern {
 				t.Errorf("got = %q, want prefix %q", got, tc.wantPattern)
 			}
@@ -356,7 +360,7 @@ func TestAdvanceDateMonthEndClamps(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _ := advanceDate(tc.input, tc.rrule)
+			got, _ := advanceDate(tc.input, tc.rrule, nil)
 			if got != tc.want {
 				t.Errorf("advanceDate(%q, %q) = %q, want %q", tc.input, tc.rrule, got, tc.want)
 			}
@@ -378,7 +382,7 @@ func TestAdvanceDateYearlyLeapDayClamps(t *testing.T) {
 		{"2026-06-11", "FREQ=YEARLY", "2027-06-11"},
 	}
 	for _, tc := range cases {
-		got, _ := advanceDate(tc.input, tc.rrule)
+		got, _ := advanceDate(tc.input, tc.rrule, nil)
 		if got != tc.want {
 			t.Errorf("advanceDate(%q, %q) = %q, want %q", tc.input, tc.rrule, got, tc.want)
 		}
@@ -400,7 +404,7 @@ func TestAdvanceDateClampPreservesShapeAndOffset(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _ := advanceDate(tc.input, "FREQ=MONTHLY")
+			got, _ := advanceDate(tc.input, "FREQ=MONTHLY", nil)
 			if got != tc.want {
 				t.Errorf("advanceDate(%q) = %q, want %q", tc.input, got, tc.want)
 			}
@@ -414,11 +418,11 @@ func TestAdvanceDateClampPreservesShapeAndOffset(t *testing.T) {
 // Android. True RFC 5545 semantics would keep the 31st anchor and skip short
 // months, which needs an anchor-day column — see TODO.
 func TestAdvanceDateClampDrifts(t *testing.T) {
-	feb, _ := advanceDate("2026-01-31", "FREQ=MONTHLY")
+	feb, _ := advanceDate("2026-01-31", "FREQ=MONTHLY", nil)
 	if feb != "2026-02-28" {
 		t.Fatalf("first advance = %q, want %q", feb, "2026-02-28")
 	}
-	mar, _ := advanceDate(feb, "FREQ=MONTHLY")
+	mar, _ := advanceDate(feb, "FREQ=MONTHLY", nil)
 	if mar != "2026-03-28" {
 		t.Errorf("second advance = %q, want %q (clamp is sticky, not restored to the 31st)", mar, "2026-03-28")
 	}
@@ -438,7 +442,7 @@ func TestAdvanceDateArbitraryInterval(t *testing.T) {
 		{"FREQ=YEARLY;INTERVAL=2", "2028-01-05"},
 	}
 	for _, tc := range cases {
-		got, _ := advanceDate("2026-01-05", tc.rrule)
+		got, _ := advanceDate("2026-01-05", tc.rrule, nil)
 		if got != tc.want {
 			t.Errorf("advanceDate(%q, %q) = %q, want %q", "2026-01-05", tc.rrule, got, tc.want)
 		}
@@ -488,7 +492,7 @@ func TestParseUntilExplicitTimePreserved(t *testing.T) {
 // UNTIL=20261231 would deactivate after Dec 30 fires, because the advanced
 // Dec 31 09:00 was incorrectly flagged as past UNTIL (compared to midnight).
 func TestAdvanceDateDailyUntilDateOnlyIncludesUntilDay(t *testing.T) {
-	next, pastUntil := advanceDate("2026-12-30T09:00", "FREQ=DAILY;UNTIL=20261231")
+	next, pastUntil := advanceDate("2026-12-30T09:00", "FREQ=DAILY;UNTIL=20261231", nil)
 	if next != "2026-12-31T09:00" {
 		t.Errorf("next = %q, want %q", next, "2026-12-31T09:00")
 	}
@@ -496,7 +500,7 @@ func TestAdvanceDateDailyUntilDateOnlyIncludesUntilDay(t *testing.T) {
 		t.Errorf("pastUntil = true, want false (Dec 31 is inclusive)")
 	}
 
-	next, pastUntil = advanceDate("2026-12-31T09:00", "FREQ=DAILY;UNTIL=20261231")
+	next, pastUntil = advanceDate("2026-12-31T09:00", "FREQ=DAILY;UNTIL=20261231", nil)
 	if next != "2027-01-01T09:00" {
 		t.Errorf("next = %q, want %q", next, "2027-01-01T09:00")
 	}

@@ -52,10 +52,17 @@ func TestParseClientDate_NaiveUsesLocal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	wantOff := time.Now().In(time.Local).Format("-07:00")
+	// Pin the expectation to the offset in effect on the *tested* date, not
+	// today's: a June date in a DST zone carries the summer offset even when
+	// the suite runs in winter.
+	want := time.Date(2026, time.June, 11, 8, 41, 0, 0, time.Local)
+	wantOff := want.Format("-07:00")
 	gotOff := got.Format("-07:00")
 	if gotOff != wantOff {
-		t.Errorf("offset = %s, want server local %s", gotOff, wantOff)
+		t.Errorf("offset = %s, want server local %s (in effect on 2026-06-11)", gotOff, wantOff)
+	}
+	if !got.Equal(want) {
+		t.Errorf("instant = %v, want %v", got, want)
 	}
 }
 
@@ -93,8 +100,11 @@ func TestCanonicalizeClientDate_LegacyNaiveGetsServerOffset(t *testing.T) {
 	if !strings.Contains(got, "T") {
 		t.Errorf("canonicalize = %q, want RFC3339-style", got)
 	}
-	wantOff := time.Now().In(time.Local).Format("-07:00")
-	if !strings.HasSuffix(got, wantOff) {
-		t.Errorf("canonicalize = %q, want suffix %q (server local)", got, wantOff)
+	// Mirror the production rule (time.Local on the tested date, rendered with
+	// time.RFC3339) instead of hard-coding a suffix: the offset depends on DST
+	// for that date, and under TZ=UTC RFC3339 renders "Z", not "+00:00".
+	want := time.Date(2026, time.June, 11, 8, 41, 0, 0, time.Local).Format(time.RFC3339)
+	if got != want {
+		t.Errorf("canonicalize = %q, want %q (server local offset on 2026-06-11)", got, want)
 	}
 }

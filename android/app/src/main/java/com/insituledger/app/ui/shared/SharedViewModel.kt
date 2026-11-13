@@ -8,6 +8,7 @@ import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.SharedRepository
 import com.insituledger.app.domain.model.Account
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -20,7 +21,11 @@ data class SharedUiState(
     val email: String = "",
     val selectedAccountId: Long? = null,
     val isSaving: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    // One-shot feedback (add / remove results), shown as a snackbar and then
+    // cleared via clearMessage(). Kept apart from [error], which belongs to
+    // the add form.
+    val message: String? = null
 )
 
 @HiltViewModel
@@ -83,25 +88,42 @@ class SharedViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, error = null) }
-            sharedRepository.createSharedAccess(state.email.trim(), accountId)
+            val result = try {
+                sharedRepository.createSharedAccess(state.email.trim(), accountId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+            result
                 .onSuccess {
-                    _uiState.update { it.copy(email = "", isSaving = false) }
+                    _uiState.update { it.copy(email = "", isSaving = false, message = "Co-owner added") }
                     load()
                 }
                 .onFailure { e ->
-                    _uiState.update { it.copy(isSaving = false, error = e.message) }
+                    _uiState.update { it.copy(isSaving = false, error = e.message ?: "Couldn't add co-owner") }
                 }
         }
     }
 
     fun delete(id: Long) {
+        val access = _uiState.value.accesses.find { it.id == id }
         viewModelScope.launch {
             try {
-                sharedRepository.deleteSharedAccess(id)
+                if (sharedRepository.deleteSharedAccess(id)) {
+                    val removed = access?.let { "Removed ${it.guestName}'s access to ${it.accountName}" } ?: "Access removed"
+                    _uiState.update { it.copy(message = removed) }
+                } else {
+                    _uiState.update { it.copy(message = "Couldn't remove access. Try again.") }
+                }
                 load()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message ?: "Failed to delete") }
+                _uiState.update { it.copy(message = e.message ?: "Couldn't remove access") }
             }
         }
     }
+
+    fun clearMessage() { _uiState.update { it.copy(message = null) } }
 }

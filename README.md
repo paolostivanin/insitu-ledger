@@ -36,7 +36,8 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 - **Autocomplete** — typing a description suggests previously used entries and prefills the category, and the amount for recurring ones
 - **Accounts** — multiple accounts with independent balances and currencies (default EUR)
 - **Categories** — hierarchical categories (parent/child, icons, colors) for income and expense
-- **Scheduled transactions** — recurring entries with date and time on any interval (every N days, weeks, months, or years — from the six presets to a custom bimonthly rule), materialized by the backend scheduler (checks every minute) and by the Android WorkManager job (every 15 minutes). Future-dated transactions are automatically converted to one-time scheduled entries
+- **Scheduled transactions** — recurring entries with date and time on any interval (every N days, weeks, months, or years — from the six presets to a custom bimonthly rule), ending never, after N times, or on a date. Materialized by the backend scheduler (checks every minute) and by the Android WorkManager job (every 15 minutes); a schedule that is behind (e.g. one started in the past) catches up on all missed entries in a single run. Future-dated transactions are automatically converted to one-time scheduled entries
+- **Inline scheduling (Android)** — schedule straight from the add-transaction screen: the calendar-clock button next to the date opens a sheet for a one-time entry at a future date or a recurring series. Start a series in the past to back-fill a forgotten expense ("paid rent last Friday, repeat monthly") — the missed entries are created right away. Existing transactions are never converted into schedules
 - **Reports** — spending by category or rolled up into parent categories, over a period (this week/month/year, last month/year, or a custom range), plus by-month and trend analysis (ECharts)
 - **Search summary** — total any description search into money in, money out and the net, one row per currency. Tag a trip or project in the description ("Valencia") and see what you spent, what people paid back, and where it landed
 - **Batch operations** — multi-select transactions for bulk delete or category change
@@ -63,7 +64,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 
 - **Web** — dark/light theme with localStorage persistence and FOUC prevention, keyboard shortcuts (`n` new item, `Escape` close, `?` help), offline banner
 - **PWA** — installable, with offline caching and a service worker
-- **Android** — local-first with optional sync; SQLCipher-encrypted Room database (Keystore-bound), encrypted local backups (PBKDF2 + AES-256-GCM via SAF), optional mTLS client-certificate authentication for sync, home-screen quick-add widget, biometric unlock
+- **Android** — local-first with optional sync; a quiet native Material 3 interface (light/dark/system themes, edge-to-edge, large-font and screen-reader friendly, navigation rail on tablets and foldables); SQLCipher-encrypted Room database (Keystore-bound), encrypted local backups (PBKDF2 + AES-256-GCM via SAF), optional mTLS client-certificate authentication for sync, home-screen quick-add widget, biometric unlock
 - **Mobile sync** — version-based incremental sync API for offline-first clients
 - **API documentation** — interactive Swagger UI at `/api/docs`
 - **Single binary** — the Go binary serves the SvelteKit SPA as static files; no external services
@@ -157,6 +158,13 @@ cd android && ./gradlew assembleDebug
 
 The app works fully offline with no server. To sync with your own instance, open **Settings > Connect to Server** and sign in; file-based JSON backup/restore is always available there too.
 
+Debug builds include a synthetic-data seeder for UI checks (it is not part of release builds). Screenshots of the app need **Settings > Prevent screenshots** off, which the seeder can also do:
+
+```bash
+adb shell am broadcast -n com.insituledger.app/.debug.DebugSeedReceiver --es profile typical   # or: stress
+adb shell am broadcast -n com.insituledger.app/.debug.DebugSeedReceiver --es profile prefs --ez secure false --es theme dark
+```
+
 ### Configuration
 
 | Flag / Env Var              | Default   | Description                  |
@@ -164,6 +172,7 @@ The app works fully offline with no server. To sync with your own instance, open
 | `-addr` / `INSITU_ADDR`     | `:8080`   | Listen address               |
 | `-data` / `INSITU_DATA_DIR` | `./data`  | Directory for the SQLite database (and `backups/` subdirectory) |
 | `INSITU_TRUST_PROXY`        | `false`   | When `true`, trust `X-Forwarded-For` for client IP (use only behind a reverse proxy that sets it) |
+| `INSITU_TIMEZONE`           | unset     | Home IANA time zone (e.g. `Europe/Rome`). Recurring schedules saved with that zone's offset keep their local time across DST (09:00 stays 09:00); schedules with other offsets keep fixed-offset stepping. Invalid values are logged and ignored |
 
 Environment variables take precedence over flags.
 
@@ -288,6 +297,8 @@ Environment=INSITU_ADDR=:8080
 Environment=INSITU_DATA_DIR=/var/lib/insitu-ledger
 # Uncomment only if a trusted reverse proxy fronts this service:
 #Environment=INSITU_TRUST_PROXY=true
+# Keep recurring schedules on local wall-clock time across DST:
+#Environment=INSITU_TIMEZONE=Europe/Rome
 
 # Hardening
 NoNewPrivileges=true
@@ -351,6 +362,7 @@ error_log="/var/log/${RC_SVCNAME}.log"
 export INSITU_ADDR=":8080"
 export INSITU_DATA_DIR="/var/lib/insitu-ledger"
 # export INSITU_TRUST_PROXY="true"   # only if behind a trusted reverse proxy
+# export INSITU_TIMEZONE="Europe/Rome" # keep recurring schedules on local time across DST
 
 depend() {
     need net

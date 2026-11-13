@@ -22,10 +22,13 @@ import kotlinx.coroutines.launch
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.sync.BackupManager
 import com.insituledger.app.data.sync.SyncManager
-import com.insituledger.app.ui.common.LoadingIndicator
+import com.insituledger.app.ui.common.LockScreen
 import com.insituledger.app.ui.common.LocalCurrencySymbol
 import com.insituledger.app.ui.navigation.AppNavigation
 import com.insituledger.app.ui.theme.InSituLedgerTheme
+import com.insituledger.app.ui.theme.resolveDarkTheme
+import androidx.activity.SystemBarStyle
+import android.graphics.Color
 import androidx.compose.runtime.CompositionLocalProvider
 import com.insituledger.app.widget.AddTransactionWidgetProvider
 import dagger.hilt.android.AndroidEntryPoint
@@ -43,6 +46,20 @@ class MainActivity : AppCompatActivity() {
     private var biometricRequested = false
     private val newTransactionEvents = MutableSharedFlow<Unit>(replay = 1, extraBufferCapacity = 1)
     private var contentReady = false
+    /** Last resolved in-app theme; re-applied after the splash exits (it resets bar appearance). */
+    private var appliedDarkTheme: Boolean? = null
+
+    private fun applySystemBars(dark: Boolean) {
+        appliedDarkTheme = dark
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark },
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark }
+        )
+    }
+
+    private fun reapplySystemBars() {
+        appliedDarkTheme?.let(::applySystemBars)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
@@ -64,14 +81,14 @@ class MainActivity : AppCompatActivity() {
                 }
                 val fade = ObjectAnimator.ofFloat(icon, View.ALPHA, 1f, 0f).apply {
                     duration = 250L
-                    doOnEnd { provider.remove() }
+                    doOnEnd { provider.remove(); reapplySystemBars() }
                 }
                 scale.start(); scaleY.start(); fade.start()
             } else {
                 // Widget / shortcut cold-launch sometimes hands us a splash with no icon view.
                 ObjectAnimator.ofFloat(provider.view, View.ALPHA, 1f, 0f).apply {
                     duration = 200L
-                    doOnEnd { provider.remove() }
+                    doOnEnd { provider.remove(); reapplySystemBars() }
                     start()
                 }
             }
@@ -94,7 +111,10 @@ class MainActivity : AppCompatActivity() {
         backupManager.scheduleAutoBackup()
 
         setContent {
-            val themeMode by userPreferences.themeModeFlow.collectAsStateWithLifecycle(initialValue = "system")
+            // null until DataStore emits: the splash stays up meanwhile, so a
+            // forced Light/Dark theme never flashes the system theme first.
+            val themeMode by userPreferences.themeModeFlow
+                .collectAsStateWithLifecycle(initialValue = null as String?)
             val biometricEnabled by userPreferences.biometricEnabledFlow.collectAsStateWithLifecycle(initialValue = false)
             val screenSecure by userPreferences.screenSecureFlow.collectAsStateWithLifecycle(initialValue = true)
             val currencySymbol by userPreferences.currencySymbolFlow.collectAsStateWithLifecycle(initialValue = "€")
@@ -112,12 +132,24 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            val mode = themeMode ?: return@setContent
             LaunchedEffect(Unit) { contentReady = true }
 
-            InSituLedgerTheme(themeMode = themeMode) {
+            val darkTheme = resolveDarkTheme(mode)
+            // System bar icons follow the in-app theme, not the system one.
+            DisposableEffect(darkTheme) {
+                applySystemBars(darkTheme)
+                onDispose {}
+            }
+
+            InSituLedgerTheme(darkTheme = darkTheme) {
                 CompositionLocalProvider(LocalCurrencySymbol provides currencySymbol) {
                     if (biometricEnabled && !unlocked) {
-                        LoadingIndicator()
+                        LockScreen(onUnlock = {
+                            biometricPromptShown = false
+                            biometricRequested = true
+                            maybeShowBiometricPrompt()
+                        })
                         LaunchedEffect(Unit) {
                             biometricRequested = true
                             maybeShowBiometricPrompt()

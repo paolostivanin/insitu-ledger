@@ -1,39 +1,122 @@
 package com.insituledger.app.ui.settings
 
 import android.app.Activity
-import android.content.Intent
+import android.net.Uri
 import android.security.KeyChain
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Remove
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.insituledger.app.ui.common.AppCard
-import com.insituledger.app.ui.theme.AppSpacing
+import androidx.documentfile.provider.DocumentFile
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.ui.common.ConfirmDialog
+import com.insituledger.app.ui.common.DateLabels
+import com.insituledger.app.ui.common.LocalContentPadding
+import com.insituledger.app.ui.common.LocalSnackbarController
+import com.insituledger.app.ui.common.SectionHeader
+import com.insituledger.app.ui.theme.AppSpacing
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private const val MIN_BACKUP_PASSPHRASE_LENGTH = 12
-private val BACKUP_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+private val BACKUP_TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
 
-private fun formatBackupTime(timestamp: Long?): String =
-    timestamp?.let {
-        Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).format(BACKUP_TIME_FORMAT)
-    } ?: "Never"
+private fun formatBackupTime(timestamp: Long?): String {
+    if (timestamp == null) return "Never"
+    val at = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault())
+    return "${DateLabels.day(at.toLocalDate())} · ${at.format(BACKUP_TIME_FORMAT)}"
+}
+
+private fun changeCount(n: Int): String = if (n == 1) "1 change" else "$n changes"
+
+private data class Choice<T>(val value: T, val label: String, val description: String? = null)
+
+private val ThemeChoices = listOf(
+    Choice("system", "System default"),
+    Choice("light", "Light"),
+    Choice("dark", "Dark")
+)
+
+private val WeekStartChoices = listOf(
+    Choice("monday", "Monday"),
+    Choice("sunday", "Sunday")
+)
+
+private val HeadlineChoices = listOf(
+    Choice("net_worth", "Net worth", "Total balance of your accounts"),
+    Choice("month_net", "This month", "Income minus expenses so far this month")
+)
+
+private fun <T> List<Choice<T>>.labelFor(value: T): String =
+    (firstOrNull { it.value == value } ?: first()).label
+
+/** Which dialog is open. One at a time; saved across rotation. */
+private enum class SettingsDialog {
+    Theme, WeekStart, CurrencySymbol, DashboardHeadline, DefaultAccount,
+    BackupPassphrase, DisablePassphrase, ClearBackupFolder,
+    ChangePassword, DiscardFailed, Disconnect
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,22 +126,35 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbar = LocalSnackbarController.current
+    val context = LocalContext.current
+    val pad = LocalContentPadding.current
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    var dialog by rememberSaveable { mutableStateOf<SettingsDialog?>(null) }
 
     LaunchedEffect(uiState.passwordChanged) {
         if (uiState.passwordChanged) {
+            dialog = null
             viewModel.clearPasswordChanged()
             onConnectWebapp?.invoke()
         }
     }
 
-    // SAF launcher for auto backup folder
+    LaunchedEffect(uiState.backupMessage) {
+        uiState.backupMessage?.let {
+            snackbar.show(it)
+            viewModel.clearBackupMessage()
+        }
+    }
+
+    // SAF launcher for the automatic backup folder
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         uri?.let { viewModel.setAutoBackupFolder(it) }
     }
 
-    // SAF launchers for file backup
+    // SAF launchers for manual export / import
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
@@ -71,33 +167,12 @@ fun SettingsScreen(
         uri?.let { viewModel.importData(it) }
     }
 
-    if (uiState.pendingImportNeedsPassphrase) {
-        ImportPassphraseDialog(
-            onConfirm = { viewModel.importWithPassphrase(it) },
-            onDismiss = { viewModel.cancelPendingImport() }
-        )
-    }
-
-    var showBackupPassphraseDialog by remember { mutableStateOf(false) }
-    if (showBackupPassphraseDialog) {
-        BackupPassphraseDialog(
-            isCurrentlySet = uiState.backupPassphraseSet,
-            onSave = { viewModel.setBackupPassphrase(it); showBackupPassphraseDialog = false },
-            onClear = { viewModel.setBackupPassphrase(null); showBackupPassphraseDialog = false },
-            onDismiss = { showBackupPassphraseDialog = false }
-        )
-    }
-
-    // Show snackbar for backup messages
-    val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(uiState.backupMessage) {
-        uiState.backupMessage?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.clearBackupMessage()
-        }
-    }
+    val connected = uiState.syncMode == "webapp" && uiState.isWebappConnected
+    val backupBusy = uiState.isExporting || uiState.isImporting
+    val errorColor = MaterialTheme.colorScheme.error
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
@@ -105,605 +180,726 @@ fun SettingsScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                scrollBehavior = scrollBehavior
             )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(AppSpacing.screenPadding),
-            verticalArrangement = Arrangement.spacedBy(AppSpacing.lg)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = AppSpacing.xl)
         ) {
-            // Theme
-            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
-                    Text("Theme", style = MaterialTheme.typography.titleSmall)
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                        listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (value, label) ->
-                            FilterChip(
-                                selected = uiState.themeMode == value,
-                                onClick = { viewModel.setTheme(value) },
-                                label = { Text(label) }
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Week starts on
-            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
-                    Text("Week starts on", style = MaterialTheme.typography.titleSmall)
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                        listOf("monday" to "Monday", "sunday" to "Sunday").forEach { (value, label) ->
-                            FilterChip(
-                                selected = uiState.weekStartDay == value,
-                                onClick = { viewModel.setWeekStartDay(value) },
-                                label = { Text(label) }
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Currency symbol
-            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
-                    Text("Currency symbol", style = MaterialTheme.typography.titleSmall)
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
-                    Text(
-                        "Shown next to every amount across the app.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    var symbolDraft by remember(uiState.currencySymbol) { mutableStateOf(uiState.currencySymbol) }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                        OutlinedTextField(
-                            value = symbolDraft,
-                            onValueChange = { symbolDraft = it.take(8) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            label = { Text("Symbol") }
-                        )
-                        Button(
-                            onClick = { viewModel.setCurrencySymbol(symbolDraft) },
-                            enabled = symbolDraft != uiState.currencySymbol
-                        ) {
-                            Text("Save")
-                        }
-                    }
-                }
-            }
-
-            // Dashboard headline
-            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
-                    Text("Dashboard headline", style = MaterialTheme.typography.titleSmall)
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
-                    Text(
-                        "Choose what the big number on the home screen shows.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                        listOf("net_worth" to "Net worth", "month_net" to "Monthly net").forEach { (value, label) ->
-                            FilterChip(
-                                selected = uiState.dashboardHeroMode == value,
-                                onClick = { viewModel.setDashboardHeroMode(value) },
-                                label = { Text(label) }
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Biometric unlock
-            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                Row(
-                    modifier = Modifier.padding(AppSpacing.cardPadding),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Fingerprint, contentDescription = null)
-                    Spacer(modifier = Modifier.width(AppSpacing.md))
-                    Text("Fingerprint unlock", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    Switch(
-                        checked = uiState.biometricEnabled,
-                        onCheckedChange = viewModel::setBiometric
-                    )
-                }
-            }
-
-            // Prevent screenshots
-            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                Row(
-                    modifier = Modifier.padding(AppSpacing.cardPadding),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.ScreenLockPortrait, contentDescription = null)
-                    Spacer(modifier = Modifier.width(AppSpacing.md))
-                    Text("Prevent screenshots", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    Switch(
-                        checked = uiState.screenSecure,
-                        onCheckedChange = viewModel::setScreenSecure
-                    )
-                }
-            }
-
-            // Data backup (always available)
-            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = null)
-                        Spacer(modifier = Modifier.width(AppSpacing.md))
-                        Text("Data Backup", style = MaterialTheme.typography.titleSmall)
-                    }
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Text(
-                        "Export or import your data as a JSON file. Save to Google Drive, Dropbox, or any storage provider.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (uiState.backupPassphraseSet) Icons.Default.Lock else Icons.Default.LockOpen,
-                            contentDescription = null,
-                            tint = if (uiState.backupPassphraseSet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(AppSpacing.xs))
-                        Text(
-                            if (uiState.backupPassphraseSet) "Backups encrypted with passphrase" else "Backups are unencrypted",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (uiState.backupPassphraseSet) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = { showBackupPassphraseDialog = true }) {
-                            Text(if (uiState.backupPassphraseSet) "Change" else "Set")
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                        Button(
-                            onClick = {
-                                val name = if (uiState.backupPassphraseSet) "insitu-ledger-backup.ilbk" else "insitu-ledger-backup.json"
-                                exportLauncher.launch(name)
-                            },
-                            enabled = !uiState.isExporting && !uiState.isImporting
-                        ) {
-                            if (uiState.isExporting) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary)
-                                Spacer(modifier = Modifier.width(AppSpacing.sm))
-                            }
-                            Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(AppSpacing.xs))
-                            Text("Export")
-                        }
-                        OutlinedButton(
-                            onClick = { importLauncher.launch(arrayOf("*/*")) },
-                            enabled = !uiState.isExporting && !uiState.isImporting
-                        ) {
-                            if (uiState.isImporting) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(AppSpacing.sm))
-                            }
-                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(AppSpacing.xs))
-                            Text("Import")
-                        }
-                    }
-                }
-            }
-
-            // Automatic backup
-            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Schedule, contentDescription = null)
-                        Spacer(modifier = Modifier.width(AppSpacing.md))
-                        Text("Automatic Backup", style = MaterialTheme.typography.titleSmall)
-                    }
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Text(
-                        "Automatically back up your data on a daily, weekly, or monthly schedule. " +
-                                "Backups are saved as JSON files to the selected folder.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                    if (uiState.autoBackupFolderUri != null) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Folder, contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(AppSpacing.sm))
-                            Text(
-                                "Folder selected", style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f)
-                            )
-                            TextButton(onClick = { folderPickerLauncher.launch(null) }) { Text("Change") }
-                            TextButton(onClick = viewModel::clearAutoBackupFolder) { Text("Clear") }
-                        }
-                        Text(
-                            "Last attempted: ${formatBackupTime(uiState.autoBackupLastAttemptAt)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            "Last successful: ${formatBackupTime(uiState.autoBackupLastSuccessfulAt)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Spacer(modifier = Modifier.height(AppSpacing.md))
-                        HorizontalDivider()
-                        Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                        BackupTierRow(
-                            label = "Daily",
-                            description = "Runs every day at ~3:00 AM",
-                            enabled = uiState.autoBackupDailyEnabled,
-                            retention = uiState.autoBackupDailyRetention,
-                            onEnabledChange = viewModel::setAutoBackupDailyEnabled,
-                            onRetentionChange = viewModel::setAutoBackupDailyRetention
-                        )
-                        BackupTierRow(
-                            label = "Weekly",
-                            description = "Runs every Monday",
-                            enabled = uiState.autoBackupWeeklyEnabled,
-                            retention = uiState.autoBackupWeeklyRetention,
-                            onEnabledChange = viewModel::setAutoBackupWeeklyEnabled,
-                            onRetentionChange = viewModel::setAutoBackupWeeklyRetention
-                        )
-                        BackupTierRow(
-                            label = "Monthly",
-                            description = "Runs on the 1st of each month",
-                            enabled = uiState.autoBackupMonthlyEnabled,
-                            retention = uiState.autoBackupMonthlyRetention,
-                            onEnabledChange = viewModel::setAutoBackupMonthlyEnabled,
-                            onRetentionChange = viewModel::setAutoBackupMonthlyRetention
-                        )
-                    } else {
-                        Button(onClick = { folderPickerLauncher.launch(null) }) {
-                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(AppSpacing.sm))
-                            Text("Select Backup Folder")
-                        }
-                    }
-                }
-            }
-
-            // Client certificate (mTLS)
-            val context = LocalContext.current
-            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.VerifiedUser, contentDescription = null)
-                        Spacer(modifier = Modifier.width(AppSpacing.md))
-                        Text("Client certificate (mTLS)", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        Switch(
-                            checked = uiState.mtlsEnabled,
-                            onCheckedChange = viewModel::setMtlsEnabled
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Text(
-                        "Required if your server enforces mutual TLS (e.g. Cloudflare Access).",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (uiState.mtlsEnabled) {
-                        Spacer(modifier = Modifier.height(AppSpacing.md))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Selected certificate", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(
-                                    uiState.mtlsAlias ?: "None",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (uiState.mtlsAlias != null) FontWeight.Medium else FontWeight.Normal
-                                )
-                            }
-                            TextButton(onClick = {
-                                val activity = context as? Activity ?: return@TextButton
-                                KeyChain.choosePrivateKeyAlias(
-                                    activity,
-                                    { alias -> viewModel.setMtlsAlias(alias) },
-                                    null,
-                                    null,
-                                    null,
-                                    -1,
-                                    uiState.mtlsAlias
-                                )
-                            }) {
-                                Text(if (uiState.mtlsAlias == null) "Choose" else "Change")
-                            }
-                            if (uiState.mtlsAlias != null) {
-                                TextButton(onClick = { viewModel.setMtlsAlias(null) }) { Text("Clear") }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Allow HTTP (cleartext) — opt-in for LAN self-hosters
-            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                        Spacer(modifier = Modifier.width(AppSpacing.md))
-                        Text("Allow HTTP (insecure)", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        Switch(
-                            checked = uiState.allowCleartextHttp,
-                            onCheckedChange = viewModel::setAllowCleartextHttp
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(AppSpacing.xs))
-                    Text(
-                        "Required for LAN servers reached over http://. Leave off if your server is on the public internet — HTTPS is enforced by default.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            // Sync section
-            AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Sync, contentDescription = null)
-                        Spacer(modifier = Modifier.width(AppSpacing.md))
-                        Text("Server Sync", style = MaterialTheme.typography.titleSmall)
-                    }
-                    Spacer(modifier = Modifier.height(AppSpacing.sm))
-                    Text(
-                        "Optionally connect to an InSitu Ledger server for real-time sync across devices.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(AppSpacing.md))
-
-                    if (uiState.syncMode == "webapp" && uiState.isWebappConnected) {
-                        // Connected state
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Cloud, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(AppSpacing.md))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Connected", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                                if (uiState.userName.isNotBlank()) {
-                                    Text(uiState.userName, style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(AppSpacing.sm))
-                        Text("Last sync version: ${uiState.lastSyncVersion}", style = MaterialTheme.typography.bodySmall)
-                        Text("Pending operations: ${uiState.pendingOps}", style = MaterialTheme.typography.bodySmall)
-                        if (uiState.failedOps > 0) {
-                            Text(
-                                "Failed operations: ${uiState.failedOps}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                            uiState.firstFailedOpError?.let {
-                                Text(
-                                    it,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                                TextButton(onClick = viewModel::retryFailedSyncOperations) {
-                                    Text("Retry failed")
-                                }
-                                TextButton(onClick = viewModel::discardFailedSyncOperations) {
-                                    Text("Discard failed")
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(AppSpacing.md))
-                        Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                            Button(onClick = viewModel::forceSync, enabled = !uiState.isSyncing) {
-                                if (uiState.isSyncing) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary)
-                                    Spacer(modifier = Modifier.width(AppSpacing.sm))
-                                }
-                                Text("Sync Now")
-                            }
-                            OutlinedButton(
-                                onClick = viewModel::disconnect,
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Text("Disconnect")
-                            }
-                        }
-                        uiState.syncError?.let { msg ->
-                            Spacer(modifier = Modifier.height(AppSpacing.sm))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.Default.Warning,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(AppSpacing.sm))
-                                Text(
-                                    msg,
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                TextButton(
-                                    onClick = viewModel::clearSyncError,
-                                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                                ) {
-                                    Text("Dismiss")
-                                }
-                            }
-                        }
-                    } else {
-                        // Not connected
-                        Button(onClick = {
-                            viewModel.setSyncMode("webapp")
-                            onConnectWebapp?.invoke()
-                        }) {
-                            Icon(Icons.Default.CloudOff, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(AppSpacing.sm))
-                            Text("Connect to Server")
-                        }
-                    }
-                }
-            }
-
-            // Default account (only when webapp connected and there are accounts to pick)
-            if (uiState.syncMode == "webapp" && uiState.isWebappConnected && uiState.accessibleAccountOptions.isNotEmpty()) {
-                LaunchedEffect(Unit) { viewModel.refreshAccessibleAccounts() }
-                AppCard(modifier = Modifier.fillMaxWidth(), level = 1) {
-                    Column(modifier = Modifier.padding(AppSpacing.cardPadding)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Star, contentDescription = null)
-                            Spacer(modifier = Modifier.width(AppSpacing.md))
-                            Text("Default account", style = MaterialTheme.typography.titleSmall)
-                        }
-                        Spacer(modifier = Modifier.height(AppSpacing.xs))
-                        Text(
-                            "Selected on launch when forms ask for an account.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(AppSpacing.sm))
-                        DefaultAccountPicker(
-                            options = uiState.accessibleAccountOptions,
-                            selectedId = uiState.defaultAccountId,
-                            onSelect = viewModel::setDefaultAccount
-                        )
-                    }
-                }
-            }
-
-            // Change password (only when webapp connected)
-            if (uiState.syncMode == "webapp" && uiState.isWebappConnected) {
-                var showPasswordDialog by remember { mutableStateOf(false) }
-                AppCard(modifier = Modifier.fillMaxWidth(), onClick = { showPasswordDialog = true }, level = 1) {
-                    Row(modifier = Modifier.padding(AppSpacing.cardPadding), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.width(AppSpacing.md))
-                        Text("Change Password", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                    }
-                }
-
-                if (showPasswordDialog) {
-                    ChangePasswordDialog(
-                        isLoading = uiState.isChangingPassword,
-                        error = uiState.passwordError,
-                        onDismiss = { showPasswordDialog = false },
-                        onConfirm = { current, new -> viewModel.changePassword(current, new) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DefaultAccountPicker(
-    options: List<AccessibleAccountOption>,
-    selectedId: Long?,
-    onSelect: (Long?) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val selected = options.find { it.accountId == selectedId }
-    val label = selected?.let { "${it.ownerName} · ${it.accountName}" } ?: "None"
-    val grouped = options.groupBy { it.ownerName }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = !expanded }
-    ) {
-        OutlinedTextField(
-            value = label,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Default account") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth()
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("None") },
-                onClick = { onSelect(null); expanded = false }
+            // ---- Appearance ----
+            SectionHeader("Appearance", horizontalPadding = pad, topPadding = AppSpacing.sm)
+            PreferenceRow(
+                title = "Theme",
+                summary = ThemeChoices.labelFor(uiState.themeMode),
+                onClick = { dialog = SettingsDialog.Theme }
             )
-            grouped.forEach { (ownerName, ownerAccounts) ->
-                HorizontalDivider()
-                DropdownMenuItem(
-                    enabled = false,
-                    text = {
-                        Text(
-                            ownerName,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+            PreferenceRow(
+                title = "Week starts on",
+                summary = WeekStartChoices.labelFor(uiState.weekStartDay),
+                onClick = { dialog = SettingsDialog.WeekStart }
+            )
+            PreferenceRow(
+                title = "Currency symbol",
+                summary = uiState.currencySymbol.ifBlank { "None" },
+                onClick = { dialog = SettingsDialog.CurrencySymbol }
+            )
+            PreferenceRow(
+                title = "Dashboard headline",
+                summary = HeadlineChoices.labelFor(uiState.dashboardHeroMode),
+                onClick = { dialog = SettingsDialog.DashboardHeadline }
+            )
+
+            // ---- Security ----
+            SectionHeader("Security", horizontalPadding = pad)
+            SwitchRow(
+                title = "Fingerprint unlock",
+                summary = "Unlock with your fingerprint when the app opens",
+                checked = uiState.biometricEnabled,
+                onCheckedChange = viewModel::setBiometric
+            )
+            SwitchRow(
+                title = "Prevent screenshots",
+                summary = "Blocks screenshots and hides the app in recent apps",
+                checked = uiState.screenSecure,
+                onCheckedChange = viewModel::setScreenSecure
+            )
+
+            // ---- Backups ----
+            SectionHeader("Backups", horizontalPadding = pad)
+            PreferenceRow(
+                title = "Export backup",
+                summary = if (uiState.backupPassphraseSet) "Save an encrypted .ilbk file"
+                    else "Save a .json file to your device or a cloud drive",
+                enabled = !backupBusy,
+                onClick = {
+                    val name = if (uiState.backupPassphraseSet) "insitu-ledger-backup.ilbk" else "insitu-ledger-backup.json"
+                    exportLauncher.launch(name)
+                },
+                trailing = if (uiState.isExporting) ({ RowProgress("Exporting") }) else null
+            )
+            PreferenceRow(
+                title = "Import backup",
+                summary = "Restore entries from a .json or .ilbk file",
+                enabled = !backupBusy,
+                onClick = { importLauncher.launch(arrayOf("*/*")) },
+                trailing = if (uiState.isImporting) ({ RowProgress("Importing") }) else null
+            )
+            PreferenceRow(
+                title = "Backup passphrase",
+                summary = if (uiState.backupPassphraseSet) "Encrypted" else "Not encrypted",
+                onClick = { dialog = SettingsDialog.BackupPassphrase }
+            )
+
+            SectionHeader("Automatic backup", horizontalPadding = pad, topPadding = AppSpacing.lg)
+            val folderUri = uiState.autoBackupFolderUri
+            val folderName = rememberFolderName(folderUri)
+            PreferenceRow(
+                title = "Backup folder",
+                summary = when {
+                    folderUri == null -> "Choose a folder to turn on automatic backups"
+                    else -> folderName ?: "Folder selected"
+                },
+                onClick = { folderPickerLauncher.launch(null) },
+                trailing = if (folderUri != null) ({
+                    TextButton(
+                        onClick = { dialog = SettingsDialog.ClearBackupFolder },
+                        modifier = Modifier.semantics { contentDescription = "Clear backup folder" }
+                    ) { Text("Clear") }
+                }) else null
+            )
+            if (folderUri != null) {
+                SwitchRow(
+                    title = "Daily",
+                    summary = "Every day at about 03:00",
+                    checked = uiState.autoBackupDailyEnabled,
+                    onCheckedChange = viewModel::setAutoBackupDailyEnabled
+                )
+                if (uiState.autoBackupDailyEnabled) {
+                    RetentionRow("daily", uiState.autoBackupDailyRetention, viewModel::setAutoBackupDailyRetention)
+                }
+                SwitchRow(
+                    title = "Weekly",
+                    summary = "Every Monday",
+                    checked = uiState.autoBackupWeeklyEnabled,
+                    onCheckedChange = viewModel::setAutoBackupWeeklyEnabled
+                )
+                if (uiState.autoBackupWeeklyEnabled) {
+                    RetentionRow("weekly", uiState.autoBackupWeeklyRetention, viewModel::setAutoBackupWeeklyRetention)
+                }
+                SwitchRow(
+                    title = "Monthly",
+                    summary = "On the 1st of each month",
+                    checked = uiState.autoBackupMonthlyEnabled,
+                    onCheckedChange = viewModel::setAutoBackupMonthlyEnabled
+                )
+                if (uiState.autoBackupMonthlyEnabled) {
+                    RetentionRow("monthly", uiState.autoBackupMonthlyRetention, viewModel::setAutoBackupMonthlyRetention)
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = pad, vertical = AppSpacing.sm)
+                        .semantics(mergeDescendants = true) {},
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)
+                ) {
+                    FootnoteText("Last successful backup: ${formatBackupTime(uiState.autoBackupLastSuccessfulAt)}")
+                    FootnoteText("Last attempt: ${formatBackupTime(uiState.autoBackupLastAttemptAt)}")
+                    FootnoteText(
+                        if (uiState.backupPassphraseSet) "Saved as encrypted .ilbk files."
+                        else "Saved as .json files. Set a backup passphrase to encrypt them."
+                    )
+                }
+            }
+
+            // ---- Sync ----
+            SectionHeader("Sync", horizontalPadding = pad)
+            if (connected) {
+                PreferenceRow(
+                    title = uiState.userName.takeIf { it.isNotBlank() }?.let { "Connected as $it" } ?: "Connected",
+                    summary = when {
+                        uiState.isSyncing -> "Syncing…"
+                        uiState.pendingOps == 0 -> "All changes synced"
+                        else -> "${changeCount(uiState.pendingOps)} waiting to sync"
+                    },
+                    liveSummary = true
+                )
+                PreferenceRow(
+                    title = "Sync now",
+                    enabled = !uiState.isSyncing,
+                    onClick = viewModel::forceSync,
+                    trailing = if (uiState.isSyncing) ({ RowProgress("Syncing") }) else null
+                )
+                uiState.syncError?.let { msg ->
+                    PreferenceRow(
+                        title = "Last sync failed",
+                        titleColor = errorColor,
+                        summary = msg,
+                        liveSummary = true,
+                        trailing = {
+                            TextButton(
+                                onClick = viewModel::clearSyncError,
+                                modifier = Modifier.semantics { contentDescription = "Dismiss sync error" }
+                            ) { Text("Dismiss") }
+                        }
+                    )
+                }
+                if (uiState.failedOps > 0) {
+                    FailedOperationsRow(
+                        count = uiState.failedOps,
+                        firstError = uiState.firstFailedOpError,
+                        onRetry = {
+                            viewModel.retryFailedSyncOperations()
+                            snackbar.show("Retrying ${changeCount(uiState.failedOps)}")
+                        },
+                        onDiscard = { dialog = SettingsDialog.DiscardFailed }
+                    )
+                }
+                if (uiState.accessibleAccountOptions.isNotEmpty()) {
+                    LaunchedEffect(Unit) { viewModel.refreshAccessibleAccounts() }
+                    val selected = uiState.accessibleAccountOptions.find { it.accountId == uiState.defaultAccountId }
+                    PreferenceRow(
+                        title = "Default account",
+                        summary = selected?.let { "${it.ownerName} · ${it.accountName}" } ?: "None",
+                        onClick = { dialog = SettingsDialog.DefaultAccount }
+                    )
+                }
+                PreferenceRow(
+                    title = "Change password",
+                    onClick = { dialog = SettingsDialog.ChangePassword }
+                )
+                PreferenceRow(
+                    title = "Disconnect",
+                    titleColor = errorColor,
+                    summary = "Sign out of the server on this device",
+                    onClick = { dialog = SettingsDialog.Disconnect }
+                )
+            } else {
+                PreferenceRow(
+                    title = "Not connected",
+                    summary = "Sync your data across devices with an InSitu Ledger server"
+                )
+                PreferenceRow(
+                    title = "Connect to server",
+                    titleColor = MaterialTheme.colorScheme.primary,
+                    onClick = {
+                        viewModel.setSyncMode("webapp")
+                        onConnectWebapp?.invoke()
+                    }
+                )
+            }
+
+            // Connection settings stay visible so they can be set before connecting.
+            SectionHeader("Connection", horizontalPadding = pad, topPadding = AppSpacing.lg)
+            SwitchRow(
+                title = "Client certificate (mTLS)",
+                summary = "Required if your server enforces mutual TLS, for example Cloudflare Access",
+                checked = uiState.mtlsEnabled,
+                onCheckedChange = viewModel::setMtlsEnabled
+            )
+            if (uiState.mtlsEnabled) {
+                PreferenceRow(
+                    title = "Certificate",
+                    summary = uiState.mtlsAlias ?: "None selected",
+                    onClick = {
+                        val activity = context as? Activity ?: return@PreferenceRow
+                        KeyChain.choosePrivateKeyAlias(
+                            activity,
+                            { alias -> viewModel.setMtlsAlias(alias) },
+                            null,
+                            null,
+                            null,
+                            -1,
+                            uiState.mtlsAlias
                         )
                     },
-                    onClick = {}
+                    trailing = if (uiState.mtlsAlias != null) ({
+                        TextButton(
+                            onClick = { viewModel.setMtlsAlias(null) },
+                            modifier = Modifier.semantics { contentDescription = "Clear certificate" }
+                        ) { Text("Clear") }
+                    }) else null
                 )
-                ownerAccounts.forEach { opt ->
-                    DropdownMenuItem(
-                        text = { Text(opt.accountName) },
-                        onClick = { onSelect(opt.accountId); expanded = false }
-                    )
-                }
             }
+            SwitchRow(
+                title = "Allow HTTP (insecure)",
+                summary = "Needed for LAN servers reached over http://. Leave off for servers on the internet; HTTPS is enforced by default.",
+                checked = uiState.allowCleartextHttp,
+                onCheckedChange = viewModel::setAllowCleartextHttp
+            )
+        }
+    }
+
+    // ---- Dialogs ----
+    val dismiss = { dialog = null }
+    when (dialog) {
+        SettingsDialog.Theme -> ChoiceDialog(
+            title = "Theme",
+            choices = ThemeChoices,
+            selected = uiState.themeMode,
+            onSelect = viewModel::setTheme,
+            onDismiss = dismiss
+        )
+        SettingsDialog.WeekStart -> ChoiceDialog(
+            title = "Week starts on",
+            choices = WeekStartChoices,
+            selected = uiState.weekStartDay,
+            onSelect = viewModel::setWeekStartDay,
+            onDismiss = dismiss
+        )
+        SettingsDialog.DashboardHeadline -> ChoiceDialog(
+            title = "Dashboard headline",
+            message = "What the large number on the dashboard shows.",
+            choices = HeadlineChoices,
+            selected = uiState.dashboardHeroMode,
+            onSelect = viewModel::setDashboardHeroMode,
+            onDismiss = dismiss
+        )
+        SettingsDialog.CurrencySymbol -> CurrencySymbolDialog(
+            current = uiState.currencySymbol,
+            onSave = { viewModel.setCurrencySymbol(it); dialog = null },
+            onDismiss = dismiss
+        )
+        SettingsDialog.DefaultAccount -> DefaultAccountDialog(
+            options = uiState.accessibleAccountOptions,
+            selectedId = uiState.defaultAccountId,
+            onSelect = { viewModel.setDefaultAccount(it); dialog = null },
+            onDismiss = dismiss
+        )
+        SettingsDialog.BackupPassphrase -> BackupPassphraseDialog(
+            isCurrentlySet = uiState.backupPassphraseSet,
+            onSave = {
+                viewModel.setBackupPassphrase(it)
+                dialog = null
+                snackbar.show("Backups will be encrypted")
+            },
+            onClear = { dialog = SettingsDialog.DisablePassphrase },
+            onDismiss = dismiss
+        )
+        SettingsDialog.DisablePassphrase -> ConfirmDialog(
+            title = "Turn off backup encryption?",
+            text = "New backups will be saved as unencrypted .json files that anyone with the file can read. " +
+                "Existing encrypted backups still need the passphrase to import.",
+            confirmLabel = "Turn off",
+            onConfirm = {
+                viewModel.setBackupPassphrase(null)
+                dialog = null
+                snackbar.show("Backup encryption turned off")
+            },
+            onDismiss = dismiss
+        )
+        SettingsDialog.ClearBackupFolder -> ConfirmDialog(
+            title = "Clear backup folder?",
+            text = "Automatic backups stop. Backup files already in the folder are kept.",
+            confirmLabel = "Clear",
+            onConfirm = {
+                viewModel.clearAutoBackupFolder()
+                dialog = null
+                snackbar.show("Automatic backups turned off")
+            },
+            onDismiss = dismiss
+        )
+        SettingsDialog.ChangePassword -> ChangePasswordDialog(
+            isLoading = uiState.isChangingPassword,
+            error = uiState.passwordError,
+            onDismiss = dismiss,
+            onConfirm = { current, new -> viewModel.changePassword(current, new) }
+        )
+        SettingsDialog.DiscardFailed -> ConfirmDialog(
+            title = "Discard ${changeCount(uiState.failedOps)}?",
+            text = "They stay on this device but won't be sent to the server.",
+            confirmLabel = "Discard",
+            onConfirm = {
+                viewModel.discardFailedSyncOperations()
+                dialog = null
+            },
+            onDismiss = dismiss
+        )
+        SettingsDialog.Disconnect -> ConfirmDialog(
+            title = "Disconnect from the server?",
+            text = "Your entries stay on this device but won't sync until you connect again. " +
+                "App preferences such as theme and automatic backups are reset.",
+            confirmLabel = "Disconnect",
+            onConfirm = {
+                viewModel.disconnect()
+                dialog = null
+                snackbar.show("Disconnected")
+            },
+            onDismiss = dismiss
+        )
+        null -> Unit
+    }
+
+    if (uiState.pendingImportNeedsPassphrase) {
+        ImportPassphraseDialog(
+            onConfirm = { viewModel.importWithPassphrase(it) },
+            onDismiss = { viewModel.cancelPendingImport() }
+        )
+    }
+}
+
+// ---- Rows ----
+
+/** Flat settings row: title, optional summary, optional trailing control. */
+@Composable
+private fun PreferenceRow(
+    title: String,
+    modifier: Modifier = Modifier,
+    summary: String? = null,
+    titleColor: Color = Color.Unspecified,
+    summaryColor: Color = Color.Unspecified,
+    enabled: Boolean = true,
+    liveSummary: Boolean = false,
+    onClick: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null
+) {
+    val pad = LocalContentPadding.current
+    val colors = MaterialTheme.colorScheme
+    val disabled = colors.onSurface.copy(alpha = 0.38f)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (onClick != null) Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                else Modifier.semantics(mergeDescendants = true) {}
+            )
+            .heightIn(min = AppSpacing.rowMinHeight)
+            .padding(horizontal = pad, vertical = AppSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = when {
+                    !enabled -> disabled
+                    titleColor != Color.Unspecified -> titleColor
+                    else -> colors.onSurface
+                },
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (summary != null) {
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = when {
+                        !enabled -> disabled
+                        summaryColor != Color.Unspecified -> summaryColor
+                        else -> colors.onSurfaceVariant
+                    },
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = if (liveSummary) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier
+                )
+            }
+        }
+        if (trailing != null) {
+            Spacer(Modifier.size(AppSpacing.md))
+            trailing()
+        }
+    }
+}
+
+/** Whole-row switch: the row is the toggle target. */
+@Composable
+private fun SwitchRow(
+    title: String,
+    summary: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val pad = LocalContentPadding.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .heightIn(min = AppSpacing.rowMinHeight)
+            .padding(horizontal = pad, vertical = AppSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (summary != null) {
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Spacer(Modifier.size(AppSpacing.lg))
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+/** "Keep 7 daily backups" with 48dp − / + buttons; indented under its tier. */
+@Composable
+private fun RetentionRow(tier: String, retention: Int, onChange: (Int) -> Unit) {
+    val pad = LocalContentPadding.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = AppSpacing.rowMinHeight)
+            .padding(start = pad + AppSpacing.lg, end = (pad - AppSpacing.md).coerceAtLeast(0.dp)),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "Keep $retention $tier ${if (retention == 1) "backup" else "backups"}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .semantics { liveRegion = LiveRegionMode.Polite }
+        )
+        IconButton(onClick = { if (retention > 1) onChange(retention - 1) }, enabled = retention > 1) {
+            Icon(Icons.Outlined.Remove, contentDescription = "Keep fewer $tier backups")
+        }
+        IconButton(onClick = { onChange(retention + 1) }) {
+            Icon(Icons.Outlined.Add, contentDescription = "Keep more $tier backups")
         }
     }
 }
 
 @Composable
-private fun BackupTierRow(
-    label: String,
-    description: String,
-    enabled: Boolean,
-    retention: Int,
-    onEnabledChange: (Boolean) -> Unit,
-    onRetentionChange: (Int) -> Unit
+private fun FailedOperationsRow(
+    count: Int,
+    firstError: String?,
+    onRetry: () -> Unit,
+    onDiscard: () -> Unit
 ) {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(label, style = MaterialTheme.typography.bodyLarge)
-                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+    val pad = LocalContentPadding.current
+    Column(Modifier.fillMaxWidth()) {
+        PreferenceRow(
+            title = "${changeCount(count)} couldn't sync",
+            titleColor = MaterialTheme.colorScheme.error,
+            summary = firstError
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = (pad - AppSpacing.md).coerceAtLeast(0.dp), end = pad, bottom = AppSpacing.xs),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+        ) {
+            TextButton(
+                onClick = onRetry,
+                modifier = Modifier.semantics { contentDescription = "Retry changes that couldn't sync" }
+            ) { Text("Retry") }
+            TextButton(
+                onClick = onDiscard,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.semantics { contentDescription = "Discard changes that couldn't sync" }
+            ) { Text("Discard") }
         }
-        if (enabled) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = AppSpacing.lg, bottom = AppSpacing.sm)
-            ) {
-                Text("Keep", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(modifier = Modifier.width(AppSpacing.sm))
-                IconButton(
-                    onClick = { if (retention > 1) onRetentionChange(retention - 1) },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(Icons.Default.Remove, contentDescription = "Decrease", modifier = Modifier.size(18.dp))
-                }
-                Text("$retention", style = MaterialTheme.typography.bodyMedium)
-                IconButton(
-                    onClick = { onRetentionChange(retention + 1) },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Increase", modifier = Modifier.size(18.dp))
-                }
-                Spacer(modifier = Modifier.width(AppSpacing.xs))
-                Text("backups", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun RowProgress(label: String) {
+    CircularProgressIndicator(
+        modifier = Modifier
+            .size(20.dp)
+            .semantics { contentDescription = label },
+        strokeWidth = 2.dp
+    )
+}
+
+@Composable
+private fun FootnoteText(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+/** Display name of the backup folder, resolved off the main thread. */
+@Composable
+private fun rememberFolderName(uri: String?): String? {
+    val context = LocalContext.current
+    var name by remember(uri) { mutableStateOf<String?>(null) }
+    LaunchedEffect(uri) {
+        name = if (uri == null) null else withContext(Dispatchers.IO) {
+            runCatching { DocumentFile.fromTreeUri(context, Uri.parse(uri))?.name }.getOrNull()
+        }
+    }
+    return name
+}
+
+// ---- Dialogs ----
+
+@Composable
+private fun ChoiceRow(label: String, description: String?, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(vertical = AppSpacing.xs),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.size(AppSpacing.lg))
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (description != null) {
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
+}
+
+/** Single-choice dialog: picking an option applies it and closes. */
+@Composable
+private fun <T> ChoiceDialog(
+    title: String,
+    choices: List<Choice<T>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    onDismiss: () -> Unit,
+    message: String? = null
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                if (message != null) {
+                    Text(
+                        message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = AppSpacing.sm)
+                    )
+                }
+                Column(Modifier.selectableGroup()) {
+                    choices.forEach { choice ->
+                        ChoiceRow(
+                            label = choice.label,
+                            description = choice.description,
+                            selected = choice.value == selected,
+                            onClick = { onSelect(choice.value); onDismiss() }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun DefaultAccountDialog(
+    options: List<AccessibleAccountOption>,
+    selectedId: Long?,
+    onSelect: (Long?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val grouped = options.groupBy { it.ownerName }
+    val noneSelected = options.none { it.accountId == selectedId }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Default account") },
+        text = {
+            Column(
+                Modifier
+                    .verticalScroll(rememberScrollState())
+                    .selectableGroup()
+            ) {
+                Text(
+                    "Pre-selected when a form asks for an account.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = AppSpacing.sm)
+                )
+                ChoiceRow("None", null, selected = noneSelected, onClick = { onSelect(null) })
+                grouped.forEach { (ownerName, ownerAccounts) ->
+                    Text(
+                        ownerName,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .padding(top = AppSpacing.md, bottom = AppSpacing.xs)
+                            .semantics { heading() }
+                    )
+                    ownerAccounts.forEach { opt ->
+                        ChoiceRow(
+                            label = opt.accountName,
+                            description = null,
+                            selected = opt.accountId == selectedId,
+                            onClick = { onSelect(opt.accountId) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun CurrencySymbolDialog(
+    current: String,
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var draft by rememberSaveable { mutableStateOf(current) }
+    val changed = draft != current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Currency symbol") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.md)) {
+                Text(
+                    "Shown next to amounts in your main currency.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it.take(8) },
+                    label = { Text("Symbol") },
+                    supportingText = { Text("Up to 8 characters") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (changed) onSave(draft) }),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(draft) }, enabled = changed) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable
@@ -717,22 +913,26 @@ private fun ImportPassphraseDialog(
         onDismissRequest = onDismiss,
         title = { Text("Encrypted backup") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.md)) {
                 Text(
                     "This backup is encrypted. Enter the passphrase used when it was created.",
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 OutlinedTextField(
                     value = passphrase,
                     onValueChange = { passphrase = it },
                     label = { Text("Passphrase") },
                     visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (passphrase.isNotEmpty()) onConfirm(passphrase) }),
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         },
         confirmButton = {
-            Button(
+            TextButton(
                 onClick = { onConfirm(passphrase) },
                 enabled = passphrase.isNotEmpty()
             ) {
@@ -759,25 +959,37 @@ private fun BackupPassphraseDialog(
     // at least 12 characters so the derived key is meaningfully expensive to
     // brute-force on stolen backup files.
     val tooShort = passphrase.isNotEmpty() && passphrase.length < MIN_BACKUP_PASSPHRASE_LENGTH
+    val canSave = passphrase.length >= MIN_BACKUP_PASSPHRASE_LENGTH && passphrase == confirmation
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isCurrentlySet) "Change backup passphrase" else "Set backup passphrase") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+            ) {
                 Text(
-                    "Backups will be encrypted with AES-256 using this passphrase. " +
-                            "If you lose it, your backups cannot be recovered.",
-                    style = MaterialTheme.typography.bodySmall,
+                    "Backups are encrypted with AES-256 using this passphrase. " +
+                        "If you lose it, your backups can't be recovered.",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 OutlinedTextField(
                     value = passphrase,
                     onValueChange = { passphrase = it },
-                    label = { Text("Passphrase (min $MIN_BACKUP_PASSPHRASE_LENGTH chars)") },
+                    label = { Text("Passphrase") },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
-                    isError = tooShort
+                    isError = tooShort,
+                    supportingText = {
+                        Text(
+                            if (tooShort) "Passphrase must be at least $MIN_BACKUP_PASSPHRASE_LENGTH characters"
+                            else "At least $MIN_BACKUP_PASSPHRASE_LENGTH characters"
+                        )
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = confirmation,
@@ -785,29 +997,16 @@ private fun BackupPassphraseDialog(
                     label = { Text("Confirm passphrase") },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
-                    isError = mismatch
+                    isError = mismatch,
+                    supportingText = if (mismatch) ({ Text("Passphrases don't match") }) else null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (canSave) onSave(passphrase) }),
+                    modifier = Modifier.fillMaxWidth()
                 )
-                if (tooShort) {
-                    Text(
-                        "Passphrase must be at least $MIN_BACKUP_PASSPHRASE_LENGTH characters.",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-                if (mismatch) {
-                    Text(
-                        "Passphrases do not match.",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
             }
         },
         confirmButton = {
-            Button(
-                onClick = { onSave(passphrase) },
-                enabled = passphrase.length >= MIN_BACKUP_PASSPHRASE_LENGTH && passphrase == confirmation
-            ) {
+            TextButton(onClick = { onSave(passphrase) }, enabled = canSave) {
                 Text("Save")
             }
         },
@@ -818,7 +1017,7 @@ private fun BackupPassphraseDialog(
                         onClick = onClear,
                         colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                     ) {
-                        Text("Disable")
+                        Text("Turn off")
                     }
                 }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
@@ -839,29 +1038,49 @@ private fun ChangePasswordDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Change Password") },
+        title = { Text("Change password") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
-                OutlinedTextField(
-                    value = currentPassword, onValueChange = { currentPassword = it },
-                    label = { Text("Current Password") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
+            ) {
+                Text(
+                    "You'll be asked to sign in again with the new password.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 OutlinedTextField(
-                    value = newPassword, onValueChange = { newPassword = it },
-                    label = { Text("New Password") },
+                    value = currentPassword,
+                    onValueChange = { currentPassword = it },
+                    label = { Text("Current password") },
                     visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = newPassword,
+                    onValueChange = { newPassword = it },
+                    label = { Text("New password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (!isLoading) onConfirm(currentPassword, newPassword) }),
+                    modifier = Modifier.fillMaxWidth()
                 )
                 error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                    )
                 }
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(currentPassword, newPassword) }, enabled = !isLoading) {
-                Text("Change")
+            TextButton(onClick = { onConfirm(currentPassword, newPassword) }, enabled = !isLoading) {
+                Text(if (isLoading) "Changing…" else "Change")
             }
         },
         dismissButton = {

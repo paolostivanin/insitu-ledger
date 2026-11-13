@@ -9,10 +9,15 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
+import androidx.compose.material.icons.filled.EventRepeat
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
-import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.outlined.EventRepeat
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.CompositionLocalProvider
@@ -50,7 +55,12 @@ import com.insituledger.app.ui.scheduled.ScheduledScreen
 import com.insituledger.app.ui.settings.SettingsScreen
 import com.insituledger.app.ui.shared.SharedScreen
 import com.insituledger.app.ui.about.AboutScreen
-import com.insituledger.app.ui.common.LocalSnackbarHostState
+import com.insituledger.app.ui.common.LocalContentPadding
+import com.insituledger.app.ui.common.LocalSnackbarController
+import com.insituledger.app.ui.common.SnackbarController
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.max
 import com.insituledger.app.ui.transactions.TransactionFormScreen
 import com.insituledger.app.ui.transactions.TransactionsScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -61,15 +71,24 @@ import javax.inject.Inject
 private data class BottomNavItem(
     val screen: Screen,
     val icon: ImageVector,
+    val selectedIcon: ImageVector,
     val label: String
 )
 
 private val bottomNavItems = listOf(
-    BottomNavItem(Screen.Dashboard, Icons.Default.Home, "Home"),
-    BottomNavItem(Screen.Transactions, Icons.Default.Receipt, "Transactions"),
-    BottomNavItem(Screen.Scheduled, Icons.Default.CalendarMonth, "Scheduled"),
-    BottomNavItem(Screen.More, Icons.Default.MoreHoriz, "More")
+    BottomNavItem(Screen.Dashboard, Icons.Outlined.Home, Icons.Filled.Home, "Home"),
+    BottomNavItem(Screen.Transactions, Icons.AutoMirrored.Outlined.ReceiptLong, Icons.AutoMirrored.Filled.ReceiptLong, "Transactions"),
+    BottomNavItem(Screen.Scheduled, Icons.Outlined.EventRepeat, Icons.Filled.EventRepeat, "Scheduled"),
+    BottomNavItem(Screen.More, Icons.Outlined.MoreHoriz, Icons.Filled.MoreHoriz, "More")
 )
+
+private val fabRoutes = setOf(
+    Screen.Dashboard.route, Screen.Transactions.route, Screen.Scheduled.route,
+    Screen.Accounts.route, Screen.Categories.route
+)
+
+/** Width at which the bottom bar becomes a navigation rail. */
+private const val RAIL_MIN_WIDTH_DP = 600
 
 private val bottomNavRoutes = bottomNavItems.map { it.screen.route }.toSet()
 
@@ -147,14 +166,51 @@ fun AppNavigation(
     val currentRoute by remember {
         derivedStateOf { navBackStackEntry?.destination?.route }
     }
-    val showBottomBar = currentRoute in bottomNavRoutes
+    val isTopLevel = currentRoute in bottomNavRoutes
+    val useRail = LocalConfiguration.current.screenWidthDp >= RAIL_MIN_WIDTH_DP
 
     val sharedOwnerViewModel: SharedOwnerViewModel = hiltViewModel()
     val accessibleOwners by sharedOwnerViewModel.accessibleOwners.collectAsStateWithLifecycle()
     val ownerFilter by sharedOwnerViewModel.ownerFilter.collectAsStateWithLifecycle()
     val syncMode by sharedOwnerViewModel.syncMode.collectAsStateWithLifecycle(initialValue = "none")
+    val showOwnerSwitcher = isTopLevel && syncMode == "webapp" && accessibleOwners.isNotEmpty()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    val appScope = rememberCoroutineScope()
+    val snackbarController = remember(snackbarHostState, appScope) {
+        SnackbarController(snackbarHostState, appScope)
+    }
+
+    val navigateTopLevel: (String) -> Unit = { route ->
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
+    // Form screens report their result here. Feedback is shown from this
+    // scope so it outlives the popped form; on the widget path the activity
+    // finishes, so a toast is the only feedback that survives.
+    val finishForm: () -> Unit = {
+        if (launchedFromWidget) {
+            (context as? android.app.Activity)?.finish()
+        } else {
+            navController.popBackStack()
+        }
+    }
+    val onFormSaved: (message: String, offerScheduled: Boolean) -> Unit = { message, offerScheduled ->
+        if (launchedFromWidget) {
+            android.widget.Toast.makeText(context.applicationContext, message, android.widget.Toast.LENGTH_SHORT).show()
+        } else if (offerScheduled) {
+            snackbarController.show(message, actionLabel = "View") { navigateTopLevel(Screen.Scheduled.route) }
+        } else {
+            snackbarController.show(message)
+        }
+        finishForm()
+    }
 
     LaunchedEffect(navController) {
         if (launchedFromWidget) return@LaunchedEffect
@@ -187,37 +243,51 @@ fun AppNavigation(
             }
     }
 
-    CompositionLocalProvider(LocalSnackbarHostState provides snackbarHostState) {
+    CompositionLocalProvider(
+        LocalSnackbarController provides snackbarController
+    ) {
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        // Insets are handled once: inner screens' top bars take the status
+        // bar, forms take the IME + navigation bar, the bottom bar takes its own.
+        contentWindowInsets = WindowInsets(0),
+        // Lift snackbars above the FAB on screens that have one.
+        snackbarHost = {
+            SnackbarHost(
+                snackbarHostState,
+                modifier = Modifier.padding(bottom = if (currentRoute in fabRoutes) 72.dp else 0.dp)
+            )
+        },
         bottomBar = {
-            if (showBottomBar) {
+            if (isTopLevel) {
                 Column {
-                    // Owner filter dropdown when connected to webapp and there are co-owners
-                    if (syncMode == "webapp" && accessibleOwners.isNotEmpty()) {
+                    if (showOwnerSwitcher) {
                         OwnerSwitcher(
                             owners = accessibleOwners,
                             selectedOwnerId = ownerFilter,
-                            onSelect = { ownerId -> sharedOwnerViewModel.setOwnerFilter(ownerId) }
+                            onSelect = { ownerId -> sharedOwnerViewModel.setOwnerFilter(ownerId) },
+                            padNavigationBar = useRail
                         )
                     }
-                    BottomNavBar(
-                        currentRoute = currentRoute,
-                        onNavigate = { route ->
-                            navController.navigate(route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        }
-                    )
+                    if (!useRail) {
+                        BottomNavBar(currentRoute = currentRoute, onNavigate = navigateTopLevel)
+                    }
                 }
             }
         }
     ) { innerPadding ->
-        Column(modifier = Modifier.padding(innerPadding)) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
+        ) {
+            if (useRail && isTopLevel) {
+                NavRail(currentRoute = currentRoute, onNavigate = navigateTopLevel)
+            }
+            BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                // Bound content width on large screens by widening the side padding.
+                val sidePadding = max(AppSpacing.screenH, (maxWidth - AppSpacing.maxContentWidth) / 2)
+                CompositionLocalProvider(LocalContentPadding provides sidePadding) {
             NavHost(
                 navController = navController,
                 startDestination = if (launchedFromWidget) Screen.TransactionForm.route else Screen.Dashboard.route,
@@ -247,7 +317,9 @@ fun AppNavigation(
                         onTransactionClick = { id ->
                             navController.navigate(Screen.TransactionForm.createRoute(id))
                         },
-                        onAddClick = { navController.navigate(Screen.TransactionForm.createRoute()) }
+                        onAddClick = { navController.navigate(Screen.TransactionForm.createRoute()) },
+                        onSeeAllTransactions = { navigateTopLevel(Screen.Transactions.route) },
+                        onManageAccounts = { navController.navigate(Screen.Accounts.route) }
                     )
                 }
 
@@ -264,13 +336,10 @@ fun AppNavigation(
                     Screen.TransactionForm.route,
                     arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null })
                 ) {
-                    TransactionFormScreen(onBack = {
-                        if (launchedFromWidget) {
-                            (context as? android.app.Activity)?.finish()
-                        } else {
-                            navController.popBackStack()
-                        }
-                    })
+                    TransactionFormScreen(
+                        onBack = finishForm,
+                        onSaved = onFormSaved
+                    )
                 }
 
                 composable(Screen.Scheduled.route) {
@@ -284,7 +353,10 @@ fun AppNavigation(
                     Screen.ScheduledForm.route,
                     arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null })
                 ) {
-                    ScheduledFormScreen(onBack = { navController.popBackStack() })
+                    ScheduledFormScreen(
+                        onBack = { navController.popBackStack() },
+                        onSaved = { message -> snackbarController.show(message); navController.popBackStack() }
+                    )
                 }
 
                 composable(Screen.More.route) {
@@ -310,7 +382,10 @@ fun AppNavigation(
                     Screen.AccountForm.route,
                     arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null })
                 ) {
-                    AccountFormScreen(onBack = { navController.popBackStack() })
+                    AccountFormScreen(
+                        onBack = { navController.popBackStack() },
+                        onSaved = { message -> snackbarController.show(message); navController.popBackStack() }
+                    )
                 }
 
                 composable(Screen.Categories.route) {
@@ -325,15 +400,24 @@ fun AppNavigation(
                     Screen.CategoryForm.route,
                     arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null })
                 ) {
-                    CategoryFormScreen(onBack = { navController.popBackStack() })
+                    CategoryFormScreen(
+                        onBack = { navController.popBackStack() },
+                        onSaved = { message -> snackbarController.show(message); navController.popBackStack() }
+                    )
                 }
 
                 composable(Screen.Reports.route) {
-                    ReportsScreen(onBack = { navController.popBackStack() })
+                    ReportsScreen(
+                        onBack = { navController.popBackStack() },
+                        onTransactionClick = { id -> navController.navigate(Screen.TransactionForm.createRoute(id)) }
+                    )
                 }
 
                 composable(Screen.Shared.route) {
-                    SharedScreen(onBack = { navController.popBackStack() })
+                    SharedScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenSettings = { navController.navigate(Screen.Settings.route) }
+                    )
                 }
 
                 composable(Screen.Settings.route) {
@@ -356,6 +440,8 @@ fun AppNavigation(
                     )
                 }
             }
+                }
+            }
         }
     }
     }
@@ -366,74 +452,109 @@ private fun BottomNavBar(
     currentRoute: String?,
     onNavigate: (String) -> Unit
 ) {
-    NavigationBar {
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
         bottomNavItems.forEach { item ->
+            val selected = currentRoute == item.screen.route
             NavigationBarItem(
-                selected = currentRoute == item.screen.route,
+                selected = selected,
                 onClick = { onNavigate(item.screen.route) },
-                icon = { Icon(item.icon, contentDescription = item.label) },
-                label = {
-                    Text(
-                        text = item.label,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Visible,
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                }
+                // The visible label already names the destination.
+                icon = { Icon(if (selected) item.selectedIcon else item.icon, contentDescription = null) },
+                label = { NavLabel(item.label) }
             )
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NavRail(
+    currentRoute: String?,
+    onNavigate: (String) -> Unit
+) {
+    NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+        Spacer(Modifier.weight(1f))
+        bottomNavItems.forEach { item ->
+            val selected = currentRoute == item.screen.route
+            NavigationRailItem(
+                selected = selected,
+                onClick = { onNavigate(item.screen.route) },
+                icon = { Icon(if (selected) item.selectedIcon else item.icon, contentDescription = null) },
+                label = { NavLabel(item.label) }
+            )
+        }
+        Spacer(Modifier.weight(1f))
+    }
+}
+
 @Composable
 private fun OwnerSwitcher(
     owners: List<AccessibleOwnerDto>,
     selectedOwnerId: Long?,
-    onSelect: (Long?) -> Unit
+    onSelect: (Long?) -> Unit,
+    padNavigationBar: Boolean
 ) {
     var expanded by remember { mutableStateOf(false) }
     val currentLabel = if (selectedOwnerId == null) {
         "All accounts"
     } else {
-        val owner = owners.find { it.ownerUserId == selectedOwnerId }
-        owner?.let { "${it.name} (${it.accounts.size})" } ?: "All accounts"
+        owners.find { it.ownerUserId == selectedOwnerId }?.name ?: "All accounts"
     }
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant
+        color = MaterialTheme.colorScheme.surfaceContainer
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = AppSpacing.lg, vertical = AppSpacing.xs),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
-        ) {
-            Text("Filter:", style = MaterialTheme.typography.labelSmall)
-            ExposedDropdownMenuBox(
-                expanded = expanded,
-                onExpandedChange = { expanded = it }
+        Column {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Box(
+                modifier = if (padNavigationBar) Modifier.navigationBarsPadding() else Modifier
             ) {
-                FilterChip(
-                    selected = selectedOwnerId != null,
+                TextButton(
                     onClick = { expanded = true },
-                    label = { Text(currentLabel, style = MaterialTheme.typography.labelSmall) },
-                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true)
-                )
-                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    modifier = Modifier.padding(horizontal = AppSpacing.sm)
+                ) {
+                    Text(
+                        "Viewing: $currentLabel",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     DropdownMenuItem(
                         text = { Text("All accounts") },
                         onClick = { onSelect(null); expanded = false }
                     )
                     owners.forEach { owner ->
+                        val count = owner.accounts.size
                         DropdownMenuItem(
-                            text = { Text("${owner.name} (${owner.accounts.size} account${if (owner.accounts.size == 1) "" else "s"})") },
+                            text = { Text("${owner.name} · $count account${if (count == 1) "" else "s"}") },
                             onClick = { onSelect(owner.ownerUserId); expanded = false }
                         )
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * Navigation labels scale with the system font up to 1.3× (1.0× under 360dp), then stop: past
+ * that four labels can't fit a 320dp bar and would truncate to "Ho…". The
+ * icons and TalkBack labels carry the meaning beyond that point.
+ */
+@Composable
+private fun NavLabel(text: String) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    // On narrow phones even 1.3× doesn't fit "Transactions" in a quarter of the bar.
+    val cap = if (LocalConfiguration.current.screenWidthDp < 360) 1.0f else 1.3f
+    CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(
+            density.density, density.fontScale.coerceAtMost(cap)
+        )
+    ) {
+        Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
     }
 }
