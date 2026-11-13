@@ -148,6 +148,8 @@ cd android && ./gradlew testDebugUnitTest lintDebug assembleDebug
 python3 android/tools/check_attribution_migration.py
 ```
 
+GitHub Actions (`.github/workflows/ci.yml`) runs all of the above on every pull request and on pushes to `main`.
+
 ### Android
 
 Prebuilt APKs are attached to each [GitHub release](https://github.com/paolostivanin/insitu-ledger/releases); the release notes list the APK's SHA-256 and signing-certificate fingerprint so you can verify the download. To build it yourself:
