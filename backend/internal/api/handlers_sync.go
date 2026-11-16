@@ -200,7 +200,8 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch changed transactions (including soft-deleted ones so mobile can remove them).
-	// Includes created_by_user_id and the creator's display name for the "Added by" UI.
+	// Includes created_by_user_id and the creator's display name for the "Added by" UI,
+	// plus the recurring-entry marker (scheduled_id / occurrence / occurrence_total).
 	// Freshly-accessible accounts (just-granted shares) get their full
 	// transaction history shipped even when each transaction's own
 	// sync_version predates `since`.
@@ -211,7 +212,8 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	txnRows, err := tx.Query(
 		`SELECT t.id, t.account_id, t.category_id, t.user_id, t.type, t.amount, t.currency,
 		        t.description, t.note, t.date, t.created_at, t.updated_at, t.deleted_at, t.sync_version,
-		        t.created_by_user_id, cu.name
+		        t.created_by_user_id, cu.name,
+		        t.scheduled_id, t.occurrence, t.occurrence_total
 		 FROM transactions t
 		 LEFT JOIN users cu ON cu.id = t.created_by_user_id
 		 WHERE t.account_id IN (`+accInClause+`)
@@ -230,20 +232,24 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		var amount float64
 		var description, note, deletedAt, createdByName *string
 		var createdByUserID *int64
+		var marker recurringMarker
 		if err := txnRows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
 			&description, &note, &date, &createdAt, &updatedAt, &deletedAt, &sv,
-			&createdByUserID, &createdByName); err != nil {
+			&createdByUserID, &createdByName,
+			&marker.scheduledID, &marker.occurrence, &marker.occurrenceTotal); err != nil {
 			log.Printf("sync: scan transaction error: %v", err)
 			continue
 		}
-		txns = append(txns, map[string]any{
+		row := map[string]any{
 			"id": id, "account_id": accountID, "category_id": categoryID,
 			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
 			"description": description, "note": note, "date": date, "created_at": createdAt,
 			"updated_at": updatedAt, "deleted_at": deletedAt, "sync_version": sv,
 			"created_by_user_id": createdByUserID,
 			"created_by_name":    createdByName,
-		})
+		}
+		marker.addTo(row)
+		txns = append(txns, row)
 	}
 	if err := txnRows.Err(); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

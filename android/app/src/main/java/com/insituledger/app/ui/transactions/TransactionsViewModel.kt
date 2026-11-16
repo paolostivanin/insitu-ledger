@@ -5,11 +5,13 @@ import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.CategoryRepository
+import com.insituledger.app.data.repository.ScheduledRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
+import com.insituledger.app.domain.model.ScheduledTransaction
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.reports.DateRangePreset
 import com.insituledger.app.ui.reports.resolveRange
@@ -28,6 +30,8 @@ data class TransactionsUiState(
     val transactions: List<Transaction> = emptyList(),
     val categories: List<Category> = emptyList(),
     val accounts: List<Account> = emptyList(),
+    /** Schedules by id (soft-deleted included), for the series label on auto-added rows. */
+    val schedules: Map<Long, ScheduledTransaction> = emptyMap(),
     val isLoading: Boolean = true,
     /** A reload after the first one: keep showing rows, show a thin progress bar. */
     val isUpdating: Boolean = false,
@@ -72,7 +76,8 @@ class TransactionsViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val syncManager: SyncManager,
     private val sharedAccessState: SharedAccessState,
-    prefs: UserPreferences
+    prefs: UserPreferences,
+    scheduledRepository: ScheduledRepository
 ) : ViewModel() {
 
     private val weekStart: StateFlow<DayOfWeek> = prefs.weekStartDayFlow
@@ -101,10 +106,11 @@ class TransactionsViewModel @Inject constructor(
             combine(
                 categoryRepository.getAll(),
                 accountRepository.getAll(),
-                prefs.userIdFlow
-            ) { cats, accounts, currentUserId ->
+                prefs.userIdFlow,
+                scheduledRepository.getAllById()
+            ) { cats, accounts, currentUserId, schedules ->
                 _uiState.update {
-                    it.copy(categories = cats, accounts = accounts, currentUserId = currentUserId)
+                    it.copy(categories = cats, accounts = accounts, currentUserId = currentUserId, schedules = schedules)
                 }
             }.collect()
         }

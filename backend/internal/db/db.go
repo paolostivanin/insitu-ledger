@@ -59,6 +59,10 @@ func Open(dataDir string) (*sql.DB, error) {
 		"ALTER TABLE categories ADD COLUMN client_id TEXT",
 		"ALTER TABLE scheduled_transactions ADD COLUMN client_id TEXT",
 		"ALTER TABLE shared_account_access ADD COLUMN deleted_at DATETIME",
+		// Recurring-entry marker (see migrateRecurringEntryMarker).
+		"ALTER TABLE transactions ADD COLUMN scheduled_id INTEGER REFERENCES scheduled_transactions(id) ON DELETE SET NULL",
+		"ALTER TABLE transactions ADD COLUMN occurrence INTEGER",
+		"ALTER TABLE transactions ADD COLUMN occurrence_total INTEGER",
 	}
 	for _, m := range migrations {
 		if _, err := conn.Exec(m); err != nil {
@@ -131,6 +135,11 @@ func Open(dataDir string) (*sql.DB, error) {
 	if err := migrateSharedAccessAttribution(conn); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("shared access attribution migration: %w", err)
+	}
+
+	if err := migrateRecurringEntryMarker(conn); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("recurring entry marker migration: %w", err)
 	}
 
 	// These triggers depend on attribution columns added by the migrations.
@@ -221,6 +230,51 @@ func migrateSharedAccessAttribution(conn *sql.DB) error {
 		"CREATE INDEX IF NOT EXISTS idx_transactions_created_by ON transactions(created_by_user_id)",
 	); err != nil {
 		return fmt.Errorf("create created_by index: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateRecurringEntryMarker indexes transactions.scheduled_id and backfills
+// it for history. The backend scheduler has always written the deterministic
+// client_id "sched-<scheduled_id>-<next_occurrence>", so pre-marker rows can
+// be linked back to their schedule. Only rows whose schedule row still exists
+// (soft-deleted ones count) and belongs to the same owner are linked; the
+// owner guard skips client_ids a client happened to craft in that shape.
+// occurrence / occurrence_total stay NULL for history: the series position at
+// materialization time is not recoverable. Idempotent via scheduled_id IS NULL.
+// Each linked row bumps its sync_version (row-version trigger), so incremental
+// clients re-pull it with the marker.
+func migrateRecurringEntryMarker(conn *sql.DB) error {
+	tx, err := conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Speeds up the ON DELETE SET NULL child lookup when a schedule row is
+	// hard-deleted (e.g. admin user deletion cascades). Created here, not in
+	// schema.sql, because legacy DBs need the ALTER first.
+	if _, err := tx.Exec(
+		"CREATE INDEX IF NOT EXISTS idx_transactions_scheduled ON transactions(scheduled_id)",
+	); err != nil {
+		return fmt.Errorf("create scheduled_id index: %w", err)
+	}
+
+	// GLOB is case-sensitive and requires a digit right after "sched-" plus
+	// a later '-'; sid is the text up to that first '-', which must be all
+	// digits (so "sched-1a-..." is not read as schedule 1).
+	if _, err := tx.Exec(`
+		UPDATE transactions
+		SET scheduled_id = s.id
+		FROM scheduled_transactions s
+		WHERE transactions.scheduled_id IS NULL
+		  AND transactions.client_id GLOB 'sched-[0-9]*-*'
+		  AND SUBSTR(transactions.client_id, 7, INSTR(SUBSTR(transactions.client_id, 7), '-') - 1) NOT GLOB '*[^0-9]*'
+		  AND s.id = CAST(SUBSTR(transactions.client_id, 7, INSTR(SUBSTR(transactions.client_id, 7), '-') - 1) AS INTEGER)
+		  AND s.user_id = transactions.user_id
+	`); err != nil {
+		return fmt.Errorf("backfill transactions.scheduled_id: %w", err)
 	}
 
 	return tx.Commit()

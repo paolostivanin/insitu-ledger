@@ -390,6 +390,9 @@ class SyncRepository @Inject constructor(
         database.withTransaction {
             scheduledDao.updateId(oldId, newId)
             scheduledDao.clearLocalOnly(newId)
+            // Keep locally materialized entries pointing at their schedule
+            // (and away from a future local schedule that reuses the id).
+            transactionDao.updateScheduledId(oldId, newId)
             pendingOpDao.updateEntityId(oldId, newId, "scheduled")
         }
     }
@@ -649,7 +652,8 @@ class SyncRepository @Inject constructor(
         userId = userId, type = type, amount = amount, currency = currency,
         description = description, note = note, date = date, createdAt = createdAt,
         updatedAt = updatedAt, deletedAt = deletedAt, syncVersion = syncVersion,
-        createdByUserId = createdByUserId, createdByName = createdByName
+        createdByUserId = createdByUserId, createdByName = createdByName,
+        scheduledId = scheduledId, occurrence = occurrence, occurrenceTotal = occurrenceTotal
     )
 
     private fun ScheduledTransactionDto.toEntity() = ScheduledTransactionEntity(

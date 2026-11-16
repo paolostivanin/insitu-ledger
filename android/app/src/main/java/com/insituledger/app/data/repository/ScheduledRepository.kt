@@ -52,6 +52,14 @@ class ScheduledRepository @Inject constructor(
 
     suspend fun getById(id: Long): ScheduledTransaction? = scheduledDao.getById(id)?.toDomain()
 
+    /**
+     * Every schedule still in Room (soft-deleted included), keyed by id — the
+     * lookup the ledger rows use to label auto-added entries. One query and
+     * one map per change, so list rendering stays a hash lookup per row.
+     */
+    fun getAllById(): Flow<Map<Long, ScheduledTransaction>> =
+        scheduledDao.getAllIncludingDeleted().map { list -> list.associate { it.id to it.toDomain() } }
+
     suspend fun create(
         accountId: Long, categoryId: Long, type: String,
         amount: Double, currency: String, description: String?, note: String?,

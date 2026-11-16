@@ -47,6 +47,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
+import com.insituledger.app.domain.model.ScheduledTransaction
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AddFab
 import com.insituledger.app.ui.common.AutoSizeMoneyText
@@ -66,6 +67,7 @@ import com.insituledger.app.ui.common.categoryEmoji
 import com.insituledger.app.ui.common.currencySymbolFor
 import com.insituledger.app.ui.common.entryAttribution
 import com.insituledger.app.ui.common.primaryCurrency
+import com.insituledger.app.ui.common.seriesLabel
 import com.insituledger.app.ui.theme.AppSpacing
 import com.insituledger.app.ui.theme.LocalSemanticColors
 import com.insituledger.app.ui.theme.amountLarge
@@ -117,11 +119,12 @@ fun DashboardScreen(
 		) {
 			val symbol = LocalCurrencySymbol.current
 			val primary = remember(data.accounts) { primaryCurrency(data.accounts) }
-			val rows = remember(data.recentTransactions, data.accounts, uiState.categories, uiState.currentUserId, symbol) {
+			val rows = remember(data.recentTransactions, data.accounts, uiState.categories, uiState.schedules, uiState.currentUserId, symbol) {
 				buildRecentRows(
 					data.recentTransactions.take(RECENT_ROWS),
 					data.accounts,
 					uiState.categories,
+					uiState.schedules,
 					uiState.currentUserId,
 					symbol,
 					primary
@@ -510,6 +513,7 @@ private fun buildRecentRows(
 	transactions: List<Transaction>,
 	accounts: List<Account>,
 	categories: List<Category>,
+	schedules: Map<Long, ScheduledTransaction>,
 	currentUserId: Long?,
 	preferredSymbol: String,
 	primary: String?
@@ -533,7 +537,8 @@ private fun buildRecentRows(
 			attribution = entryAttribution(account?.isShared == true, txn.createdByUserId, txn.createdByName, currentUserId),
 			amount = txn.amount,
 			type = txn.type,
-			symbol = currencySymbolFor(txn.currency, preferredSymbol, primary)
+			symbol = currencySymbolFor(txn.currency, preferredSymbol, primary),
+			seriesLabel = seriesLabel(txn, schedules)
 		)
 	}
 }

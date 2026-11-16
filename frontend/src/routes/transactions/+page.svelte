@@ -1,20 +1,24 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
-	import { transactions, categories, accounts, batch, csv, scheduled, type Transaction, type Category, type Account, type AutocompleteSuggestion } from '$lib/api/client';
+	import { transactions, categories, accounts, batch, csv, scheduled, type Transaction, type Category, type Account, type AutocompleteSuggestion, type ScheduledTransaction } from '$lib/api/client';
 	import CategoryPicker from '$lib/components/CategoryPicker.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import AccountFilterPill from '$lib/components/AccountFilterPill.svelte';
+	import TransactionName from '$lib/components/TransactionName.svelte';
 	import { addToast } from '$lib/stores/toast';
 	import { sharedOwnerUserId } from '$lib/stores/shared';
 	import { currentAccountId } from '$lib/stores/accountFilter';
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
 	import { extractTime, localDateInputValue, toIsoOffset } from '$lib/datetime';
+	import { indexSchedules } from '$lib/series';
 
 	let txns = $state<Transaction[]>([]);
 	let cats = $state<Category[]>([]);
 	let accts = $state<Account[]>([]);
+	// Only resolves the series label on recurring rows; never gates the list.
+	let scheduleById = $state<Map<number, ScheduledTransaction>>(new Map());
 	let loading = $state(true);
 	let showForm = $state(false);
 	let editId = $state<number | null>(null);
@@ -178,11 +182,24 @@
 		if (!cats.some(c => c.id === fCategoryId)) fCategoryId = cats[0]?.id ?? 0;
 	}
 
+	// Fire-and-forget, once per owner (schedules aren't filtered by account or
+	// search): a failure just leaves recurring rows on the 'Recurring' fallback.
+	let scheduleSeq = 0;
+	async function loadSchedules() {
+		const seq = ++scheduleSeq;
+		scheduleById = new Map();
+		try {
+			const list = await scheduled.list({ owner_id: $sharedOwnerUserId || undefined });
+			if (seq === scheduleSeq) scheduleById = indexSchedules(list);
+		} catch { /* keep the fallback label */ }
+	}
+
 	async function loadAll() {
 		const seq = ++pageLoadSeq;
 		loading = true;
 		txns = [];
 		loadError = '';
+		void loadSchedules();
 		try {
 			const results = await Promise.allSettled([loadTransactions(), loadReferenceData()]);
 			const failure = results.find(result => result.status === 'rejected');
@@ -690,7 +707,7 @@
 							<td><span class="badge {txn.type === 'income' ? 'badge-income' : 'badge-expense'}">{txn.type}</span></td>
 							<td>{catName(txn.category_id)}</td>
 							<td>{acctName(txn.account_id)}</td>
-							<td>{txn.description || '—'}</td>
+							<td><TransactionName {txn} schedules={scheduleById} /></td>
 							{#if hasAnyShared}
 								<td class="added-by">{isSharedAcct(txn.account_id) ? (txn.created_by_name || '—') : ''}</td>
 							{/if}

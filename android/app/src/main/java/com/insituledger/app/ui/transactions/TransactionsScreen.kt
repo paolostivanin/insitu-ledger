@@ -81,6 +81,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
+import com.insituledger.app.domain.model.ScheduledTransaction
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AddFab
 import com.insituledger.app.ui.common.AdaptiveTrailingRow
@@ -99,6 +100,7 @@ import com.insituledger.app.ui.common.categoryColor
 import com.insituledger.app.ui.common.categoryEmoji
 import com.insituledger.app.ui.common.currencySymbolFor
 import com.insituledger.app.ui.common.entryAttribution
+import com.insituledger.app.ui.common.seriesLabel
 import com.insituledger.app.ui.common.label
 import com.insituledger.app.ui.common.primaryCurrency
 import com.insituledger.app.ui.common.rangeLabel
@@ -474,8 +476,8 @@ private fun TransactionsList(
     val primary = remember(uiState.accounts) { primaryCurrency(uiState.accounts) }
     val byDate = uiState.sortBy == "date"
 
-    val rows = remember(uiState.transactions, uiState.categories, uiState.accounts, uiState.currentUserId, symbol, byDate) {
-        buildRows(uiState.transactions, uiState.categories, uiState.accounts, uiState.currentUserId, symbol, primary, byDate)
+    val rows = remember(uiState.transactions, uiState.categories, uiState.accounts, uiState.schedules, uiState.currentUserId, symbol, byDate) {
+        buildRows(uiState.transactions, uiState.categories, uiState.accounts, uiState.schedules, uiState.currentUserId, symbol, primary, byDate)
     }
 
     // Load the next page automatically when the end comes into view.
@@ -593,6 +595,7 @@ private fun buildRows(
     transactions: List<Transaction>,
     categories: List<Category>,
     accounts: List<Account>,
+    schedules: Map<Long, ScheduledTransaction>,
     currentUserId: Long?,
     preferredSymbol: String,
     primary: String?,
@@ -621,7 +624,8 @@ private fun buildRows(
             categoryName = categoryName,
             // Always lead with the avatar here, so rows stay aligned even if a
             // category is briefly missing while data loads.
-            showAvatar = true
+            showAvatar = true,
+            seriesLabel = seriesLabel(txn, schedules)
         )
     }
 }

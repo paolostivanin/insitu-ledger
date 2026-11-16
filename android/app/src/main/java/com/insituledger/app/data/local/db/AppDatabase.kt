@@ -16,7 +16,7 @@ import com.insituledger.app.data.local.db.entity.*
         ScheduledTransactionEntity::class,
         PendingOperationEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = true
 )
 @androidx.room.TypeConverters(Converters::class)
@@ -32,6 +32,17 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE transactions ADD COLUMN created_by_name TEXT")
                 db.execSQL("ALTER TABLE scheduled_transactions ADD COLUMN created_by_name TEXT")
+            }
+        }
+
+        // Recurring-entry marker: which schedule auto-added a transaction and
+        // where it sits in the series. Nullable, no FK (mirrors the backend's
+        // scheduled_id / occurrence / occurrence_total columns).
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN scheduled_id INTEGER")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN occurrence INTEGER")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN occurrence_total INTEGER")
             }
         }
 

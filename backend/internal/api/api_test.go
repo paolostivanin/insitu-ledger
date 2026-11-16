@@ -110,7 +110,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,
     sync_version INTEGER NOT NULL DEFAULT 0,
-    client_id TEXT
+    client_id TEXT,
+    scheduled_id INTEGER REFERENCES scheduled_transactions(id) ON DELETE SET NULL,
+    occurrence INTEGER,
+    occurrence_total INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS scheduled_transactions (

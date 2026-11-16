@@ -1,17 +1,21 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { isAuthenticated, accounts, transactions, reports, type Account, type Transaction, type CategoryReport, type MonthReport } from '$lib/api/client';
+	import { isAuthenticated, accounts, transactions, reports, scheduled, type Account, type Transaction, type CategoryReport, type MonthReport, type ScheduledTransaction } from '$lib/api/client';
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
 	import { sharedOwnerUserId } from '$lib/stores/shared';
 	import { currentAccountId } from '$lib/stores/accountFilter';
 	import AccountFilterPill from '$lib/components/AccountFilterPill.svelte';
+	import TransactionName from '$lib/components/TransactionName.svelte';
 	import { extractTime, localMonthKey } from '$lib/datetime';
 	import { rollUpByParent } from '$lib/categoryRollup';
+	import { indexSchedules } from '$lib/series';
 
 	let accts = $state<Account[]>([]);
 	let recentTxns = $state<Transaction[]>([]);
+	// Only resolves the series label on recurring rows; never gates the dashboard.
+	let scheduleById = $state<Map<number, ScheduledTransaction>>(new Map());
 	let categoryData = $state<CategoryReport[]>([]);
 	let monthData = $state<MonthReport[]>([]);
 	let loading = $state(true);
@@ -55,6 +59,7 @@
 		loading = true;
 		const oid = $sharedOwnerUserId || undefined;
 		const aid = $currentAccountId !== null ? $currentAccountId.toString() : undefined;
+		void loadSchedules(seq, oid);
 		try {
 			const results = await Promise.allSettled([
 				accounts.list(oid),
@@ -89,6 +94,16 @@
 			}
 		}
 		if (seq === loadSeq) loading = false;
+	}
+
+	// Fire-and-forget: a failure just leaves recurring rows on the 'Recurring'
+	// fallback, so it is neither awaited nor reported.
+	async function loadSchedules(seq: number, oid: string | undefined) {
+		scheduleById = new Map();
+		try {
+			const list = await scheduled.list({ owner_id: oid });
+			if (seq === loadSeq) scheduleById = indexSchedules(list);
+		} catch { /* keep the fallback label */ }
 	}
 
 	function totalBalance(): number {
@@ -173,7 +188,7 @@
 									<tr>
 										<td>{txn.date.slice(0, 10)}</td>
 										<td>{extractTime(txn.date) || '—'}</td>
-										<td>{txn.description || '—'}</td>
+										<td><TransactionName {txn} schedules={scheduleById} /></td>
 										{#if hasAnyShared}
 											<td class="added-by">{isSharedAcct(txn.account_id) ? (txn.created_by_name || '—') : ''}</td>
 										{/if}

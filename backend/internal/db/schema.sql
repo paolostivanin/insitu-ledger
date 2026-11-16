@@ -104,7 +104,16 @@ CREATE TABLE IF NOT EXISTS transactions (
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     deleted_at DATETIME,
     sync_version INTEGER NOT NULL DEFAULT 0,
-    client_id TEXT
+    client_id TEXT,
+    -- Recurring-entry marker, set only by the scheduler when it materializes
+    -- an occurrence (never by client create/update). scheduled_id is the
+    -- source schedule; occurrence is its 1-based position in the series
+    -- (the schedule's occurrence_count after this entry); occurrence_total
+    -- is the schedule's max_occurrences at that moment (NULL = open-ended).
+    -- All three are NULL for ordinary entries.
+    scheduled_id INTEGER REFERENCES scheduled_transactions(id) ON DELETE SET NULL,
+    occurrence INTEGER,
+    occurrence_total INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS scheduled_transactions (
@@ -165,7 +174,8 @@ CREATE INDEX IF NOT EXISTS idx_shared_account_access_sync ON shared_account_acce
 CREATE INDEX IF NOT EXISTS idx_shared_account_access_guest_sync ON shared_account_access(guest_user_id, sync_version);
 CREATE INDEX IF NOT EXISTS idx_transactions_description ON transactions(description COLLATE NOCASE);
 -- idx_transactions_created_by is created by migrateSharedAccessAttribution after
--- the column is added (legacy DBs need the ALTER first).
+-- the column is added (legacy DBs need the ALTER first). Same for
+-- idx_transactions_scheduled (migrateRecurringEntryMarker).
 
 -- Sync version indexes (for efficient sync queries)
 CREATE INDEX IF NOT EXISTS idx_transactions_sync ON transactions(sync_version);

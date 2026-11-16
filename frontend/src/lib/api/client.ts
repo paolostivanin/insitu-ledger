@@ -167,6 +167,13 @@ export interface Transaction {
 	// accounts. Set on create, sticky across edits.
 	created_by_user_id: number | null;
 	created_by_name: string | null;
+	// Set only by a scheduler on the entries it generates; null/omitted for
+	// ordinary entries and against servers that predate them. Never sent on
+	// create/update. occurrence is 1-based; occurrence_total is the schedule's
+	// max_occurrences when the entry was added (null = open-ended).
+	scheduled_id?: number | null;
+	occurrence?: number | null;
+	occurrence_total?: number | null;
 }
 
 export interface TransactionInput {

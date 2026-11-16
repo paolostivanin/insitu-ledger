@@ -50,7 +50,11 @@ class ReportsSearchViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun viewModel() = ReportsViewModel(transactionRepository, categoryRepository, prefs)
+    private val scheduledRepository: com.insituledger.app.data.repository.ScheduledRepository = mockk {
+        every { getAllById() } returns flowOf(emptyMap())
+    }
+
+    private fun viewModel() = ReportsViewModel(transactionRepository, categoryRepository, prefs, scheduledRepository)
 
     @Test
     fun `search totals each currency separately and nets them out`() = runTest(dispatcher) {

@@ -121,6 +121,9 @@ interface TransactionDao {
     @Query("UPDATE transactions SET category_id = :newId WHERE category_id = :oldId")
     suspend fun updateCategoryId(oldId: Long, newId: Long)
 
+    @Query("UPDATE transactions SET scheduled_id = :newId WHERE scheduled_id = :oldId")
+    suspend fun updateScheduledId(oldId: Long, newId: Long)
+
     @Query("""
         SELECT * FROM transactions
         WHERE deleted_at IS NULL

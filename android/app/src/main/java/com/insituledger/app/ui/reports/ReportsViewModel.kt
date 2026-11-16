@@ -6,8 +6,10 @@ import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.dao.CategoryBreakdownRow
 import com.insituledger.app.data.local.db.dao.CurrencySummaryRow
 import com.insituledger.app.data.repository.CategoryRepository
+import com.insituledger.app.data.repository.ScheduledRepository
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.domain.model.Category
+import com.insituledger.app.domain.model.ScheduledTransaction
 import com.insituledger.app.domain.model.Transaction
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -90,6 +92,8 @@ data class ReportsUiState(
     val isLoading: Boolean = true,
     val selectedCategory: Category? = null,
     val selectedCategoryTransactions: List<Transaction> = emptyList(),
+    /** Schedules by id (soft-deleted included), for the drill-down's series labels. */
+    val schedules: Map<Long, ScheduledTransaction> = emptyMap(),
     val selectedCategoryTotal: Double = 0.0,
     val searchQuery: String = "",
     val searchSummary: List<CurrencySummaryRow> = emptyList(),
@@ -101,7 +105,8 @@ data class ReportsUiState(
 class ReportsViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
-    private val prefs: UserPreferences
+    private val prefs: UserPreferences,
+    private val scheduledRepository: ScheduledRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReportsUiState())
@@ -128,6 +133,13 @@ class ReportsViewModel @Inject constructor(
             categories.collect { cats ->
                 _uiState.update { it.copy(categories = cats) }
                 loadReport()
+            }
+        }
+
+        // Decoration only (drill-down series labels); never triggers a reload.
+        viewModelScope.launch {
+            scheduledRepository.getAllById().collect { schedules ->
+                _uiState.update { it.copy(schedules = schedules) }
             }
         }
 

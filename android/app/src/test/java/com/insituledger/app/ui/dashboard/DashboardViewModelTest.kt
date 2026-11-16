@@ -40,7 +40,10 @@ class DashboardViewModelTest {
         coEvery { transactions.getFilteredSync(any(), any(), null) } returns emptyList()
         every { prefs.userIdFlow } returns flowOf(1L)
         every { prefs.dashboardHeroModeFlow } returns flowOf("net_worth")
-        val vm = DashboardViewModel(accounts, transactions, shared, mockk(relaxed = true), prefs, mockk(relaxed = true))
+        val schedules: com.insituledger.app.data.repository.ScheduledRepository = mockk {
+            every { getAllById() } returns flowOf(emptyMap())
+        }
+        val vm = DashboardViewModel(accounts, transactions, shared, mockk(relaxed = true), prefs, mockk(relaxed = true), schedules)
         backgroundScope.launch(dispatcher) { vm.uiState.collect() }
         assertEquals(1, subscriptions)
         shared.setOwnerFilter(2)

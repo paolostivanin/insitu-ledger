@@ -37,5 +37,13 @@ data class TransactionEntity(
     // Authenticated creator; differs from userId when a co-owner adds an
     // entry to a shared account. Sticky across edits.
     @ColumnInfo(name = "created_by_user_id") val createdByUserId: Long? = null,
-    @ColumnInfo(name = "created_by_name") val createdByName: String? = null
+    @ColumnInfo(name = "created_by_name") val createdByName: String? = null,
+    // Set only by a scheduler (backend, or ScheduledMaterializer in local
+    // mode): the scheduled_transactions row that produced this entry, its
+    // 1-based position in the series and the series length at that moment
+    // (null = open-ended). Plain column, no FK: the schedule may be purged
+    // while the entry stays. Never sent on create/update; kept on local edits.
+    @ColumnInfo(name = "scheduled_id") val scheduledId: Long? = null,
+    val occurrence: Int? = null,
+    @ColumnInfo(name = "occurrence_total") val occurrenceTotal: Int? = null
 )

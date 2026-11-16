@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -69,7 +70,14 @@ data class TransactionRowModel(
      * On whenever the caller supplies category data, so a list never mixes
      * the two layouts while categories load.
      */
-    val showAvatar: Boolean = categoryIcon != null || categoryName != null
+    val showAvatar: Boolean = categoryIcon != null || categoryName != null,
+    /**
+     * Position in the schedule that auto-added the entry ("Monthly · 2 of 3",
+     * see [seriesLabel]); drawn ahead of [supporting]. Null for ordinary entries.
+     */
+    val seriesLabel: String? = null,
+    /** Show the repeat glyph after the title: the entry came from a schedule. */
+    val recurring: Boolean = seriesLabel != null
 )
 
 /** The emoji a category is drawn with: its own icon, else its parent's. */
@@ -137,20 +145,34 @@ fun TransactionRow(
             modifier = Modifier.weight(1f),
             content = {
                 Column {
-                    Text(
-                        text = model.title,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = model.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            // Don't fill: the glyph sits right after the text,
+                            // and the title still ellipsizes before pushing it out.
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (model.recurring) {
+                            Spacer(Modifier.size(AppSpacing.xs))
+                            Icon(
+                                Icons.Default.Repeat,
+                                contentDescription = "Recurring",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (!model.showAvatar && model.categoryColor != null) {
                             CategoryDot(model.categoryColor)
                             Spacer(Modifier.size(6.dp))
                         }
                         Text(
-                            text = model.supporting,
+                            text = supportingText(model.seriesLabel, model.supporting),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -174,6 +196,10 @@ fun TransactionRow(
         )
     }
 }
+
+/** The supporting line with the series label (if any) in front. */
+internal fun supportingText(seriesLabel: String?, supporting: String): String =
+    listOfNotNull(seriesLabel, supporting.takeIf { it.isNotEmpty() }).joinToString(" · ")
 
 /**
  * Category identity at a glance: a circle tinted with the category colour

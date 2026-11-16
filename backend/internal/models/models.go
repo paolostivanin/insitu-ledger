@@ -53,6 +53,12 @@ type Transaction struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
 	SyncVersion int64      `json:"sync_version"`
+	// Recurring-entry marker, set only by the scheduler (nil for ordinary
+	// entries): source schedule, 1-based position in the series, and the
+	// series length at materialization time (nil = open-ended).
+	ScheduledID     *int64 `json:"scheduled_id"`
+	Occurrence      *int64 `json:"occurrence"`
+	OccurrenceTotal *int64 `json:"occurrence_total"`
 }
 
 type ScheduledTransaction struct {
