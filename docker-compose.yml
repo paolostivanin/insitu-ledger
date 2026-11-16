@@ -1,15 +1,30 @@
 services:
   insitu-ledger:
-    build: .
+    image: ghcr.io/paolostivanin/insitu-ledger:latest
+    # Pin a release instead of following latest: ghcr.io/paolostivanin/insitu-ledger:1.26.0
+    # To build from this checkout instead of pulling: replace `image:` with `build: .`
+    container_name: insitu-ledger
     ports:
+      # With the reverse proxy on the same host, publish on loopback only so the
+      # plain-HTTP port can't be reached directly: "127.0.0.1:8080:8080".
       - "8080:8080"
     volumes:
+      # Named volume (unchanged from earlier releases, so existing data stays put).
+      # A bind mount works too and makes backups easier: ./data:/data
       - ledger_data:/data
     environment:
       - INSITU_DATA_DIR=/data
       - INSITU_ADDR=:8080
       # Home time zone: recurring schedules in this zone keep their local time across DST.
       # - INSITU_TIMEZONE=Europe/Rome
+      # Only behind a trusted reverse proxy that sets X-Forwarded-For.
+      # - INSITU_TRUST_PROXY=true
+      # Owner of the files in /data. Defaults to the existing owner of /data,
+      # or 1000:1000 for a new one. The server never runs as root.
+      # - PUID=1000
+      # - PGID=1000
+    # The admin Restore feature relies on the container being restarted after
+    # it swaps the database.
     restart: unless-stopped
 
 volumes:
