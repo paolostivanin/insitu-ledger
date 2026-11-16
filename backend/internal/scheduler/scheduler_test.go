@@ -41,7 +41,10 @@ CREATE TABLE transactions (
     date TEXT NOT NULL,
     deleted_at DATETIME,
     sync_version INTEGER NOT NULL DEFAULT 0,
-    client_id TEXT
+    client_id TEXT,
+    scheduled_id INTEGER REFERENCES scheduled_transactions(id) ON DELETE SET NULL,
+    occurrence INTEGER,
+    occurrence_total INTEGER
 );
 CREATE UNIQUE INDEX idx_transactions_client_id ON transactions(created_by_user_id, client_id) WHERE client_id IS NOT NULL;
 CREATE TABLE scheduled_transactions (

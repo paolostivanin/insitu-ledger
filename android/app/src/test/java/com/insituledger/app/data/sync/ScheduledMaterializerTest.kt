@@ -186,6 +186,46 @@ class ScheduledMaterializerTest {
         assertEquals("boom", errors.single().message)
     }
 
+    // Recurring-entry marker: which schedule, which position, of how many.
+    @Test fun boundedCatchUpMarksEachEntryWithItsPosition() = runTest {
+        schedule(max = 3)
+        assertEquals(3, materializer().run())
+
+        assertEquals(listOf(-1L, -1L, -1L), created.map { it.scheduledId })
+        assertEquals(listOf(1, 2, 3), created.map { it.occurrence })
+        assertEquals(listOf(3, 3, 3), created.map { it.occurrenceTotal })
+        assertFalse(rows.getValue(-1).active)
+    }
+
+    @Test fun openEndedEntriesHaveNoSeriesLength() = runTest {
+        schedule(id = -4)
+        assertEquals(3, materializer().run())
+
+        assertTrue(created.all { it.scheduledId == -4L })
+        assertEquals(listOf(1, 2, 3), created.map { it.occurrence })
+        assertTrue(created.all { it.occurrenceTotal == null })
+    }
+
+    @Test fun catchUpContinuesFromTheStoredCount() = runTest {
+        // Two entries were added on earlier runs; four of six remain.
+        schedule(max = 6, count = 2)
+        assertEquals(3, materializer().run())
+
+        assertEquals(listOf(3, 4, 5), created.map { it.occurrence })
+        assertEquals(listOf(6, 6, 6), created.map { it.occurrenceTotal })
+        assertEquals(5, rows.getValue(-1).occurrenceCount)
+    }
+
+    @Test fun oneTimeEntryIsMarkedOneOfOne() = runTest {
+        schedule(id = -2, next = "2026-11-13T09:00+01:00", rrule = "FREQ=DAILY", max = 1)
+        assertEquals(1, materializer().run())
+
+        val entry = created.single()
+        assertEquals(-2L, entry.scheduledId)
+        assertEquals(1, entry.occurrence)
+        assertEquals(1, entry.occurrenceTotal)
+    }
+
     @Test fun oneTimeScheduleMaterializesOnceAndEnds() = runTest {
         schedule(next = "2026-11-13T09:00+01:00", rrule = "FREQ=DAILY", max = 1)
         assertEquals(1, materializer().run())

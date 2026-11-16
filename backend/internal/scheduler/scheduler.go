@@ -172,10 +172,16 @@ func processOne(db *sql.DB, s scheduled, now time.Time, home *time.Location) (st
 	// (created_by_user_id, client_id) rejects the INSERT, the transaction
 	// rolls back, and the schedule's next_occurrence is NOT re-advanced.
 	clientID := fmt.Sprintf("sched-%d-%s", s.id, s.nextOccurrence)
+	// Recurring-entry marker: the source schedule, this entry's 1-based
+	// position in the series (= occurrence_count after it) and the series
+	// length at this moment (max_occurrences; NULL = open-ended).
+	newCount := s.occurrenceCount + 1
 	if _, err := tx.Exec(
-		`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date, client_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO transactions (account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, date, client_id,
+		                           scheduled_id, occurrence, occurrence_total)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.accountID, s.categoryID, s.userID, s.createdByUserID, s.typ, s.amount, s.currency, s.description, s.note, s.nextOccurrence, clientID,
+		s.id, newCount, s.maxOccurrences,
 	); err != nil {
 		tx.Rollback()
 		return "", fmt.Errorf("insert transaction (client_id=%s): %w", clientID, err)
@@ -191,7 +197,6 @@ func processOne(db *sql.DB, s scheduled, now time.Time, home *time.Location) (st
 	}
 
 	next, pastUntil := advanceDate(s.nextOccurrence, s.rrule, home)
-	newCount := s.occurrenceCount + 1
 	deactivate := pastUntil || (s.maxOccurrences != nil && newCount >= *s.maxOccurrences)
 
 	active := 1

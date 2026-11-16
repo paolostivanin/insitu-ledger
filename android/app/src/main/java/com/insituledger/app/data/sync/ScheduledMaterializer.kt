@@ -109,7 +109,15 @@ class ScheduledMaterializer(
                 date = fresh.nextOccurrence,
                 isLocalOnly = true,
                 createdByUserId = fresh.createdByUserId,
-                createdByName = fresh.createdByName
+                createdByName = fresh.createdByName,
+                // Recurring-entry marker, same meaning as the backend's. These
+                // are local schedule ids: on a local→webapp switch the entry is
+                // pushed without them (TransactionInput has no such fields and
+                // the server couldn't map a local schedule id anyway), so the
+                // marker disappears once the server copy is pulled.
+                scheduledId = fresh.id,
+                occurrence = newCount,
+                occurrenceTotal = fresh.maxOccurrences
             ))
 
             val delta = if (fresh.type == "expense") -fresh.amount else fresh.amount

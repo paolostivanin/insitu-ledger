@@ -84,6 +84,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.data.local.db.dao.CurrencySummaryRow
 import com.insituledger.app.domain.model.Category
+import com.insituledger.app.domain.model.ScheduledTransaction
 import com.insituledger.app.domain.model.Transaction
 import com.insituledger.app.ui.common.AdaptiveTrailingRow
 import com.insituledger.app.ui.common.AutoSizeMoneyText
@@ -103,6 +104,7 @@ import com.insituledger.app.ui.common.categoryPath
 import com.insituledger.app.ui.common.displayName
 import com.insituledger.app.ui.common.label
 import com.insituledger.app.ui.common.rangeLabel
+import com.insituledger.app.ui.common.seriesLabel
 import com.insituledger.app.ui.common.toUtcMillis
 import com.insituledger.app.ui.common.utcMillisToLocalDate
 import com.insituledger.app.ui.theme.AppSpacing
@@ -692,6 +694,7 @@ private data class DrillDownDay(val date: String, val label: String, val rows: L
 private fun drillDownDays(
     transactions: List<Transaction>,
     categories: List<Category>,
+    schedules: Map<Long, ScheduledTransaction>,
     symbol: String,
     today: LocalDate = LocalDate.now()
 ): List<DrillDownDay> {
@@ -714,7 +717,8 @@ private fun drillDownDays(
                     attribution = null,
                     amount = txn.amount,
                     type = txn.type,
-                    symbol = symbol
+                    symbol = symbol,
+                    seriesLabel = seriesLabel(txn, schedules)
                 )
             }
         )
@@ -733,8 +737,8 @@ private fun DrillDownView(
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val pad = LocalContentPadding.current
     val symbol = LocalCurrencySymbol.current
-    val days = remember(uiState.selectedCategoryTransactions, uiState.categories, symbol) {
-        drillDownDays(uiState.selectedCategoryTransactions, uiState.categories, symbol)
+    val days = remember(uiState.selectedCategoryTransactions, uiState.categories, uiState.schedules, symbol) {
+        drillDownDays(uiState.selectedCategoryTransactions, uiState.categories, uiState.schedules, symbol)
     }
     val (from, to) = resolveRange(uiState.dateRangePreset, uiState.customFrom, uiState.customTo, weekStart)
     val count = uiState.selectedCategoryTransactions.size

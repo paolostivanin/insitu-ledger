@@ -3,6 +3,7 @@ package com.insituledger.app.ui.transactions
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.CategoryRepository
+import com.insituledger.app.data.repository.ScheduledRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.data.sync.SyncManager
@@ -33,6 +34,7 @@ class TransactionsSearchViewModelTest {
     private val syncManager: SyncManager = mockk(relaxed = true)
     private val sharedAccessState = SharedAccessState()
     private val prefs: UserPreferences = mockk(relaxed = true)
+    private val scheduledRepository: ScheduledRepository = mockk(relaxed = true)
 
     @Before
     fun setUp() {
@@ -40,6 +42,7 @@ class TransactionsSearchViewModelTest {
         every { categoryRepository.getAll() } returns flowOf(emptyList())
         every { accountRepository.getAll() } returns flowOf(emptyList())
         every { prefs.userIdFlow } returns flowOf(1L)
+        every { scheduledRepository.getAllById() } returns flowOf(emptyMap())
         every {
             transactionRepository.getSorted(any(), any(), any(), any(), any(), any(), any(), any(), any())
         } returns flowOf(emptyList())
@@ -52,7 +55,7 @@ class TransactionsSearchViewModelTest {
 
     private fun viewModel() = TransactionsViewModel(
         transactionRepository, categoryRepository, accountRepository,
-        syncManager, sharedAccessState, prefs
+        syncManager, sharedAccessState, prefs, scheduledRepository
     )
 
     // The bug this replaced: searching swapped in an unfiltered, unsorted,

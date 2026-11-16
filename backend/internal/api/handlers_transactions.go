@@ -30,6 +30,22 @@ type createTransactionRequest struct {
 	ClientID string `json:"client_id,omitempty"`
 }
 
+// recurringMarker is the scheduler-set link from a materialized transaction
+// back to its schedule (transactions.scheduled_id / occurrence /
+// occurrence_total). All three are NULL for ordinary entries; clients only
+// read them (create/update input ignores them).
+type recurringMarker struct {
+	scheduledID, occurrence, occurrenceTotal *int64
+}
+
+// addTo sets the marker's JSON fields on a transaction object. They are always
+// present, as null for ordinary entries.
+func (m recurringMarker) addTo(row map[string]any) {
+	row["scheduled_id"] = m.scheduledID
+	row["occurrence"] = m.occurrence
+	row["occurrence_total"] = m.occurrenceTotal
+}
+
 func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFromContext(r.Context())
 
@@ -82,7 +98,8 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 	// the source of truth for authorization; no t.user_id filter is needed.
 	selectCols := `t.id, t.account_id, t.category_id, t.user_id, t.type, t.amount, t.currency,
 		           t.description, t.note, t.date, t.created_at, t.updated_at, t.sync_version,
-		           t.created_by_user_id, cu.name`
+		           t.created_by_user_id, cu.name,
+		           t.scheduled_id, t.occurrence, t.occurrence_total`
 	joinCreator := ` LEFT JOIN users cu ON t.created_by_user_id = cu.id`
 	var query string
 	if needsCategoryJoin {
@@ -141,21 +158,25 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 		var amount float64
 		var description, note, createdByName *string
 		var createdByUserID *int64
+		var marker recurringMarker
 
 		if err := rows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
 			&description, &note, &date, &createdAt, &updatedAt, &syncVersion,
-			&createdByUserID, &createdByName); err != nil {
+			&createdByUserID, &createdByName,
+			&marker.scheduledID, &marker.occurrence, &marker.occurrenceTotal); err != nil {
 			http.Error(w, "scan error", http.StatusInternalServerError)
 			return
 		}
-		txns = append(txns, map[string]any{
+		row := map[string]any{
 			"id": id, "account_id": accountID, "category_id": categoryID,
 			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
 			"description": description, "note": note, "date": date,
 			"created_at": createdAt, "updated_at": updatedAt, "sync_version": syncVersion,
 			"created_by_user_id": createdByUserID,
 			"created_by_name":    createdByName,
-		})
+		}
+		marker.addTo(row)
+		txns = append(txns, row)
 	}
 
 	if err := rows.Err(); err != nil {

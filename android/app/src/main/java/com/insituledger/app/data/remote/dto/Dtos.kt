@@ -68,7 +68,12 @@ data class TransactionDto(
     @SerializedName("deleted_at") val deletedAt: String?,
     @SerializedName("sync_version") val syncVersion: Long,
     @SerializedName("created_by_user_id") val createdByUserId: Long? = null,
-    @SerializedName("created_by_name") val createdByName: String? = null
+    @SerializedName("created_by_name") val createdByName: String? = null,
+    // Recurring-entry marker, set only by the server scheduler. Read-only:
+    // TransactionInput deliberately has no such fields. Older servers omit them.
+    @SerializedName("scheduled_id") val scheduledId: Long? = null,
+    val occurrence: Int? = null,
+    @SerializedName("occurrence_total") val occurrenceTotal: Int? = null
 )
 
 data class TransactionInput(

@@ -15,6 +15,12 @@ interface ScheduledTransactionDao {
     @Query("SELECT * FROM scheduled_transactions WHERE id = :id")
     suspend fun getById(id: Long): ScheduledTransactionEntity?
 
+    // Every row still in Room, soft-deleted included: an exhausted schedule is
+    // soft-deleted (local mode keeps it until a purge), but the entries it
+    // produced still need its rrule for their series label.
+    @Query("SELECT * FROM scheduled_transactions")
+    fun getAllIncludingDeleted(): Flow<List<ScheduledTransactionEntity>>
+
     @Upsert
     suspend fun upsert(scheduled: ScheduledTransactionEntity)
 

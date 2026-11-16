@@ -40,7 +40,13 @@ data class Transaction(
     val date: String,
     val isLocalOnly: Boolean = false,
     val createdByUserId: Long? = null,
-    val createdByName: String? = null
+    val createdByName: String? = null,
+    /** Schedule that auto-added this entry; null for ordinary entries. */
+    val scheduledId: Long? = null,
+    /** 1-based position in the series, when known. */
+    val occurrence: Int? = null,
+    /** Series length when it was added; null = open-ended. */
+    val occurrenceTotal: Int? = null
 )
 
 @Immutable

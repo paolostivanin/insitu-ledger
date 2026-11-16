@@ -139,6 +139,32 @@ components:
           description: >-
             Display name of the creator, denormalized for the "Added by [name]"
             UI on shared accounts. Mirrors `users.name` at fetch time.
+        scheduled_id:
+          type: integer
+          nullable: true
+          description: >-
+            ID of the scheduled transaction that materialized this entry
+            (recurring or one-time scheduled). Null for ordinary entries. Set
+            only by the server scheduler; ignored on create/update. Entries
+            materialized before this field existed are backfilled from their
+            `sched-<id>-…` client_id when the schedule row still exists. The
+            schedule may since have been deleted or exhausted (soft-deleted,
+            so absent from `GET /scheduled`); set to null only if the
+            schedule row is hard-deleted.
+        occurrence:
+          type: integer
+          nullable: true
+          description: >-
+            1-based position of this entry in its schedule's series (the
+            schedule's occurrence_count after materializing it). Null for
+            ordinary entries and for backfilled history.
+        occurrence_total:
+          type: integer
+          nullable: true
+          description: >-
+            The schedule's max_occurrences when this entry was materialized.
+            Null for open-ended schedules, ordinary entries and backfilled
+            history. 1 means a one-time scheduled entry.
 
     TransactionInput:
       type: object
@@ -1296,6 +1322,11 @@ paths:
                     type: integer
                   transactions:
                     type: array
+                    description: >-
+                      Changed transactions, including soft-deleted ones
+                      (`deleted_at` set). Same fields as `Transaction`
+                      (including `scheduled_id`, `occurrence`,
+                      `occurrence_total`) plus `deleted_at`.
                     items: {}
                   categories:
                     type: array

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.insituledger.app.data.local.datastore.UserPreferences
+import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.db.dao.AccountDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
 import com.insituledger.app.data.local.db.entity.AccountEntity
@@ -13,6 +14,7 @@ import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.CategoryRepository
 import com.insituledger.app.data.repository.ScheduledRepository
 import com.insituledger.app.data.repository.TransactionRepository
+import com.insituledger.app.data.sync.ScheduledMaterializer
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -21,6 +23,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.time.Clock
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -51,6 +54,8 @@ class DebugSeedReceiver : BroadcastReceiver() {
         fun accountDao(): AccountDao
         fun transactionDao(): TransactionDao
         fun prefs(): UserPreferences
+        fun database(): AppDatabase
+        fun clock(): Clock
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -145,6 +150,15 @@ class DebugSeedReceiver : BroadcastReceiver() {
             scheduled.create(checking, subscriptions, "expense", 4.99, "EUR", "iCloud", null, "FREQ=MONTHLY", at(-22, 9, 0))
             scheduled.create(checking, health, "expense", 85.0, "EUR", "Dentist", null, "FREQ=DAILY", at(-3, 15, 30), 1)
             scheduled.create(checking, salary, "income", 2_850.0, "EUR", "Salary", null, "FREQ=MONTHLY", at(-29, 9, 0))
+
+            // Past-start schedules, caught up right away by the real
+            // materializer, so the ledger has auto-added rows with series
+            // labels: "Monthly · 1 of 3" / "· 2 of 3", "Weekly", "Scheduled".
+            scheduled.create(checking, health, "expense", 35.0, "EUR", "Gym", null, "FREQ=MONTHLY", at(40, 7, 0), 3)
+            scheduled.create(checking, home, "expense", 25.0, "EUR", "Cleaning", null, "FREQ=WEEKLY", at(13, 18, 0))
+            scheduled.create(checking, transport, "expense", 180.0, "EUR", "Car service", null, "FREQ=DAILY", at(1, 9, 0), 1)
+            val db = ep.database()
+            ScheduledMaterializer(db, db.scheduledTransactionDao(), db.transactionDao(), db.accountDao(), ep.clock()).run()
 
             if (profile == "stress") seedStress(checking, groceries, salary)
         }

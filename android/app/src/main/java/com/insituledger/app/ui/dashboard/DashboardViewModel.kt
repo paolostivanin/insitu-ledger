@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AccountRepository
 import com.insituledger.app.data.repository.CategoryRepository
+import com.insituledger.app.data.repository.ScheduledRepository
 import com.insituledger.app.domain.model.Category
+import com.insituledger.app.domain.model.ScheduledTransaction
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.data.sync.SyncManager
@@ -26,7 +28,9 @@ data class DashboardUiState(
     val isRefreshing: Boolean = false,
     val heroMode: String = "net_worth",
     val currentUserId: Long? = null,
-    val categories: List<Category> = emptyList()
+    val categories: List<Category> = emptyList(),
+    /** Schedules by id (soft-deleted included), for the series label on auto-added rows. */
+    val schedules: Map<Long, ScheduledTransaction> = emptyMap()
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -37,7 +41,8 @@ class DashboardViewModel @Inject constructor(
     private val sharedAccessState: SharedAccessState,
     private val syncManager: SyncManager,
     private val prefs: UserPreferences,
-    private val categoryRepository: CategoryRepository
+    private val categoryRepository: CategoryRepository,
+    private val scheduledRepository: ScheduledRepository
 ) : ViewModel() {
 
     private val _isRefreshing = MutableStateFlow(false)
@@ -87,6 +92,10 @@ class DashboardViewModel @Inject constructor(
         // Categories only decorate rows (name + colour); never block the first frame on them.
         .combine(categoryRepository.getAll().onStart { emit(emptyList()) }) { state, cats ->
             state.copy(categories = cats)
+        }
+        // Same for schedules: they only add the series label to auto-added rows.
+        .combine(scheduledRepository.getAllById().onStart { emit(emptyMap()) }) { state, schedules ->
+            state.copy(schedules = schedules)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardUiState())
 

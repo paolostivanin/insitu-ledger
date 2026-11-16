@@ -46,7 +46,12 @@ data class TransactionBackup(
     val type: String, val amount: Double, val currency: String,
     val description: String?, val note: String? = null, val date: String,
     @SerializedName("created_at") val createdAt: String,
-    @SerializedName("updated_at") val updatedAt: String
+    @SerializedName("updated_at") val updatedAt: String,
+    // Recurring-entry marker. Optional and additive (older backups omit it,
+    // older apps ignore it), so BACKUP_SCHEMA_VERSION stays put.
+    @SerializedName("scheduled_id") val scheduledId: Long? = null,
+    val occurrence: Int? = null,
+    @SerializedName("occurrence_total") val occurrenceTotal: Int? = null
 )
 
 data class ScheduledBackup(
@@ -81,7 +86,10 @@ class FileBackupRepository @Inject constructor(
                 CategoryBackup(it.id, it.parentId, it.name, it.type, it.icon, it.color, it.createdAt, it.updatedAt)
             }
             val transactions = transactionDao.getAllSync().map {
-                TransactionBackup(it.id, it.accountId, it.categoryId, it.type, it.amount, it.currency, it.description, it.note, it.date, it.createdAt, it.updatedAt)
+                TransactionBackup(
+                    it.id, it.accountId, it.categoryId, it.type, it.amount, it.currency, it.description, it.note, it.date, it.createdAt, it.updatedAt,
+                    scheduledId = it.scheduledId, occurrence = it.occurrence, occurrenceTotal = it.occurrenceTotal
+                )
             }
             val scheduled = scheduledDao.getAllSync().map {
                 ScheduledBackup(it.id, it.accountId, it.categoryId, it.type, it.amount, it.currency, it.description, it.note, it.rrule, it.nextOccurrence, it.active, it.maxOccurrences, it.occurrenceCount, it.createdAt, it.updatedAt)
@@ -202,7 +210,8 @@ class FileBackupRepository @Inject constructor(
                     userId = 0, type = it.type, amount = it.amount, currency = it.currency,
                     description = it.description, note = it.note, date = it.date,
                     createdAt = it.createdAt, updatedAt = it.updatedAt,
-                    isLocalOnly = true
+                    isLocalOnly = true,
+                    scheduledId = it.scheduledId, occurrence = it.occurrence, occurrenceTotal = it.occurrenceTotal
                 )
             }
             val scheduledEntities = backup.scheduledTransactions.map {
@@ -277,6 +286,8 @@ internal fun validateBackup(backup: BackupData): String? {
         if (!t.amount.isFinite() || t.amount <= 0) return "transactions[$i]: amount must be positive and finite"
         if (t.currency.isBlank()) return "transactions[$i]: currency is empty"
         if (!DATE_PREFIX.containsMatchIn(t.date)) return "transactions[$i]: unparseable date '${t.date}'"
+        if (t.occurrence != null && t.occurrence < 1) return "transactions[$i]: invalid occurrence ${t.occurrence}"
+        if (t.occurrenceTotal != null && t.occurrenceTotal < 1) return "transactions[$i]: invalid occurrence_total ${t.occurrenceTotal}"
         if (!transactionIds.add(t.id)) return "transactions[$i]: duplicate id ${t.id}"
     }
 

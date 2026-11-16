@@ -138,7 +138,8 @@ class TransactionRepository @Inject constructor(
                 id = dto.id, accountId = dto.accountId, categoryId = dto.categoryId,
                 userId = dto.userId, type = dto.type, amount = dto.amount,
                 currency = dto.currency, description = dto.description, note = dto.note, date = dto.date,
-                createdByUserId = dto.createdByUserId, createdByName = dto.createdByName
+                createdByUserId = dto.createdByUserId, createdByName = dto.createdByName,
+                scheduledId = dto.scheduledId, occurrence = dto.occurrence, occurrenceTotal = dto.occurrenceTotal
             )
         } ?: emptyList()
     }
@@ -239,6 +240,9 @@ class TransactionRepository @Inject constructor(
             val newDelta = if (type == "income") amount else -amount
             accountDao.adjustBalance(accountId, newDelta)
 
+            // copy() keeps the recurring-entry marker (scheduled_id,
+            // occurrence, occurrence_total): an edited auto-added entry still
+            // shows where it came from. The UPDATE payload never carries it.
             transactionDao.upsert(existing.copy(
                 accountId = accountId, categoryId = categoryId, type = type,
                 amount = amount, currency = currency, description = description, note = note, date = date
@@ -297,6 +301,7 @@ class TransactionRepository @Inject constructor(
         userId = userId, type = type, amount = amount,
         currency = currency, description = description, note = note, date = date,
         isLocalOnly = isLocalOnly,
-        createdByUserId = createdByUserId, createdByName = createdByName
+        createdByUserId = createdByUserId, createdByName = createdByName,
+        scheduledId = scheduledId, occurrence = occurrence, occurrenceTotal = occurrenceTotal
     )
 }
