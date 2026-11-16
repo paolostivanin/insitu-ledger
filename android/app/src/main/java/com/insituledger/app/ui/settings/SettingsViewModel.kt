@@ -62,6 +62,7 @@ data class SettingsUiState(
     // Display preferences
     val currencySymbol: String = "€",
     val dashboardHeroMode: String = "net_worth",
+    val dashboardShowNetWorth: Boolean = true,
     val allowCleartextHttp: Boolean = false,
     // Backup encryption
     val backupPassphraseSet: Boolean = false,
@@ -163,6 +164,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             prefs.dashboardHeroModeFlow.collect { mode ->
                 _uiState.update { it.copy(dashboardHeroMode = mode) }
+            }
+        }
+
+        viewModelScope.launch {
+            prefs.dashboardShowNetWorthFlow.collect { show ->
+                _uiState.update { it.copy(dashboardShowNetWorth = show) }
             }
         }
 
@@ -439,6 +446,10 @@ class SettingsViewModel @Inject constructor(
             prefs.saveAllowCleartextHttp(enabled)
             okHttpClient.connectionPool.evictAll()
         }
+    }
+
+    fun setDashboardShowNetWorth(show: Boolean) {
+        viewModelScope.launch { prefs.saveDashboardShowNetWorth(show) }
     }
 
     fun setDashboardHeroMode(mode: String) {

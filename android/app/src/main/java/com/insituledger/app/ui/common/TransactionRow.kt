@@ -1,5 +1,11 @@
 package com.insituledger.app.ui.common
 
+import androidx.compose.material3.Surface
+
+import androidx.compose.material.icons.outlined.Schedule
+
+import androidx.compose.ui.semantics.contentDescription
+
 import com.insituledger.app.ui.theme.LocalSemanticColors
 
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
@@ -72,12 +78,11 @@ data class TransactionRowModel(
      */
     val showAvatar: Boolean = categoryIcon != null || categoryName != null,
     /**
-     * Position in the schedule that auto-added the entry ("Monthly · 2 of 3",
-     * see [seriesLabel]); drawn ahead of [supporting]. Null for ordinary entries.
+     * The schedule badge ("Monthly · 2/3", "Weekly · ∞", "Once", see
+     * [seriesBadge]) shown as a tonal pill under the supporting line. Null for
+     * ordinary entries.
      */
-    val seriesLabel: String? = null,
-    /** Show the repeat glyph after the title: the entry came from a schedule. */
-    val recurring: Boolean = seriesLabel != null
+    val series: SeriesBadge? = null
 )
 
 /** The emoji a category is drawn with: its own icon, else its parent's. */
@@ -145,40 +150,29 @@ fun TransactionRow(
             modifier = Modifier.weight(1f),
             content = {
                 Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = model.title,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            // Don't fill: the glyph sits right after the text,
-                            // and the title still ellipsizes before pushing it out.
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        if (model.recurring) {
-                            Spacer(Modifier.size(AppSpacing.xs))
-                            Icon(
-                                Icons.Default.Repeat,
-                                contentDescription = "Recurring",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
+                    Text(
+                        text = model.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (!model.showAvatar && model.categoryColor != null) {
                             CategoryDot(model.categoryColor)
                             Spacer(Modifier.size(6.dp))
                         }
                         Text(
-                            text = supportingText(model.seriesLabel, model.supporting),
+                            text = model.supporting,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    // The series gets its own line in the accent colour, so
+                    // "Monthly · 2 of 3" never blends into the category line.
+                    model.series?.let { SeriesPill(it, Modifier.padding(top = AppSpacing.xs)) }
                     if (model.attribution != null) {
                         Text(
                             text = model.attribution,
@@ -196,10 +190,6 @@ fun TransactionRow(
         )
     }
 }
-
-/** The supporting line with the series label (if any) in front. */
-internal fun supportingText(seriesLabel: String?, supporting: String): String =
-    listOfNotNull(seriesLabel, supporting.takeIf { it.isNotEmpty() }).joinToString(" · ")
 
 /**
  * Category identity at a glance: a circle tinted with the category colour
@@ -341,5 +331,38 @@ fun DirectionAvatar(type: String, modifier: Modifier = Modifier, size: Dp = 40.d
             tint = if (income) semantic.onPositiveContainer else semantic.onNegativeContainer,
             modifier = Modifier.size(size * 0.5f)
         )
+    }
+}
+
+/**
+ * Tonal pill marking an entry a schedule added: repeat icon + "Monthly · 2/3"
+ * (or "Weekly · ∞"), clock icon + "Once" for one-time schedules. A single
+ * TalkBack phrase ("Recurring monthly, 2 of 3").
+ */
+@Composable
+fun SeriesPill(badge: SeriesBadge, modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = MaterialTheme.shapes.small,
+        modifier = modifier.clearAndSetSemantics { contentDescription = badge.spoken }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = 2.dp)
+        ) {
+            Icon(
+                if (badge.oneTime) Icons.Outlined.Schedule else Icons.Default.Repeat,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(Modifier.size(AppSpacing.xs))
+            Text(
+                text = badge.text,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }

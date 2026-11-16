@@ -277,6 +277,36 @@ func migrateRecurringEntryMarker(conn *sql.DB) error {
 		return fmt.Errorf("backfill transactions.scheduled_id: %w", err)
 	}
 
+	// Number scheduler entries that predate the stored position (history).
+	// They are the newest entries of their schedule — older ones predate the
+	// sched-<id> client_id and were never linked — so count back from the
+	// schedule's occurrence_count: the latest linked entry is
+	// occurrence_count, the one before it one less, and so on. Soft-deleted
+	// entries count (the scheduler did create them). occurrence_total is the
+	// schedule's current max_occurrences (NULL = open-ended). Rows whose
+	// count would fall below 1 (inconsistent data) stay NULL, which keeps
+	// this idempotent: a second run matches no rows and bumps nothing.
+	if _, err := tx.Exec(`
+		UPDATE transactions
+		SET occurrence = c.occ, occurrence_total = c.total
+		FROM (
+			SELECT t.id AS id,
+			       s.occurrence_count - (
+			           SELECT COUNT(*) FROM transactions t2
+			           WHERE t2.scheduled_id = t.scheduled_id
+			             AND (julianday(t2.date) > julianday(t.date)
+			                  OR (julianday(t2.date) = julianday(t.date) AND t2.id > t.id))
+			       ) AS occ,
+			       s.max_occurrences AS total
+			FROM transactions t
+			JOIN scheduled_transactions s ON s.id = t.scheduled_id
+			WHERE t.occurrence IS NULL
+		) AS c
+		WHERE transactions.id = c.id AND c.occ >= 1
+	`); err != nil {
+		return fmt.Errorf("number scheduler history: %w", err)
+	}
+
 	return tx.Commit()
 }
 

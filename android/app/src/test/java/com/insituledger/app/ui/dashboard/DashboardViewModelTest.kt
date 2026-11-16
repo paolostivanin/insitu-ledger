@@ -40,6 +40,7 @@ class DashboardViewModelTest {
         coEvery { transactions.getFilteredSync(any(), any(), null) } returns emptyList()
         every { prefs.userIdFlow } returns flowOf(1L)
         every { prefs.dashboardHeroModeFlow } returns flowOf("net_worth")
+        every { prefs.dashboardShowNetWorthFlow } returns flowOf(true)
         val schedules: com.insituledger.app.data.repository.ScheduledRepository = mockk {
             every { getAllById() } returns flowOf(emptyMap())
         }

@@ -40,7 +40,7 @@ import kotlin.random.Random
  * For the empty profile, clear app data instead (adb shell pm clear …).
  *
  * QA-only preference switches (no data written):
- *   … --es profile prefs --ez secure false --es theme dark|light|system --es hero net_worth|month_net
+ *   … --es profile prefs --ez secure false --es theme dark|light|system --es hero net_worth|month_net --ez networth false
  */
 class DebugSeedReceiver : BroadcastReceiver() {
 
@@ -68,6 +68,7 @@ class DebugSeedReceiver : BroadcastReceiver() {
                 if (intent.hasExtra("secure")) ep.prefs().saveScreenSecure(intent.getBooleanExtra("secure", true))
                 intent.getStringExtra("theme")?.let { ep.prefs().saveThemeMode(it) }
                 intent.getStringExtra("hero")?.let { ep.prefs().saveDashboardHeroMode(it) }
+                if (intent.hasExtra("networth")) ep.prefs().saveDashboardShowNetWorth(intent.getBooleanExtra("networth", true))
                 if (profile != "prefs") Seeder(ep).run(profile)
                 Log.i(TAG, "Seeded profile '$profile'")
             } catch (e: Exception) {

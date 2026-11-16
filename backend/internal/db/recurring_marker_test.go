@@ -154,8 +154,15 @@ func TestRecurringMarkerMigration(t *testing.T) {
 			if sid != w {
 				t.Errorf("%s: txn %d scheduled_id = %+v, want %+v", phase, id, sid, w)
 			}
-			if occ.Valid || total.Valid {
-				t.Errorf("%s: txn %d occurrence/total = %+v/%+v, want NULL (history)", phase, id, occ, total)
+			// Numbered from the schedule's occurrence_count: schedule 2 (one-time,
+			// 1 of 1 created) gives txn 2 position 1 of 1. Schedules 1 and 12
+			// report occurrence_count 0, so their entries can't be numbered.
+			wantOcc, wantTotal := sql.NullInt64{}, sql.NullInt64{}
+			if id == 2 {
+				wantOcc, wantTotal = sql.NullInt64{Int64: 1, Valid: true}, sql.NullInt64{Int64: 1, Valid: true}
+			}
+			if occ != wantOcc || total != wantTotal {
+				t.Errorf("%s: txn %d occurrence/total = %+v/%+v, want %+v/%+v", phase, id, occ, total, wantOcc, wantTotal)
 			}
 		}
 	}
@@ -194,5 +201,86 @@ func TestRecurringMarkerMigration(t *testing.T) {
 	}
 	if sid.Valid {
 		t.Errorf("after schedule hard-delete: scheduled_id = %d, want NULL", sid.Int64)
+	}
+}
+
+// TestRecurringMarkerNumbersHistory: entries a schedule created before the
+// position was stored get it back by counting from the schedule's
+// occurrence_count (the linked entries are its newest ones).
+func TestRecurringMarkerNumbersHistory(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := conn.Exec(`
+		INSERT INTO users (id, username, email, name, password_hash) VALUES (5, 'owner', 'o@x', 'Owner', 'h');
+		INSERT INTO accounts (id, user_id, name) VALUES (1, 5, 'Wallet');
+		INSERT INTO categories (id, user_id, name, type) VALUES (1, 5, 'Gadgets', 'expense');
+		INSERT INTO scheduled_transactions (id, account_id, category_id, user_id, created_by_user_id, type, amount, rrule, next_occurrence, max_occurrences, occurrence_count, active, deleted_at) VALUES
+		    -- finished 5-part series; only its last three entries carry the sched- client_id
+		    (7, 1, 1, 5, 5, 'expense', 100, 'FREQ=MONTHLY', '2026-10-01T09:30:00+02:00', 5, 5, 0, '2026-09-01 09:30:00'),
+		    -- open-ended, two created
+		    (8, 1, 1, 5, 5, 'expense', 25, 'FREQ=WEEKLY', '2026-11-20', NULL, 2, 1, NULL),
+		    -- 3-part series: one old entry without a position, one new entry with it
+		    (9, 1, 1, 5, 5, 'expense', 40, 'FREQ=MONTHLY', '2027-01-13T10:30:00+01:00', 3, 2, 1, NULL),
+		    -- inconsistent: entry linked but the schedule reports none created
+		    (10, 1, 1, 5, 5, 'expense', 5, 'FREQ=DAILY', '2026-11-20', NULL, 0, 1, NULL);
+		INSERT INTO transactions (id, account_id, category_id, user_id, created_by_user_id, type, amount, date, scheduled_id, occurrence, occurrence_total, deleted_at) VALUES
+		    (1, 1, 1, 5, 5, 'expense', 100, '2026-07-01T09:30:00+02:00', 7, NULL, NULL, NULL),
+		    (2, 1, 1, 5, 5, 'expense', 100, '2026-08-01T09:30:00+02:00', 7, NULL, NULL, '2026-08-02 10:00:00'),
+		    (3, 1, 1, 5, 5, 'expense', 100, '2026-09-01T09:30:00+02:00', 7, NULL, NULL, NULL),
+		    (4, 1, 1, 5, 5, 'expense', 25, '2026-11-13', 8, NULL, NULL, NULL),
+		    (5, 1, 1, 5, 5, 'expense', 40, '2026-11-13T10:30:00+01:00', 9, NULL, NULL, NULL),
+		    (6, 1, 1, 5, 5, 'expense', 40, '2026-12-13T10:30:00+01:00', 9, 2, 3, NULL),
+		    (7, 1, 1, 5, 5, 'expense', 5, '2026-11-19', 10, NULL, NULL, NULL),
+		    (8, 1, 1, 5, 5, 'expense', 9, '2026-11-19', NULL, NULL, NULL, NULL);
+	`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	conn.Close()
+
+	// Re-open: the migration step numbers the history.
+	conn, err = Open(dir)
+	if err != nil {
+		t.Fatalf("re-open: %v", err)
+	}
+	type pos struct{ occ, total sql.NullInt64 }
+	n := func(v int64) sql.NullInt64 { return sql.NullInt64{Int64: v, Valid: true} }
+	want := map[int64]pos{
+		1: {n(3), n(5)}, // counted back from occurrence_count 5
+		2: {n(4), n(5)}, // soft-deleted entries count too
+		3: {n(5), n(5)},
+		4: {n(2), sql.NullInt64{}}, // open-ended: position, no total
+		5: {n(1), n(3)},           // older than the new entry at position 2
+		6: {n(2), n(3)},           // already numbered by the scheduler: untouched
+		7: {},                     // would be 0: left NULL
+		8: {},                     // ordinary entry
+	}
+	check := func(c *sql.DB, phase string) {
+		t.Helper()
+		for id, w := range want {
+			var got pos
+			if err := c.QueryRow(`SELECT occurrence, occurrence_total FROM transactions WHERE id = ?`, id).
+				Scan(&got.occ, &got.total); err != nil {
+				t.Fatalf("%s: read txn %d: %v", phase, id, err)
+			}
+			if got != w {
+				t.Errorf("%s: txn %d = %+v/%+v, want %+v/%+v", phase, id, got.occ, got.total, w.occ, w.total)
+			}
+		}
+	}
+	check(conn, "after numbering")
+	version := syncVersion(t, conn)
+	conn.Close()
+
+	again, err := Open(dir)
+	if err != nil {
+		t.Fatalf("third open: %v", err)
+	}
+	defer again.Close()
+	check(again, "third open")
+	if v := syncVersion(t, again); v != version {
+		t.Errorf("numbering is not idempotent: sync_meta %d -> %d", version, v)
 	}
 }

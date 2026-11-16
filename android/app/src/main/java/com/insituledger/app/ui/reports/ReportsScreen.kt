@@ -104,7 +104,7 @@ import com.insituledger.app.ui.common.categoryPath
 import com.insituledger.app.ui.common.displayName
 import com.insituledger.app.ui.common.label
 import com.insituledger.app.ui.common.rangeLabel
-import com.insituledger.app.ui.common.seriesLabel
+import com.insituledger.app.ui.common.seriesBadge
 import com.insituledger.app.ui.common.toUtcMillis
 import com.insituledger.app.ui.common.utcMillisToLocalDate
 import com.insituledger.app.ui.theme.AppSpacing
@@ -718,7 +718,7 @@ private fun drillDownDays(
                     amount = txn.amount,
                     type = txn.type,
                     symbol = symbol,
-                    seriesLabel = seriesLabel(txn, schedules)
+                    series = seriesBadge(txn, schedules)
                 )
             }
         )

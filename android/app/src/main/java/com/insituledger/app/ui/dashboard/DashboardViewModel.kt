@@ -27,6 +27,8 @@ data class DashboardUiState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val heroMode: String = "net_worth",
+    /** false = the user hid net worth: the headline is the month's net and net worth appears nowhere. */
+    val showNetWorth: Boolean = true,
     val currentUserId: Long? = null,
     val categories: List<Category> = emptyList(),
     /** Schedules by id (soft-deleted included), for the series label on auto-added rows. */
@@ -60,8 +62,9 @@ class DashboardViewModel @Inject constructor(
     val uiState: StateFlow<DashboardUiState> = combine(
         scopedData,
         prefs.userIdFlow,
-        prefs.dashboardHeroModeFlow
-    ) { data, currentUserId, heroMode ->
+        prefs.dashboardHeroModeFlow,
+        prefs.dashboardShowNetWorthFlow
+    ) { data, currentUserId, heroMode, showNetWorth ->
         val accounts = data.scope.accounts
         val filter = data.scope.owner
         val accountIds = accounts.map { it.id }.toSet()
@@ -85,6 +88,7 @@ class DashboardViewModel @Inject constructor(
             ),
             isLoading = false,
             heroMode = heroMode,
+            showNetWorth = showNetWorth,
             currentUserId = currentUserId
         )
     }

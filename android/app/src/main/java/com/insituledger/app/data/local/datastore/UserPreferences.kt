@@ -55,6 +55,8 @@ class UserPreferences @Inject constructor(
         const val DEFAULT_CURRENCY_SYMBOL = "€"
         val ALLOW_CLEARTEXT_HTTP = booleanPreferencesKey("allow_cleartext_http")
         val DASHBOARD_HERO_MODE = stringPreferencesKey("dashboard_hero_mode") // "net_worth" (default) | "month_net"
+        // false = never show net worth on the dashboard (headline becomes the month's net).
+        val DASHBOARD_SHOW_NET_WORTH = booleanPreferencesKey("dashboard_show_net_worth")
         // Set by clearAuthSession() (interceptor 401), cleared after the UI
         // observer (AppNavigation) has shown the "you've been signed out"
         // snackbar. Persisted so a 401 during background sync is still
@@ -97,6 +99,7 @@ class UserPreferences @Inject constructor(
     val currencySymbolFlow: Flow<String> = context.dataStore.data.map { it[CURRENCY_SYMBOL] ?: DEFAULT_CURRENCY_SYMBOL }
     val allowCleartextHttpFlow: Flow<Boolean> = context.dataStore.data.map { it[ALLOW_CLEARTEXT_HTTP] ?: false }
     val dashboardHeroModeFlow: Flow<String> = context.dataStore.data.map { it[DASHBOARD_HERO_MODE] ?: "net_worth" }
+    val dashboardShowNetWorthFlow: Flow<Boolean> = context.dataStore.data.map { it[DASHBOARD_SHOW_NET_WORTH] ?: true }
     val authNoticeFlow: Flow<String> = context.dataStore.data.map { it[AUTH_NOTICE] ?: "You've been signed out." }
     val autoLogoutPendingFlow: Flow<Boolean> = context.dataStore.data.map { it[AUTO_LOGOUT_PENDING] ?: false }
 
@@ -223,6 +226,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun saveAllowCleartextHttp(allowed: Boolean) {
         context.dataStore.edit { it[ALLOW_CLEARTEXT_HTTP] = allowed }
+    }
+
+    suspend fun saveDashboardShowNetWorth(show: Boolean) {
+        context.dataStore.edit { it[DASHBOARD_SHOW_NET_WORTH] = show }
     }
 
     suspend fun saveDashboardHeroMode(mode: String) {

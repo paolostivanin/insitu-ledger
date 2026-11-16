@@ -149,7 +149,7 @@ class RecurringMarkerMappingTest {
         assertNull(row.occurrence)
         assertNull(row.occurrenceTotal)
         coEvery { transactionDao.getById(41) } returns row
-        assertEquals("Recurring", com.insituledger.app.ui.common.seriesLabel(transactionRepository().getById(41)!!, null))
+        assertEquals("Recurring", com.insituledger.app.ui.common.seriesBadge(transactionRepository().getById(41)!!, null)?.text)
     }
 
     @Test fun `server list results carry the marker`() = runTest {

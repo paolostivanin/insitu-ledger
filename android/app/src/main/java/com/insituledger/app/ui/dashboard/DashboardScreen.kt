@@ -67,7 +67,7 @@ import com.insituledger.app.ui.common.categoryEmoji
 import com.insituledger.app.ui.common.currencySymbolFor
 import com.insituledger.app.ui.common.entryAttribution
 import com.insituledger.app.ui.common.primaryCurrency
-import com.insituledger.app.ui.common.seriesLabel
+import com.insituledger.app.ui.common.seriesBadge
 import com.insituledger.app.ui.theme.AppSpacing
 import com.insituledger.app.ui.theme.LocalSemanticColors
 import com.insituledger.app.ui.theme.amountLarge
@@ -138,6 +138,7 @@ fun DashboardScreen(
 				item(key = "balance") {
 					BalanceHeader(
 						heroMode = uiState.heroMode,
+						showNetWorth = uiState.showNetWorth,
 						totalBalance = data.totalBalance,
 						monthNet = data.monthIncome - data.monthExpense,
 						horizontalPadding = pad
@@ -219,6 +220,7 @@ fun DashboardScreen(
 @Composable
 private fun BalanceHeader(
 	heroMode: String,
+	showNetWorth: Boolean,
 	totalBalance: Double,
 	monthNet: Double,
 	horizontalPadding: Dp
@@ -226,7 +228,8 @@ private fun BalanceHeader(
 	val symbol = LocalCurrencySymbol.current
 	val semantic = LocalSemanticColors.current
 	val monthName = LocalDate.now().month.getDisplayName(TextStyle.FULL, Locale.getDefault())
-	val isMonthMode = heroMode == "month_net"
+	// With net worth hidden, the month's net is the only headline left.
+	val isMonthMode = heroMode == "month_net" || !showNetWorth
 
 	val headlineText: String
 	val headlineColor: Color
@@ -252,7 +255,11 @@ private fun BalanceHeader(
 			.semantics(mergeDescendants = true) {}
 	) {
 		Text(
-			text = if (isMonthMode) "Net this month" else "Net worth",
+			text = when {
+				!showNetWorth -> "Net in $monthName"
+				isMonthMode -> "Net this month"
+				else -> "Net worth"
+			},
 			style = MaterialTheme.typography.labelLarge,
 			color = MaterialTheme.colorScheme.onSurfaceVariant
 		)
@@ -266,7 +273,9 @@ private fun BalanceHeader(
 		)
 		Spacer(Modifier.height(AppSpacing.sm))
 		// Wraps rather than clipping when the figure is long or text is large.
-		if (isMonthMode) {
+		if (!showNetWorth) {
+			// Nothing below the headline: no net worth anywhere on the screen.
+		} else if (isMonthMode) {
 			FlowRow {
 				Text(
 					"Net worth ",
@@ -538,7 +547,7 @@ private fun buildRecentRows(
 			amount = txn.amount,
 			type = txn.type,
 			symbol = currencySymbolFor(txn.currency, preferredSymbol, primary),
-			seriesLabel = seriesLabel(txn, schedules)
+			series = seriesBadge(txn, schedules)
 		)
 	}
 }
