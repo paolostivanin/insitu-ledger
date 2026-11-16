@@ -186,11 +186,16 @@ When the backend starts against an empty database, it creates a single admin use
 
 ### Docker
 
+Every release publishes a multi-arch image (amd64 + arm64) to GitHub Container Registry: `ghcr.io/paolostivanin/insitu-ledger`, tagged `1.26.0`, `1.26`, `1` and `latest`.
+
 ```bash
-docker compose up --build
+docker compose up -d                     # pulls the image and starts the server on :8080
+docker compose pull && docker compose up -d   # upgrade
 ```
 
-This builds a multi-stage image (Node for the frontend, Go for the backend) and runs the server on port 8080. Data is persisted in a named Docker volume (`<project>_ledger_data`).
+Pin a release in `docker-compose.yml` (`ghcr.io/paolostivanin/insitu-ledger:1.26.0`) if you prefer to upgrade deliberately; to build from a checkout instead, replace `image:` with `build: .`. Data is persisted in a named Docker volume (`<project>_ledger_data`, unchanged from earlier releases); a bind mount (`./data:/data`) works too and is easier to back up.
+
+The server never runs as root: the entrypoint starts it as the owner of `/data` (or `PUID`/`PGID`, default `1000`), fixing ownership on first start. The image has a health check on `/api/health` (it assumes the default port; keep `INSITU_ADDR=:8080` inside the container and remap with `ports:`). On SELinux hosts, add `:Z` to a bind mount.
 
 The bundled `docker-compose.yml` publishes port 8080 on all interfaces. If your reverse proxy runs on the same host, change the mapping to `127.0.0.1:8080:8080` so the plain-HTTP port isn't reachable directly. Keep `restart: unless-stopped`: the admin Restore feature relies on the orchestrator restarting the container after it swaps the database.
 
@@ -228,11 +233,29 @@ Newer Alpine and Debian releases work the same way; the recipes below were writt
    pct set <vmid> -features nesting=1,keyctl=1
    ```
 2. Inside the container, install Docker (`apk add docker docker-cli-compose` on Alpine, or follow the official docker-ce instructions on Debian) and enable the service.
-3. Clone the repository (or copy `Dockerfile` + `docker-compose.yml`) and run:
+3. Copy `docker-compose.yml` into the container (no clone needed; it pulls the published image) and run:
    ```
-   docker compose up -d --build
+   docker compose up -d
    ```
-4. Back up the named volume (`<project>_ledger_data`) via PvE's container backups or a separate snapshot job.
+   Upgrade later with `docker compose pull && docker compose up -d`.
+4. Back up the data (named volume or bind mount) via PvE's container backups or a separate snapshot job. Docker adds about 100 MB of RAM, so give the container 512 MB.
+
+#### Moving an Option B install to the Docker image
+
+The image reads the same data directory layout (`insitu-ledger.db`, its `-wal`/`-shm` files and `backups/`), so moving is a copy — the original stays untouched as a rollback:
+
+```bash
+# 1. Consistent backup while the service still runs (keep a copy off the host too)
+sqlite3 -readonly /var/lib/insitu-ledger/insitu-ledger.db ".backup /root/insitu-ledger-$(date +%F).db"
+# 2. Stop the native service, then copy (not move) the data directory
+systemctl stop insitu-ledger && systemctl disable insitu-ledger
+mkdir -p /srv/insitu-ledger && cp -a /var/lib/insitu-ledger /srv/insitu-ledger/data
+# 3. docker-compose.yml in /srv/insitu-ledger: same port, a bind mount of ./data:/data,
+#    and the same INSITU_* variables the systemd unit had (e.g. INSITU_TRUST_PROXY=true)
+cd /srv/insitu-ledger && docker compose up -d && docker compose logs -f
+```
+
+The container keeps the files' existing owner. Rollback is `docker compose down && systemctl enable --now insitu-ledger`, which runs the old binary on the untouched original directory (older binaries also run on a database a newer release has migrated, since schema changes are additive).
 
 #### Option B — Native binary (no Docker, smallest footprint)
 
@@ -464,6 +487,7 @@ This project is built for a small, self-hosted, single-trust deployment where ev
 - **Backend + frontend** share a single version and are released together (`frontend/package.json`, `backend/internal/version.go`, `backend/internal/api/openapi.yaml`).
 - **Android** versions independently (`versionName` / `versionCode` in `android/app/build.gradle.kts`).
 - Each release gets **one git tag** for the backend+frontend version (e.g. `v1.25.0`); the Android version is noted in the release notes.
+- Pushing a `v*` tag runs `.github/workflows/release-image.yml`, which verifies the backend and frontend and publishes the Docker image to `ghcr.io/paolostivanin/insitu-ledger`.
 
 ## License
 

@@ -1,0 +1,15 @@
+# Keep the build context to what the image needs (backend + frontend sources).
+.git
+.github
+.claude
+android
+scripts
+**/node_modules
+frontend/build
+frontend/.svelte-kit
+backend/data
+**/*.db
+**/*.db-wal
+**/*.db-shm
+*.md
+!frontend/**/*.md

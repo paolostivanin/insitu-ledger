@@ -79,3 +79,29 @@ jobs:
             android/app/build/reports/
             android/app/build/test-results/
           retention-days: 7
+
+  image:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Build only (no push) so a broken Dockerfile is caught before a release tag.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: insitu-ledger:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Container starts and passes its health check
+        run: |
+          docker run -d --name insitu -p 8080:8080 insitu-ledger:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/api/health; then echo; exit 0; fi
+            sleep 1
+          done
+          docker logs insitu
+          exit 1
