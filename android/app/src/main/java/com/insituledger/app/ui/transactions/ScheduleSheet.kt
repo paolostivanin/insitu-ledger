@@ -126,6 +126,12 @@ fun ScheduleSheet(
                                 ) onQuickPick(QuickPick.TOMORROW)
                             },
                             shape = SegmentedButtonDefaults.itemShape(index, modes.size),
+                            // Scheduling isn't money direction: neutral selection, and the
+                            // unselected segment shows the sheet through, like the
+                            // outlined date/time buttons below.
+                            colors = SegmentedButtonDefaults.colors(
+                                inactiveContainerColor = androidx.compose.ui.graphics.Color.Transparent
+                            ),
                             icon = {},
                             modifier = Modifier.heightIn(min = 48.dp)
                         ) { Text(label, maxLines = 1) }

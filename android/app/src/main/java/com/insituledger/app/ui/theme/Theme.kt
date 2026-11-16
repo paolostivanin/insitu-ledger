@@ -12,17 +12,29 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 /**
- * Money semantics. `positive` marks income; `negative` is reserved for values
- * that are actually below zero (overdrawn balance, negative net). Expense rows
- * render in onSurface with a true minus sign — red is not the default for
- * spending. Every pair here clears WCAG AA on surface and surfaceContainer.
+ * Money semantics. `positive` (green) marks income and nets above zero;
+ * `negative` (red) marks expenses and values below zero. Colour is always
+ * paired with a sign ("+" / "−"), so direction never relies on hue alone.
+ *
+ * Tuned in OKLCH: a crimson red (hue ~20) kept clear of the Material error
+ * red, and a jade-emerald green (hue ~160) kept clear of the brand teal. The
+ * red sits darker than the green in both themes for luminance separation
+ * under red-green colour-vision deficiency. Contrast (WCAG):
+ * - light: positive 5.4 surface / 4.9 surfaceContainer / 4.6 surfaceContainerHigh,
+ *   negative 7.6 / 6.9 / 6.5; on-container text 7.4 (green) and 8.2 (red).
+ * - dark: positive 10.4 / 9.2 / 8.1, negative 7.0 / 6.2 / 5.4;
+ *   on-container text 8.9 (green) and 9.1 (red).
+ * Containers are soft tonal pills, visible against surface and surfaceContainer.
  */
 @Immutable
 data class SemanticColors(
 	val positive: Color,
 	val negative: Color,
 	val positiveContainer: Color,
-	val negativeContainer: Color
+	val negativeContainer: Color,
+	/** Text/icons on positiveContainer / negativeContainer (pills, chips). */
+	val onPositiveContainer: Color,
+	val onNegativeContainer: Color
 ) {
 	// Aliases kept for readability at income/expense call sites.
 	val income: Color get() = positive
@@ -30,17 +42,21 @@ data class SemanticColors(
 }
 
 private val LightSemanticColors = SemanticColors(
-	positive = Color(0xFF1E7B45),
-	negative = Color(0xFFB4372B),
-	positiveContainer = Color(0xFFD9F0E1),
-	negativeContainer = Color(0xFFF9DEDA)
+	positive = Color(0xFF00784D),
+	negative = Color(0xFFA3122C),
+	positiveContainer = Color(0xFFD2F3E0),
+	negativeContainer = Color(0xFFFDDDE0),
+	onPositiveContainer = Color(0xFF015636),
+	onNegativeContainer = Color(0xFF830A21)
 )
 
 private val DarkSemanticColors = SemanticColors(
-	positive = Color(0xFF7DD3A0),
-	negative = Color(0xFFFF9C8F),
-	positiveContainer = Color(0xFF1D3828),
-	negativeContainer = Color(0xFF47221D)
+	positive = Color(0xFF71D6A3),
+	negative = Color(0xFFEF7E80),
+	positiveContainer = Color(0xFF183E2B),
+	negativeContainer = Color(0xFF512225),
+	onPositiveContainer = Color(0xFFA9EDC8),
+	onNegativeContainer = Color(0xFFFFCACB)
 )
 
 val LocalSemanticColors = compositionLocalOf { LightSemanticColors }

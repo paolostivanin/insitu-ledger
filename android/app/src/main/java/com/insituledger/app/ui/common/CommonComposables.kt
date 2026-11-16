@@ -112,20 +112,34 @@ fun EmptyState(
     }
 }
 
-/** Expense / Income selector. Neutral colours: the type is not a warning. */
+/**
+ * Expense / Income selector. The selected segment takes its type's tonal
+ * colour (expense: negative container, income: positive container) so the
+ * kind of entry reads at a glance; the unselected one stays neutral. The fill,
+ * not hue alone, marks the selection, and each segment is announced as a
+ * selected / not selected option.
+ */
 @Composable
 fun TypeToggle(
     selected: String,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val semantic = com.insituledger.app.ui.theme.LocalSemanticColors.current
     val options = listOf("expense" to "Expense", "income" to "Income")
     SingleChoiceSegmentedButtonRow(modifier = modifier.fillMaxWidth()) {
         options.forEachIndexed { index, (value, label) ->
+            val income = value == "income"
             SegmentedButton(
                 selected = selected == value,
                 onClick = { onSelect(value) },
                 shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = if (income) semantic.positiveContainer else semantic.negativeContainer,
+                    activeContentColor = if (income) semantic.onPositiveContainer else semantic.onNegativeContainer,
+                    inactiveContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    inactiveContentColor = MaterialTheme.colorScheme.onSurface
+                ),
                 icon = {},
                 modifier = Modifier.heightIn(min = 48.dp)
             ) {

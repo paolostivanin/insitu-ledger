@@ -210,7 +210,9 @@ fun TransactionFormScreen(
                 onDone = { focusManager.clearFocus(); keyboard?.hide() },
                 modifier = Modifier
                     .padding(start = pad, end = pad, top = AppSpacing.md)
-                    .focusRequester(amountFocus)
+                    .focusRequester(amountFocus),
+                // The figure reads in its ledger colour: red for expense, green for income.
+                type = uiState.type
             )
 
             HorizontalDivider(

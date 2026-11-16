@@ -1,5 +1,8 @@
 package com.insituledger.app.ui.common
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -20,10 +23,13 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.insituledger.app.domain.model.Account
+import com.insituledger.app.ui.theme.AppSpacing
 import com.insituledger.app.ui.theme.LocalSemanticColors
 import com.insituledger.app.ui.theme.amountMedium
+import com.insituledger.app.ui.theme.amountSmall
 import java.util.Currency
 import java.util.Locale
 import kotlin.math.abs
@@ -70,6 +76,16 @@ object MoneyFormat {
         val label = if (type == "income") "Income" else "Expense"
         return "$label ${withSymbol(number(amount), symbol)}"
     }
+
+    /** Screen-reader phrasing of a net figure: "plus €12.30", "minus €4.00", "€0.00". */
+    fun spokenNet(value: Double, symbol: String): String {
+        val body = withSymbol(number(value), symbol)
+        return when {
+            value > 0.004 -> "plus $body"
+            value < -0.004 -> "minus $body"
+            else -> body
+        }
+    }
 }
 
 /**
@@ -113,7 +129,11 @@ fun MoneyText(
     )
 }
 
-/** Income in the positive colour with "+"; expense in onSurface with "−". */
+/**
+ * A transaction amount: income in the positive (green) colour with "+",
+ * expense in the negative (red) colour with a true minus "−". The sign always
+ * accompanies the colour so direction never depends on hue alone.
+ */
 @Composable
 fun TransactionAmount(
     amount: Double,
@@ -122,8 +142,8 @@ fun TransactionAmount(
     style: TextStyle = MaterialTheme.typography.amountMedium,
     symbol: String = LocalCurrencySymbol.current
 ) {
-    val color = if (type == "income") LocalSemanticColors.current.positive
-    else MaterialTheme.colorScheme.onSurface
+    val semantic = LocalSemanticColors.current
+    val color = if (type == "income") semantic.positive else semantic.negative
     MoneyText(
         text = MoneyFormat.transaction(amount, type, symbol),
         style = style,
@@ -167,6 +187,40 @@ fun NetText(
         else -> neutralColor
     }
     MoneyText(text = MoneyFormat.net(value, symbol), style = style, color = color, modifier = modifier)
+}
+
+/**
+ * A net figure as a soft tonal pill (day totals, period nets): positive
+ * container with "+" above zero, negative container with "−" below, a neutral
+ * container at zero. Text uses the matching on-container colour, so it clears
+ * AA on the pill in both themes. Spoken as "[spokenLabel] plus €12.30".
+ */
+@Composable
+fun NetPill(
+    value: Double,
+    modifier: Modifier = Modifier,
+    symbol: String = LocalCurrencySymbol.current,
+    spokenLabel: String = "Total",
+    style: TextStyle = MaterialTheme.typography.amountSmall
+) {
+    val semantic = LocalSemanticColors.current
+    val (container, content) = when {
+        value > 0.004 -> semantic.positiveContainer to semantic.onPositiveContainer
+        value < -0.004 -> semantic.negativeContainer to semantic.onNegativeContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = modifier
+            .background(container, MaterialTheme.shapes.small)
+            .padding(horizontal = AppSpacing.sm, vertical = 2.dp)
+    ) {
+        MoneyText(
+            text = MoneyFormat.net(value, symbol),
+            style = style,
+            color = content,
+            spoken = "$spokenLabel ${MoneyFormat.spokenNet(value, symbol)}"
+        )
+    }
 }
 
 /**

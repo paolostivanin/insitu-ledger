@@ -98,6 +98,7 @@ import com.insituledger.app.ui.common.SectionHeader
 import com.insituledger.app.ui.common.TransactionRow
 import com.insituledger.app.ui.common.TransactionRowModel
 import com.insituledger.app.ui.common.categoryColor
+import com.insituledger.app.ui.common.categoryEmoji
 import com.insituledger.app.ui.common.categoryPath
 import com.insituledger.app.ui.common.displayName
 import com.insituledger.app.ui.common.label
@@ -352,7 +353,11 @@ private fun PeriodControls(
 
 // ---- In / Out / Net ----
 
-/** One row of three figures; amounts step down in size rather than clip. */
+/**
+ * One row of three figures; amounts step down in size rather than clip.
+ * In is positive (green), Out negative (red), Net by sign — the labels carry
+ * the direction, so In / Out stay unsigned.
+ */
 @Composable
 private fun TotalsRow(income: Double, expense: Double, symbol: String, modifier: Modifier = Modifier) {
     val semantic = LocalSemanticColors.current
@@ -375,7 +380,7 @@ private fun TotalsRow(income: Double, expense: Double, symbol: String, modifier:
         Figure(
             label = "Out",
             text = outText,
-            color = onSurface,
+            color = if (expense > 0.004) semantic.negative else onSurface,
             spoken = "Expenses $outText",
             modifier = Modifier.weight(1f)
         )
@@ -704,6 +709,8 @@ private fun drillDownDays(
                         ?: txn.type.replaceFirstChar { it.uppercase() },
                     supporting = listOfNotNull(categoryName, DateLabels.time(txn.date)).joinToString(" · "),
                     categoryColor = categoryColor(categories, txn.categoryId),
+                    categoryIcon = categoryEmoji(categories, txn.categoryId),
+                    categoryName = categoryName,
                     attribution = null,
                     amount = txn.amount,
                     type = txn.type,
@@ -768,8 +775,11 @@ private fun DrillDownView(
                     AutoSizeMoneyText(
                         text = totalText,
                         style = MaterialTheme.typography.amountLarge,
-                        color = if (category.type == "income") LocalSemanticColors.current.positive
-                        else MaterialTheme.colorScheme.onSurface,
+                        color = when {
+                            uiState.selectedCategoryTotal <= 0.004 -> MaterialTheme.colorScheme.onSurface
+                            category.type == "income" -> LocalSemanticColors.current.positive
+                            else -> LocalSemanticColors.current.negative
+                        },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(AppSpacing.xs))

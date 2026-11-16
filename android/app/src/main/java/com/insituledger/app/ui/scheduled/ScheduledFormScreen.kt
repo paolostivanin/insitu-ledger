@@ -157,6 +157,7 @@ fun ScheduledFormScreen(
             AmountField(
                 amount = uiState.amount,
                 currency = uiState.currency,
+                type = uiState.type,
                 error = null,
                 onAmountChange = viewModel::updateAmount,
                 onCalculator = { showCalculator = true },

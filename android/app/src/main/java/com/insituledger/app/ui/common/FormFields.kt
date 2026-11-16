@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import com.insituledger.app.domain.model.Category
 import com.insituledger.app.ui.theme.AppSpacing
+import com.insituledger.app.ui.theme.LocalSemanticColors
 import com.insituledger.app.ui.theme.amountEntry
 import com.insituledger.app.ui.transactions.DescriptionSuggestion
 
@@ -109,6 +110,11 @@ fun DescriptionField(
     }
 }
 
+/**
+ * Amount entry. When [type] is given, the typed figure takes the money colour
+ * of that type (expense red, income green), matching how it will appear in
+ * the ledger; null keeps the default text colour.
+ */
 @Composable
 fun AmountField(
     amount: String,
@@ -117,8 +123,15 @@ fun AmountField(
     onAmountChange: (String) -> Unit,
     onCalculator: () -> Unit,
     onDone: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    type: String? = null
 ) {
+    val semantic = LocalSemanticColors.current
+    val amountColor = when (type) {
+        "income" -> semantic.positive
+        "expense" -> semantic.negative
+        else -> Color.Unspecified
+    }
     OutlinedTextField(
         value = amount,
         onValueChange = onAmountChange,
@@ -131,7 +144,8 @@ fun AmountField(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         },
-        textStyle = MaterialTheme.typography.amountEntry,
+        // Unspecified falls back to the field's own text colour.
+        textStyle = MaterialTheme.typography.amountEntry.copy(color = amountColor),
         singleLine = true,
         isError = error != null,
         supportingText = error?.let { { Text(it) } },

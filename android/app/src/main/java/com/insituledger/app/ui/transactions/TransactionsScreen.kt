@@ -92,11 +92,11 @@ import com.insituledger.app.ui.common.LoadingIndicator
 import com.insituledger.app.ui.common.LocalContentPadding
 import com.insituledger.app.ui.common.LocalCurrencySymbol
 import com.insituledger.app.ui.common.LocalSnackbarController
-import com.insituledger.app.ui.common.MoneyFormat
-import com.insituledger.app.ui.common.MoneyText
+import com.insituledger.app.ui.common.NetPill
 import com.insituledger.app.ui.common.TransactionRow
 import com.insituledger.app.ui.common.TransactionRowModel
 import com.insituledger.app.ui.common.categoryColor
+import com.insituledger.app.ui.common.categoryEmoji
 import com.insituledger.app.ui.common.currencySymbolFor
 import com.insituledger.app.ui.common.entryAttribution
 import com.insituledger.app.ui.common.label
@@ -106,8 +106,6 @@ import com.insituledger.app.ui.common.utcMillisToLocalDate
 import com.insituledger.app.ui.common.toUtcMillis
 import com.insituledger.app.ui.reports.DateRangePreset
 import com.insituledger.app.ui.theme.AppSpacing
-import com.insituledger.app.ui.theme.LocalSemanticColors
-import com.insituledger.app.ui.theme.amountSmall
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import java.time.LocalDate
@@ -544,6 +542,11 @@ private fun LazyListScope.rowItems(
     }
 }
 
+/**
+ * Sticky day header: the day label and, when the day isn't flat, its net as a
+ * tonal pill (green container above zero, red below) whose end edge lines up
+ * with the amount column. Spoken as "Day total minus €13.10".
+ */
 @Composable
 private fun DayHeader(group: DayGroup, symbol: String, pad: Dp) {
     Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
@@ -563,13 +566,9 @@ private fun DayHeader(group: DayGroup, symbol: String, pad: Dp) {
             },
             trailing = {
                 if (kotlin.math.abs(group.net) > 0.004) {
-                    // Day totals stay neutral; the sign carries the meaning.
-                    MoneyText(
-                        text = MoneyFormat.net(group.net, symbol),
-                        style = MaterialTheme.typography.amountSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        spoken = "Day total ${MoneyFormat.net(group.net, symbol)}"
-                    )
+                    // Colour follows the sign; the "+" / "−" keeps it readable
+                    // without relying on hue.
+                    NetPill(value = group.net, symbol = symbol, spokenLabel = "Day total")
                 }
             }
         )
@@ -617,7 +616,12 @@ private fun buildRows(
             attribution = entryAttribution(account?.isShared == true, txn.createdByUserId, txn.createdByName, currentUserId),
             amount = txn.amount,
             type = txn.type,
-            symbol = currencySymbolFor(txn.currency, preferredSymbol, primary)
+            symbol = currencySymbolFor(txn.currency, preferredSymbol, primary),
+            categoryIcon = categoryEmoji(categories, txn.categoryId),
+            categoryName = categoryName,
+            // Always lead with the avatar here, so rows stay aligned even if a
+            // category is briefly missing while data loads.
+            showAvatar = true
         )
     }
 }
