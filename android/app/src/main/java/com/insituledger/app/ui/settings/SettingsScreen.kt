@@ -209,11 +209,21 @@ fun SettingsScreen(
                 summary = uiState.currencySymbol.ifBlank { "None" },
                 onClick = { dialog = SettingsDialog.CurrencySymbol }
             )
-            PreferenceRow(
-                title = "Dashboard headline",
-                summary = HeadlineChoices.labelFor(uiState.dashboardHeroMode),
-                onClick = { dialog = SettingsDialog.DashboardHeadline }
+            SwitchRow(
+                title = "Show net worth",
+                summary = if (uiState.dashboardShowNetWorth) "On the main screen"
+                    else "Hidden: the main screen leads with this month's net",
+                checked = uiState.dashboardShowNetWorth,
+                onCheckedChange = viewModel::setDashboardShowNetWorth
             )
+            // The headline only chooses between net worth and the month's net.
+            if (uiState.dashboardShowNetWorth) {
+                PreferenceRow(
+                    title = "Dashboard headline",
+                    summary = HeadlineChoices.labelFor(uiState.dashboardHeroMode),
+                    onClick = { dialog = SettingsDialog.DashboardHeadline }
+                )
+            }
 
             // ---- Security ----
             SectionHeader("Security", horizontalPadding = pad)

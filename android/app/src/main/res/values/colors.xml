@@ -3,6 +3,4 @@
     <color name="ic_launcher_background">#1e293b</color>
     <color name="splash_background">#FF0B6E63</color>
     <color name="window_background">#FFFBFBFA</color>
-    <color name="brand_primary">#FF0B6E63</color>
-    <color name="brand_on_primary">#FFFFFFFF</color>
 </resources>

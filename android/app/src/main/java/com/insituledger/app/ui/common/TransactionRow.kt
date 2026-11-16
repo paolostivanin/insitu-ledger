@@ -1,5 +1,7 @@
 package com.insituledger.app.ui.common
 
+import androidx.compose.ui.semantics.contentDescription
+
 import com.insituledger.app.ui.theme.LocalSemanticColors
 
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
@@ -145,39 +147,51 @@ fun TransactionRow(
             modifier = Modifier.weight(1f),
             content = {
                 Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = model.title,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            // Don't fill: the glyph sits right after the text,
-                            // and the title still ellipsizes before pushing it out.
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        if (model.recurring) {
-                            Spacer(Modifier.size(AppSpacing.xs))
-                            Icon(
-                                Icons.Default.Repeat,
-                                contentDescription = "Recurring",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
+                    Text(
+                        text = model.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (!model.showAvatar && model.categoryColor != null) {
                             CategoryDot(model.categoryColor)
                             Spacer(Modifier.size(6.dp))
                         }
                         Text(
-                            text = supportingText(model.seriesLabel, model.supporting),
+                            text = model.supporting,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                    }
+                    // The series gets its own line in the accent colour, so
+                    // "Monthly · 2 of 3" never blends into the category line.
+                    if (model.recurring) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 2.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Repeat,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.size(AppSpacing.xs))
+                            Text(
+                                text = model.seriesLabel ?: "Recurring",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.semantics {
+                                    contentDescription = "Recurring, ${model.seriesLabel ?: ""}".trimEnd(',', ' ')
+                                }
+                            )
+                        }
                     }
                     if (model.attribution != null) {
                         Text(
@@ -196,10 +210,6 @@ fun TransactionRow(
         )
     }
 }
-
-/** The supporting line with the series label (if any) in front. */
-internal fun supportingText(seriesLabel: String?, supporting: String): String =
-    listOfNotNull(seriesLabel, supporting.takeIf { it.isNotEmpty() }).joinToString(" · ")
 
 /**
  * Category identity at a glance: a circle tinted with the category colour

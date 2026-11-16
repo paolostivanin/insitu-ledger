@@ -74,10 +74,4 @@ class SeriesLabelTest {
         assertEquals("Yearly · 3 of 3", seriesLabel(entry(occurrence = 3, total = 3), schedules))
         assertEquals("Weekly", seriesLabel(entry(scheduledId = 8, occurrence = 1), schedules))
     }
-
-    @Test fun `the series label leads the supporting line`() {
-        assertEquals("Monthly · 2 of 3 · Rent · 10:00", supportingText("Monthly · 2 of 3", "Rent · 10:00"))
-        assertEquals("Rent · 10:00", supportingText(null, "Rent · 10:00"))
-        assertEquals("Scheduled", supportingText("Scheduled", ""))
-    }
 }
