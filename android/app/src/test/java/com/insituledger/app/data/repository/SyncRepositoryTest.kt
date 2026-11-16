@@ -69,7 +69,7 @@ class SyncRepositoryTest {
 
     @Before
     fun setUp() {
-        coEvery { prefs.attributionBackfilledFlow } returns kotlinx.coroutines.flow.flowOf(true)
+        coEvery { prefs.fullSnapshotDoneFlow } returns kotlinx.coroutines.flow.flowOf(true)
         queue.clear()
         nextOpId = 1L
         // Route Room's withTransaction block straight through so remap*Id
@@ -883,7 +883,7 @@ class SyncRepositoryTest {
     }
     @Test
     fun fullBackfillCachesCreatorNamesAndCommitsCheckpoint() = runTest {
-        coEvery { prefs.attributionBackfilledFlow } returns kotlinx.coroutines.flow.flowOf(false)
+        coEvery { prefs.fullSnapshotDoneFlow } returns kotlinx.coroutines.flow.flowOf(false)
         coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(42L)
         val transaction = com.insituledger.app.data.remote.dto.TransactionDto(
             id = 1, accountId = 7, categoryId = 2, userId = 1, type = "expense",
@@ -912,7 +912,7 @@ class SyncRepositoryTest {
 
     @Test
     fun failedBackfillDoesNotCommitAndNextPullRetriesFullSnapshot() = runTest {
-        coEvery { prefs.attributionBackfilledFlow } returns kotlinx.coroutines.flow.flowOf(false)
+        coEvery { prefs.fullSnapshotDoneFlow } returns kotlinx.coroutines.flow.flowOf(false)
         coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(42L)
         coEvery { syncApi.sync(0L) } returns errorBody(503)
         assertTrue(newRepository().pull().isFailure)

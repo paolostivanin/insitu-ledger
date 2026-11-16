@@ -116,3 +116,31 @@ it('scheduled reference-data failure ends loading and can be retried', async () 
 	await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
 	expect(scheduled.list).toHaveBeenCalledTimes(2);
 });
+
+it('labels entries of a finished series with its frequency on the dashboard and transactions pages', async () => {
+	// A finished series is soft-deleted server-side; badge lookups ask for it.
+	const finished = { id: 22, rrule: 'FREQ=MONTHLY', max_occurrences: 3, deleted_at: '2026-11-13T13:50:41Z' } as any;
+	const entry = { id: 9, account_id: 1, date: '2026-11-13', type: 'expense', amount: 40, description: 'Casetta Keter', scheduled_id: 22, occurrence: 3, occurrence_total: 3 } as any;
+	vi.mocked(accounts.list).mockResolvedValue([{ id: 1, name: 'Wallet', currency: 'EUR', balance: 0 } as any]);
+	vi.mocked(categories.list).mockResolvedValue([]);
+	vi.mocked(transactions.list).mockResolvedValue([entry]);
+	vi.mocked(reports.byCategory).mockResolvedValue([]); vi.mocked(reports.byMonth).mockResolvedValue([]);
+	vi.mocked(scheduled.list).mockResolvedValue([finished]);
+	vi.mocked((await import('./api/client')).isAuthenticated).mockReturnValue(true);
+
+	for (const page of [DashboardPage, TransactionsPage]) {
+		render(page);
+		await waitFor(() => expect(screen.getByText('Monthly · 3/3')).toBeTruthy());
+		expect(screen.queryByText('Recurring · 3/3')).toBeNull();
+		cleanup();
+	}
+	for (const [params] of vi.mocked(scheduled.list).mock.calls) expect(params?.include_deleted).toBe('1');
+});
+
+it('the Scheduled page still lists only live schedules', async () => {
+	vi.mocked(scheduled.list).mockResolvedValue([]);
+	vi.mocked(accounts.list).mockResolvedValue([]); vi.mocked(categories.list).mockResolvedValue([]);
+	render(ScheduledPage);
+	await waitFor(() => expect(scheduled.list).toHaveBeenCalled());
+	for (const [params] of vi.mocked(scheduled.list).mock.calls) expect(params?.include_deleted).toBeUndefined();
+});

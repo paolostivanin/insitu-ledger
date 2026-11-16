@@ -2031,3 +2031,55 @@ func TestAutocompleteEscapesLikeWildcards(t *testing.T) {
 		t.Errorf("description = %v, want %q", results[0]["description"], "%discount")
 	}
 }
+
+// TestListScheduledIncludeDeleted: the default list hides soft-deleted
+// schedules; include_deleted=1 adds them with deleted_at so clients can label
+// the entries a finished series produced.
+func TestListScheduledIncludeDeleted(t *testing.T) {
+	s, cleanup := setupTestServer(t)
+	defer cleanup()
+	handler := NewRouter(s)
+	token := loginAdmin(t, handler)
+	acctID, catID := createTestAccountAndCategory(t, handler, token)
+
+	for _, rrule := range []string{"FREQ=MONTHLY", "FREQ=WEEKLY"} {
+		if w := postScheduled(t, handler, token, acctID, catID, rrule); w.Code != 201 {
+			t.Fatalf("POST %q: got %d", rrule, w.Code)
+		}
+	}
+	// Finish the weekly series the way the scheduler does.
+	if _, err := s.DB.Exec(`UPDATE scheduled_transactions SET active = 0, deleted_at = '2026-11-13 13:50:41' WHERE rrule = 'FREQ=WEEKLY'`); err != nil {
+		t.Fatalf("finish series: %v", err)
+	}
+
+	list := func(query string) map[string]any {
+		t.Helper()
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, authedRequest("GET", "/api/scheduled"+query, "", token))
+		if w.Code != 200 {
+			t.Fatalf("GET %s: got %d", query, w.Code)
+		}
+		var items []map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		byRule := map[string]any{}
+		for _, it := range items {
+			byRule[it["rrule"].(string)] = it["deleted_at"]
+		}
+		return byRule
+	}
+
+	if got := list(""); len(got) != 1 || got["FREQ=MONTHLY"] != nil {
+		t.Errorf("default list = %v, want only the active monthly schedule with deleted_at null", got)
+	}
+	for _, q := range []string{"?include_deleted=1", "?include_deleted=true"} {
+		got := list(q)
+		if len(got) != 2 || got["FREQ=MONTHLY"] != nil || got["FREQ=WEEKLY"] != "2026-11-13T13:50:41Z" {
+			t.Errorf("%s = %v, want both schedules, weekly with its deleted_at", q, got)
+		}
+	}
+	if got := list("?include_deleted=0"); len(got) != 1 {
+		t.Errorf("include_deleted=0 = %v, want the active list", got)
+	}
+}

@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.26.1"
+  version: "1.26.2"
 
 servers:
   - url: /api
@@ -387,6 +387,13 @@ components:
         updated_at:
           type: string
           format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            When the schedule was deleted or its series finished; null otherwise.
+            Only non-null with `include_deleted`.
         sync_version:
           type: integer
         created_by_user_id:
@@ -1232,6 +1239,15 @@ paths:
           in: query
           schema:
             type: integer
+        - name: include_deleted
+          in: query
+          description: >-
+            `1` or `true` also returns soft-deleted schedules (`deleted_at` set),
+            including finished series, so clients can label the entries they
+            produced. Omit for the active list.
+          schema:
+            type: string
+            enum: ["1", "true"]
       responses:
         "200":
           description: List of scheduled transactions

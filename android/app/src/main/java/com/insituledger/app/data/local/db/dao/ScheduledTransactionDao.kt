@@ -27,7 +27,15 @@ interface ScheduledTransactionDao {
     @Upsert
     suspend fun upsertAll(scheduled: List<ScheduledTransactionEntity>)
 
-    @Query("DELETE FROM scheduled_transactions WHERE deleted_at IS NOT NULL")
+    // Soft-deleted schedules that still label an entry stay: a finished series
+    // is soft-deleted by the scheduler, and its entries need the rrule for
+    // their badge ("Monthly · 3/3"). Run after transactionDao.purgeDeleted()
+    // so a schedule whose entries were all deleted goes in the same pull.
+    @Query("""
+        DELETE FROM scheduled_transactions
+        WHERE deleted_at IS NOT NULL
+          AND id NOT IN (SELECT scheduled_id FROM transactions WHERE scheduled_id IS NOT NULL)
+    """)
     suspend fun purgeDeleted()
 
     // SUBSTR(...,1,16) yields "YYYY-MM-DDTHH:MM" for any datetime shape

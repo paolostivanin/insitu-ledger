@@ -4,7 +4,7 @@
 
 A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, and Android app with offline-first local storage and optional sync.
 
-**Current release:** backend + frontend `v1.26.1` · Android `v1.38.0` · MIT licensed
+**Current release:** backend + frontend `v1.26.2` · Android `v1.38.1` · MIT licensed
 
 ## Contents
 
@@ -186,14 +186,14 @@ When the backend starts against an empty database, it creates a single admin use
 
 ### Docker
 
-Every release publishes a multi-arch image (amd64 + arm64) to GitHub Container Registry: `ghcr.io/paolostivanin/insitu-ledger`, tagged `1.26.1`, `1.26`, `1` and `latest`.
+Every release publishes a multi-arch image (amd64 + arm64) to GitHub Container Registry: `ghcr.io/paolostivanin/insitu-ledger`, tagged `1.26.2`, `1.26`, `1` and `latest`.
 
 ```bash
 docker compose up -d                     # pulls the image and starts the server on :8080
 docker compose pull && docker compose up -d   # upgrade
 ```
 
-Pin a release in `docker-compose.yml` (`ghcr.io/paolostivanin/insitu-ledger:1.26.1`) if you prefer to upgrade deliberately; to build from a checkout instead, replace `image:` with `build: .`. Data is persisted in a named Docker volume (`<project>_ledger_data`, unchanged from earlier releases); a bind mount (`./data:/data`) works too and is easier to back up.
+Pin a release in `docker-compose.yml` (`ghcr.io/paolostivanin/insitu-ledger:1.26.2`) if you prefer to upgrade deliberately; to build from a checkout instead, replace `image:` with `build: .`. Data is persisted in a named Docker volume (`<project>_ledger_data`, unchanged from earlier releases); a bind mount (`./data:/data`) works too and is easier to back up.
 
 The server never runs as root: the entrypoint starts it as the owner of `/data` (or `PUID`/`PGID`, default `1000`), fixing ownership on first start. The image has a health check on `/api/health` (it assumes the default port; keep `INSITU_ADDR=:8080` inside the container and remap with `ports:`). On SELinux hosts, add `:Z` to a bind mount.
 

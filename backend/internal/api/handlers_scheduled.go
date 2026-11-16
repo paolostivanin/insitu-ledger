@@ -36,16 +36,23 @@ func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// include_deleted=1 adds soft-deleted schedules (finished series are
+	// soft-deleted by the scheduler) so clients can label the entries they
+	// produced ("Monthly · 3/3"). Sync already returns these rows.
+	deletedFilter := "s.deleted_at IS NULL AND "
+	if v := r.URL.Query().Get("include_deleted"); v == "1" || v == "true" {
+		deletedFilter = ""
+	}
+
 	rows, err := s.DB.Query(
 		`SELECT s.id, s.account_id, s.category_id, s.user_id, s.type, s.amount, s.currency,
 		        s.description, s.note, s.rrule, s.next_occurrence, s.active,
 		        s.max_occurrences, s.occurrence_count,
-		        s.created_at, s.updated_at, s.sync_version,
+		        s.created_at, s.updated_at, s.deleted_at, s.sync_version,
 		        s.created_by_user_id, cu.name
 		 FROM scheduled_transactions s
 		 LEFT JOIN users cu ON s.created_by_user_id = cu.id
-		 WHERE s.deleted_at IS NULL
-		   AND s.account_id IN (`+sqlInPlaceholders(len(accIDs))+`) ORDER BY s.next_occurrence`,
+		 WHERE `+deletedFilter+`s.account_id IN (`+sqlInPlaceholders(len(accIDs))+`) ORDER BY s.next_occurrence`,
 		idsToArgs(accIDs)...,
 	)
 	if err != nil {
@@ -60,12 +67,12 @@ func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 		var active int
 		var typ, currency, rrule, nextOcc, createdAt, updatedAt string
 		var amount float64
-		var description, note, createdByName *string
+		var description, note, deletedAt, createdByName *string
 		var maxOccurrences, createdByUserID *int64
 
 		if err := rows.Scan(&id, &accountID, &categoryID, &uid, &typ, &amount, &currency,
 			&description, &note, &rrule, &nextOcc, &active, &maxOccurrences, &occurrenceCount,
-			&createdAt, &updatedAt, &syncVersion, &createdByUserID, &createdByName); err != nil {
+			&createdAt, &updatedAt, &deletedAt, &syncVersion, &createdByUserID, &createdByName); err != nil {
 			http.Error(w, "scan error", http.StatusInternalServerError)
 			return
 		}
@@ -74,7 +81,7 @@ func (s *Server) handleListScheduled(w http.ResponseWriter, r *http.Request) {
 			"user_id": uid, "type": typ, "amount": amount, "currency": currency,
 			"description": description, "note": note, "rrule": rrule, "next_occurrence": nextOcc,
 			"active": active == 1, "max_occurrences": maxOccurrences, "occurrence_count": occurrenceCount,
-			"created_at": createdAt, "updated_at": updatedAt,
+			"created_at": createdAt, "updated_at": updatedAt, "deleted_at": deletedAt,
 			"sync_version":       syncVersion,
 			"created_by_user_id": createdByUserID,
 			"created_by_name":    createdByName,

@@ -155,6 +155,20 @@ func TestProcessDueCatchUpRespectsMaxOccurrences(t *testing.T) {
 	if st.count != 2 || st.active != 0 || !st.deletedAt.Valid {
 		t.Errorf("state = %+v, want count 2, inactive, deleted_at set", st)
 	}
+	// Stored in the same shape as datetime('now'): UTC "YYYY-MM-DD HH:MM:SS",
+	// not Go's time.Time.String() ("… +0100 CET m=+…"). CAST reads the raw
+	// text; the driver would reformat the DATETIME column.
+	var raw string
+	if err := db.QueryRow(`SELECT CAST(deleted_at AS TEXT) FROM scheduled_transactions WHERE id = ?`, id).Scan(&raw); err != nil {
+		t.Fatalf("raw deleted_at: %v", err)
+	}
+	at, err := time.Parse(time.DateTime, raw)
+	if err != nil {
+		t.Fatalf("deleted_at %q is not UTC YYYY-MM-DD HH:MM:SS: %v", raw, err)
+	}
+	if d := time.Since(at); d < -time.Minute || d > time.Minute {
+		t.Errorf("deleted_at %q is %v from now, want UTC within a minute", raw, d)
+	}
 }
 
 // TestProcessDueCatchUpRespectsUntil: catch-up stops once the next occurrence

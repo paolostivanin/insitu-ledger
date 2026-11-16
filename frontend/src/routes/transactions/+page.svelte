@@ -189,7 +189,9 @@
 		const seq = ++scheduleSeq;
 		scheduleById = new Map();
 		try {
-			const list = await scheduled.list({ owner_id: $sharedOwnerUserId || undefined });
+			// Finished series are soft-deleted; include them so their entries
+			// still read "Monthly · 3/3" rather than "Recurring · 3/3".
+			const list = await scheduled.list({ owner_id: $sharedOwnerUserId || undefined, include_deleted: '1' });
 			if (seq === scheduleSeq) scheduleById = indexSchedules(list);
 		} catch { /* keep the fallback label */ }
 	}
