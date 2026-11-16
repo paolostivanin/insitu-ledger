@@ -142,6 +142,11 @@ func Open(dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("recurring entry marker migration: %w", err)
 	}
 
+	if err := normalizeScheduledDeletedAt(conn); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("scheduled deleted_at migration: %w", err)
+	}
+
 	// These triggers depend on attribution columns added by the migrations.
 	// Joined metadata must participate in incremental sync just like row data.
 	if err := InstallMetadataSyncTriggers(conn); err != nil {
@@ -336,6 +341,63 @@ func bumpSharedAccountsForAttribution(conn *sql.DB) error {
 		return fmt.Errorf("set user_version: %w", err)
 	}
 	return nil
+}
+
+// normalizeScheduledDeletedAt rewrites deleted_at values the scheduler stored
+// in Go's time.Time.String() form ("2026-11-13 14:50:41.89 +0100 CET
+// m=+3733.01", written before v1.26.2) as UTC "YYYY-MM-DD HH:MM:SS", the
+// shape datetime('now') produces everywhere else. The update trigger bumps
+// sync_version, so clients re-pull those finished schedules. Idempotent:
+// rewritten values no longer match. Unparseable values are left untouched.
+func normalizeScheduledDeletedAt(conn *sql.DB) error {
+	// CAST: the driver parses DATETIME columns on read (and would hand back
+	// RFC3339); the raw stored text is what needs rewriting.
+	rows, err := conn.Query(`SELECT id, CAST(deleted_at AS TEXT) FROM scheduled_transactions
+		WHERE deleted_at IS NOT NULL AND LENGTH(deleted_at) > 19 AND deleted_at LIKE '____-__-__ __:__:__%'`)
+	if err != nil {
+		return err
+	}
+	type fix struct {
+		id    int64
+		value string
+	}
+	var fixes []fix
+	for rows.Next() {
+		var id int64
+		var raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		v := raw
+		if i := strings.Index(v, " m="); i >= 0 {
+			v = v[:i] // monotonic clock reading
+		}
+		t, err := time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", v)
+		if err != nil {
+			continue
+		}
+		fixes = append(fixes, fix{id, t.UTC().Format(time.DateTime)})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(fixes) == 0 {
+		return nil
+	}
+
+	tx, err := conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, f := range fixes {
+		if _, err := tx.Exec(`UPDATE scheduled_transactions SET deleted_at = ? WHERE id = ?`, f.value, f.id); err != nil {
+			return fmt.Errorf("normalize scheduled %d: %w", f.id, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // seedDefaultAdmin creates the default admin user with a randomly generated

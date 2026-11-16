@@ -252,10 +252,10 @@ func TestRecurringMarkerNumbersHistory(t *testing.T) {
 		2: {n(4), n(5)}, // soft-deleted entries count too
 		3: {n(5), n(5)},
 		4: {n(2), sql.NullInt64{}}, // open-ended: position, no total
-		5: {n(1), n(3)},           // older than the new entry at position 2
-		6: {n(2), n(3)},           // already numbered by the scheduler: untouched
-		7: {},                     // would be 0: left NULL
-		8: {},                     // ordinary entry
+		5: {n(1), n(3)},            // older than the new entry at position 2
+		6: {n(2), n(3)},            // already numbered by the scheduler: untouched
+		7: {},                      // would be 0: left NULL
+		8: {},                      // ordinary entry
 	}
 	check := func(c *sql.DB, phase string) {
 		t.Helper()
@@ -282,5 +282,69 @@ func TestRecurringMarkerNumbersHistory(t *testing.T) {
 	check(again, "third open")
 	if v := syncVersion(t, again); v != version {
 		t.Errorf("numbering is not idempotent: sync_meta %d -> %d", version, v)
+	}
+}
+
+// TestNormalizeScheduledDeletedAt: deleted_at values the scheduler stored in
+// Go's time.Time.String() form become UTC "YYYY-MM-DD HH:MM:SS"; standard
+// values, NULLs and unparseable text are left alone, and a re-open is a no-op.
+func TestNormalizeScheduledDeletedAt(t *testing.T) {
+	dir := t.TempDir()
+	conn, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := conn.Exec(`
+		INSERT INTO users (id, username, email, name, password_hash) VALUES (5, 'owner', 'o@x', 'Owner', 'h');
+		INSERT INTO accounts (id, user_id, name) VALUES (1, 5, 'Wallet');
+		INSERT INTO categories (id, user_id, name, type) VALUES (1, 5, 'Gadgets', 'expense');
+		INSERT INTO scheduled_transactions (id, account_id, category_id, user_id, type, amount, rrule, next_occurrence, active, deleted_at) VALUES
+		    (1, 1, 1, 5, 'expense', 1, 'FREQ=MONTHLY', '2026-12-13', 0, '2026-11-13 14:50:41.891332017 +0100 CET m=+3733860.011538766'),
+		    (2, 1, 1, 5, 'expense', 1, 'FREQ=MONTHLY', '2026-10-01', 0, '2026-09-01 09:30:05.242051313 +0200 CEST m=+3453240.027580910'),
+		    (3, 1, 1, 5, 'expense', 1, 'FREQ=MONTHLY', '2026-10-01', 0, '2026-09-01 07:30:05'),
+		    (4, 1, 1, 5, 'expense', 1, 'FREQ=MONTHLY', '2026-10-01', 1, NULL),
+		    (5, 1, 1, 5, 'expense', 1, 'FREQ=MONTHLY', '2026-10-01', 0, '2026-09-01 07:30:05 garbage');
+	`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	conn.Close()
+
+	want := map[int64]sql.NullString{
+		1: {String: "2026-11-13 13:50:41", Valid: true}, // CET is UTC+1
+		2: {String: "2026-09-01 07:30:05", Valid: true}, // CEST is UTC+2
+		3: {String: "2026-09-01 07:30:05", Valid: true},
+		4: {},
+		5: {String: "2026-09-01 07:30:05 garbage", Valid: true},
+	}
+	check := func(c *sql.DB, phase string) {
+		t.Helper()
+		for id, w := range want {
+			var got sql.NullString
+			// Raw stored text (the driver reformats DATETIME columns on read).
+			if err := c.QueryRow(`SELECT CAST(deleted_at AS TEXT) FROM scheduled_transactions WHERE id = ?`, id).Scan(&got); err != nil {
+				t.Fatalf("%s: read %d: %v", phase, id, err)
+			}
+			if got != w {
+				t.Errorf("%s: schedule %d deleted_at = %+v, want %+v", phase, id, got, w)
+			}
+		}
+	}
+
+	conn, err = Open(dir)
+	if err != nil {
+		t.Fatalf("re-open: %v", err)
+	}
+	check(conn, "after normalize")
+	version := syncVersion(t, conn)
+	conn.Close()
+
+	again, err := Open(dir)
+	if err != nil {
+		t.Fatalf("third open: %v", err)
+	}
+	defer again.Close()
+	check(again, "third open")
+	if v := syncVersion(t, again); v != version {
+		t.Errorf("normalize is not idempotent: sync_meta %d -> %d", version, v)
 	}
 }

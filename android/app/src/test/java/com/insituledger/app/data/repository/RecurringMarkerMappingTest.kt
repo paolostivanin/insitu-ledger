@@ -53,7 +53,7 @@ class RecurringMarkerMappingTest {
         mockkStatic("androidx.room.RoomDatabaseKt")
         val block = slot<suspend () -> Any?>()
         coEvery { database.withTransaction(capture(block)) } coAnswers { block.captured.invoke() }
-        every { prefs.attributionBackfilledFlow } returns flowOf(true)
+        every { prefs.fullSnapshotDoneFlow } returns flowOf(true)
         every { prefs.lastSyncVersionFlow } returns flowOf(5L)
         every { prefs.userIdFlow } returns flowOf(1L)
         every { prefs.userNameFlow } returns flowOf("Me")

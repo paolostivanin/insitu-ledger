@@ -30,7 +30,11 @@ class UserPreferences @Inject constructor(
         val IS_ADMIN = booleanPreferencesKey("is_admin")
         val FORCE_PASSWORD_CHANGE = booleanPreferencesKey("force_password_change")
         val TOTP_ENABLED = booleanPreferencesKey("totp_enabled")
-        val ATTRIBUTION_BACKFILLED = booleanPreferencesKey("attribution_backfilled")
+        // Set once a full sync snapshot (since = 0) has been applied. The key
+        // is versioned: bumping it makes every install re-pull everything once
+        // to repair rows an incremental pull won't resend (v1 restored creator
+        // names; v2 restores finished schedules older versions purged).
+        val FULL_SNAPSHOT_DONE = booleanPreferencesKey("full_snapshot_v2")
         val LAST_SYNC_VERSION = longPreferencesKey("last_sync_version")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
@@ -75,7 +79,7 @@ class UserPreferences @Inject constructor(
     val isAdminFlow: Flow<Boolean> = context.dataStore.data.map { it[IS_ADMIN] ?: false }
     val forcePasswordChangeFlow: Flow<Boolean> = context.dataStore.data.map { it[FORCE_PASSWORD_CHANGE] ?: false }
     val totpEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[TOTP_ENABLED] ?: false }
-    val attributionBackfilledFlow: Flow<Boolean> = context.dataStore.data.map { it[ATTRIBUTION_BACKFILLED] ?: false }
+    val fullSnapshotDoneFlow: Flow<Boolean> = context.dataStore.data.map { it[FULL_SNAPSHOT_DONE] ?: false }
     val lastSyncVersionFlow: Flow<Long> = context.dataStore.data.map { it[LAST_SYNC_VERSION] ?: 0L }
     val themeModeFlow: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "system" }
     val biometricEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[BIOMETRIC_ENABLED] ?: false }
@@ -125,10 +129,10 @@ class UserPreferences @Inject constructor(
         context.dataStore.edit { it[LAST_SYNC_VERSION] = version }
     }
 
-    suspend fun saveSyncCheckpoint(version: Long, attributionBackfilled: Boolean) {
+    suspend fun saveSyncCheckpoint(version: Long, fullSnapshot: Boolean) {
         context.dataStore.edit {
             it[LAST_SYNC_VERSION] = version
-            if (attributionBackfilled) it[ATTRIBUTION_BACKFILLED] = true
+            if (fullSnapshot) it[FULL_SNAPSHOT_DONE] = true
         }
     }
 
@@ -334,7 +338,7 @@ class UserPreferences @Inject constructor(
             prefs.remove(FORCE_PASSWORD_CHANGE)
             prefs.remove(TOTP_ENABLED)
             prefs.remove(LAST_SYNC_VERSION)
-            prefs.remove(ATTRIBUTION_BACKFILLED)
+            prefs.remove(FULL_SNAPSHOT_DONE)
             prefs.remove(SHARED_OWNER_ID)
             prefs[AUTH_NOTICE] = message
             prefs[AUTO_LOGOUT_PENDING] = notifyLogout

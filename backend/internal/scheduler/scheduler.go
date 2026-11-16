@@ -204,9 +204,12 @@ func processOne(db *sql.DB, s scheduled, now time.Time, home *time.Location) (st
 		active = 0
 	}
 
-	deletedAt := sql.NullTime{}
+	// Same shape as datetime('now') (UTC "YYYY-MM-DD HH:MM:SS"), which the
+	// DELETE handler writes. Passing a time.Time stored Go's String() form
+	// ("… +0100 CET m=+…") instead.
+	deletedAt := sql.NullString{}
 	if deactivate {
-		deletedAt = sql.NullTime{Time: now, Valid: true}
+		deletedAt = sql.NullString{String: now.UTC().Format(time.DateTime), Valid: true}
 	}
 
 	if _, err := tx.Exec(
@@ -224,7 +227,11 @@ func processOne(db *sql.DB, s scheduled, now time.Time, home *time.Location) (st
 	if deactivate {
 		log.Printf("scheduler: materialized scheduled %d, deactivated after %d occurrences", s.id, newCount)
 	} else {
-		log.Printf("scheduler: materialized scheduled %d, next: %s (%d/%v)", s.id, next, newCount, s.maxOccurrences)
+		total := "∞"
+		if s.maxOccurrences != nil {
+			total = fmt.Sprint(*s.maxOccurrences)
+		}
+		log.Printf("scheduler: materialized scheduled %d, next: %s (%d/%s)", s.id, next, newCount, total)
 	}
 	return next, nil
 }

@@ -302,6 +302,8 @@ export interface ScheduledTransaction {
 	occurrence_count: number;
 	created_at: string;
 	updated_at: string;
+	// Set on finished or deleted schedules (only listed with include_deleted).
+	deleted_at?: string | null;
 	sync_version: number;
 	created_by_user_id: number | null;
 	created_by_name: string | null;
@@ -324,8 +326,9 @@ export interface ScheduledInput {
 
 export const scheduled = {
 	// owner_id is an optional list filter (since v1.15.0); mutations derive
-	// auth from the path or the authenticated user.
-	list: (params?: { owner_id?: string; account_id?: string }) =>
+	// auth from the path or the authenticated user. include_deleted '1' adds
+	// finished and deleted schedules (badge lookups, not the Scheduled page).
+	list: (params?: { owner_id?: string; account_id?: string; include_deleted?: '1' }) =>
 		request<ScheduledTransaction[]>('/scheduled', { params }),
 	create: (data: ScheduledInput) =>
 		request<{ id: number }>('/scheduled', { method: 'POST', body: data }),

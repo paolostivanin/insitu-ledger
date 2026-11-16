@@ -457,7 +457,7 @@ class SyncRepository @Inject constructor(
     }
 
     suspend fun pull(allowBackfill: Boolean = true): Result<Unit> = try {
-        val backfill = allowBackfill && !prefs.attributionBackfilledFlow.first()
+        val backfill = allowBackfill && !prefs.fullSnapshotDoneFlow.first()
         val data = fetchSyncData(backfill)
         database.withTransaction {
             // Purge access-lost accounts before generic tombstone cleanup. The
@@ -512,8 +512,10 @@ class SyncRepository @Inject constructor(
 
     private suspend fun fetchSyncData(backfill: Boolean = false): SyncResponse {
         val lastVersion = prefs.lastSyncVersionFlow.first()
-        // Existing installations cached creator IDs but discarded names. A full
-        // snapshot repairs them once; a failed pull leaves the flag unset.
+        // A full snapshot, once per install (see UserPreferences.FULL_SNAPSHOT_DONE),
+        // repairs rows an incremental pull won't resend: creator names older
+        // versions discarded and finished schedules they purged. A failed pull
+        // leaves the flag unset.
         val since = if (backfill) 0L else lastVersion
         val response = syncApi.sync(since)
         if (!response.isSuccessful) {
