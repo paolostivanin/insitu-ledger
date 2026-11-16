@@ -4,7 +4,7 @@
 
 A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, and Android app with offline-first local storage and optional sync.
 
-**Current release:** backend + frontend `v1.26.0` · Android `v1.38.0` · MIT licensed
+**Current release:** backend + frontend `v1.26.1` · Android `v1.38.0` · MIT licensed
 
 ## Contents
 
@@ -36,7 +36,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 - **Autocomplete** — typing a description suggests previously used entries and prefills the category, and the amount for recurring ones
 - **Accounts** — multiple accounts with independent balances and currencies (default EUR)
 - **Categories** — hierarchical categories (parent/child, icons, colors) for income and expense
-- **Scheduled transactions** — recurring entries with date and time on any interval (every N days, weeks, months, or years — from the six presets to a custom bimonthly rule), ending never, after N times, or on a date. Materialized by the backend scheduler (checks every minute) and by the Android WorkManager job (every 15 minutes); a schedule that is behind (e.g. one started in the past) catches up on all missed entries in a single run. Future-dated transactions are automatically converted to one-time scheduled entries. Entries a schedule adds are marked in the web and Android lists with a ↻ and their place in the series ("Monthly · 2 of 3", "Weekly", "Scheduled")
+- **Scheduled transactions** — recurring entries with date and time on any interval (every N days, weeks, months, or years — from the six presets to a custom bimonthly rule), ending never, after N times, or on a date. Materialized by the backend scheduler (checks every minute) and by the Android WorkManager job (every 15 minutes); a schedule that is behind (e.g. one started in the past) catches up on all missed entries in a single run. Future-dated transactions are automatically converted to one-time scheduled entries. Entries a schedule adds carry a small badge in the web and Android lists with their frequency and place in the series ("↻ Monthly · 2/3", "↻ Weekly · ∞" for open-ended, "🕑 Once" for one-time); entries added before the position was stored are numbered retroactively by the server
 - **Inline scheduling (Android)** — schedule straight from the add-transaction screen: the calendar-clock button next to the date opens a sheet for a one-time entry at a future date or a recurring series. Start a series in the past to back-fill a forgotten expense ("paid rent last Friday, repeat monthly") — the missed entries are created right away. Existing transactions are never converted into schedules
 - **Reports** — spending by category or rolled up into parent categories, over a period (this week/month/year, last month/year, or a custom range), plus by-month and trend analysis (ECharts)
 - **Search summary** — total any description search into money in, money out and the net, one row per currency. Tag a trip or project in the description ("Valencia") and see what you spent, what people paid back, and where it landed
@@ -186,14 +186,14 @@ When the backend starts against an empty database, it creates a single admin use
 
 ### Docker
 
-Every release publishes a multi-arch image (amd64 + arm64) to GitHub Container Registry: `ghcr.io/paolostivanin/insitu-ledger`, tagged `1.26.0`, `1.26`, `1` and `latest`.
+Every release publishes a multi-arch image (amd64 + arm64) to GitHub Container Registry: `ghcr.io/paolostivanin/insitu-ledger`, tagged `1.26.1`, `1.26`, `1` and `latest`.
 
 ```bash
 docker compose up -d                     # pulls the image and starts the server on :8080
 docker compose pull && docker compose up -d   # upgrade
 ```
 
-Pin a release in `docker-compose.yml` (`ghcr.io/paolostivanin/insitu-ledger:1.26.0`) if you prefer to upgrade deliberately; to build from a checkout instead, replace `image:` with `build: .`. Data is persisted in a named Docker volume (`<project>_ledger_data`, unchanged from earlier releases); a bind mount (`./data:/data`) works too and is easier to back up.
+Pin a release in `docker-compose.yml` (`ghcr.io/paolostivanin/insitu-ledger:1.26.1`) if you prefer to upgrade deliberately; to build from a checkout instead, replace `image:` with `build: .`. Data is persisted in a named Docker volume (`<project>_ledger_data`, unchanged from earlier releases); a bind mount (`./data:/data`) works too and is easier to back up.
 
 The server never runs as root: the entrypoint starts it as the owner of `/data` (or `PUID`/`PGID`, default `1000`), fixing ownership on first start. The image has a health check on `/api/health` (it assumes the default port; keep `INSITU_ADDR=:8080` inside the container and remap with `ports:`). On SELinux hosts, add `:Z` to a bind mount.
 
