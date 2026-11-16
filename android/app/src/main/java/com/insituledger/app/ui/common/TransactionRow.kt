@@ -1,5 +1,9 @@
 package com.insituledger.app.ui.common
 
+import androidx.compose.material3.Surface
+
+import androidx.compose.material.icons.outlined.Schedule
+
 import androidx.compose.ui.semantics.contentDescription
 
 import com.insituledger.app.ui.theme.LocalSemanticColors
@@ -74,12 +78,11 @@ data class TransactionRowModel(
      */
     val showAvatar: Boolean = categoryIcon != null || categoryName != null,
     /**
-     * Position in the schedule that auto-added the entry ("Monthly · 2 of 3",
-     * see [seriesLabel]); drawn ahead of [supporting]. Null for ordinary entries.
+     * The schedule badge ("Monthly · 2/3", "Weekly · ∞", "Once", see
+     * [seriesBadge]) shown as a tonal pill under the supporting line. Null for
+     * ordinary entries.
      */
-    val seriesLabel: String? = null,
-    /** Show the repeat glyph after the title: the entry came from a schedule. */
-    val recurring: Boolean = seriesLabel != null
+    val series: SeriesBadge? = null
 )
 
 /** The emoji a category is drawn with: its own icon, else its parent's. */
@@ -169,30 +172,7 @@ fun TransactionRow(
                     }
                     // The series gets its own line in the accent colour, so
                     // "Monthly · 2 of 3" never blends into the category line.
-                    if (model.recurring) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(top = 2.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Repeat,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(Modifier.size(AppSpacing.xs))
-                            Text(
-                                text = model.seriesLabel ?: "Recurring",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.semantics {
-                                    contentDescription = "Recurring, ${model.seriesLabel ?: ""}".trimEnd(',', ' ')
-                                }
-                            )
-                        }
-                    }
+                    model.series?.let { SeriesPill(it, Modifier.padding(top = AppSpacing.xs)) }
                     if (model.attribution != null) {
                         Text(
                             text = model.attribution,
@@ -351,5 +331,38 @@ fun DirectionAvatar(type: String, modifier: Modifier = Modifier, size: Dp = 40.d
             tint = if (income) semantic.onPositiveContainer else semantic.onNegativeContainer,
             modifier = Modifier.size(size * 0.5f)
         )
+    }
+}
+
+/**
+ * Tonal pill marking an entry a schedule added: repeat icon + "Monthly · 2/3"
+ * (or "Weekly · ∞"), clock icon + "Once" for one-time schedules. A single
+ * TalkBack phrase ("Recurring monthly, 2 of 3").
+ */
+@Composable
+fun SeriesPill(badge: SeriesBadge, modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = MaterialTheme.shapes.small,
+        modifier = modifier.clearAndSetSemantics { contentDescription = badge.spoken }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = 2.dp)
+        ) {
+            Icon(
+                if (badge.oneTime) Icons.Outlined.Schedule else Icons.Default.Repeat,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(Modifier.size(AppSpacing.xs))
+            Text(
+                text = badge.text,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }

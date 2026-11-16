@@ -3,7 +3,9 @@ package com.insituledger.app.ui.common
 import com.insituledger.app.domain.model.ScheduledTransaction
 import com.insituledger.app.domain.model.Transaction
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SeriesLabelTest {
@@ -18,60 +20,62 @@ class SeriesLabelTest {
         nextOccurrence = "2026-12-01", active = true, maxOccurrences = max
     )
 
-    @Test fun `ordinary entries have no label`() {
-        assertNull(seriesLabel(plain, schedule()))
-        assertNull(seriesLabel(plain, null))
-        assertNull(seriesLabel(plain, mapOf(7L to schedule())))
+    private fun text(tx: Transaction, s: ScheduledTransaction?) = seriesBadge(tx, s)?.text
+
+    @Test fun `ordinary entries have no badge`() {
+        assertNull(seriesBadge(plain, schedule()))
+        assertNull(seriesBadge(plain, null))
+        assertNull(seriesBadge(plain, mapOf(7L to schedule())))
     }
 
-    @Test fun `bounded series shows frequency and position`() {
-        assertEquals("Monthly · 2 of 3", seriesLabel(entry(occurrence = 2, total = 3), schedule(max = 3)))
-        assertEquals("Every 2 months · 1 of 6", seriesLabel(entry(occurrence = 1, total = 6), schedule("FREQ=MONTHLY;INTERVAL=2", 6)))
+    @Test fun `bounded series shows frequency and a compact counter`() {
+        val badge = seriesBadge(entry(occurrence = 2, total = 3), schedule(max = 3))!!
+        assertEquals("Monthly · 2/3", badge.text)
+        assertEquals("Recurring monthly, 2 of 3", badge.spoken)
+        assertFalse(badge.oneTime)
+        assertEquals("Every 2 months · 1/6", text(entry(occurrence = 1, total = 6), schedule("FREQ=MONTHLY;INTERVAL=2", 6)))
     }
 
-    @Test fun `open-ended series shows only the frequency`() {
-        assertEquals("Monthly", seriesLabel(entry(occurrence = 5), schedule()))
-        assertEquals("Biweekly", seriesLabel(entry(occurrence = 2), schedule("FREQ=WEEKLY;INTERVAL=2")))
-        // The position is stored, but the series has no length to count against.
-        assertEquals("Weekly", seriesLabel(entry(occurrence = 9, total = null), schedule("FREQ=WEEKLY", max = 12)))
+    @Test fun `open-ended series shows the infinity mark`() {
+        val badge = seriesBadge(entry(occurrence = 5), schedule())!!
+        assertEquals("Monthly · ∞", badge.text)
+        assertEquals("Recurring monthly, no end date", badge.spoken)
+        assertEquals("Biweekly · ∞", text(entry(occurrence = 2), schedule("FREQ=WEEKLY;INTERVAL=2")))
     }
 
-    @Test fun `one-time schedules read Scheduled`() {
-        // By the stored series length...
-        assertEquals("Scheduled", seriesLabel(entry(occurrence = 1, total = 1), schedule("FREQ=DAILY", 1)))
-        assertEquals("Scheduled", seriesLabel(entry(occurrence = 1, total = 1), schedule("FREQ=MONTHLY", 1)))
-        assertEquals("Scheduled", seriesLabel(entry(occurrence = 1, total = 1), null))
-        // ...or by the schedule's shape (FREQ=DAILY, interval 1, max 1) for backfilled history.
-        assertEquals("Scheduled", seriesLabel(entry(), schedule("FREQ=DAILY", 1)))
+    @Test fun `backfilled history uses the schedule to tell open-ended from bounded`() {
+        // No stored position: open-ended schedule → ∞, bounded schedule → frequency only.
+        assertEquals("Monthly · ∞", text(entry(), schedule()))
+        assertEquals("Monthly", text(entry(), schedule(max = 12)))
     }
 
-    @Test fun `a backfilled entry from a capped non-daily schedule keeps its frequency`() {
-        assertEquals("Monthly", seriesLabel(entry(), schedule("FREQ=MONTHLY", 1)))
-        // Daily but not every day, or not capped at one: a real series.
-        assertEquals("Every 2 days", seriesLabel(entry(), schedule("FREQ=DAILY;INTERVAL=2", 1)))
-        assertEquals("Daily", seriesLabel(entry(), schedule("FREQ=DAILY", 2)))
+    @Test fun `one-time schedules read Once with the clock icon`() {
+        val byLength = seriesBadge(entry(occurrence = 1, total = 1), null)!!
+        assertEquals("Once", byLength.text)
+        assertTrue(byLength.oneTime)
+        assertEquals("Scheduled once", byLength.spoken)
+        // By the schedule's rule: daily, interval 1, capped at 1.
+        assertEquals("Once", text(entry(), schedule("FREQ=DAILY", max = 1)))
+        // A capped daily series of more than one, or a monthly cap of 1 by rrule alone, is not one-time.
+        assertEquals("Daily", text(entry(), schedule("FREQ=DAILY", max = 3)))
+        assertEquals("Monthly", text(entry(), schedule("FREQ=MONTHLY", max = 1)))
     }
 
-    @Test fun `a missing schedule only replaces the frequency word`() {
-        assertEquals("Recurring · 2 of 3", seriesLabel(entry(occurrence = 2, total = 3), null))
-        assertEquals("Recurring", seriesLabel(entry(occurrence = 4), null))
-        assertEquals("Recurring", seriesLabel(entry(), null))
-        // Same while schedules are still loading (empty lookup) or the id isn't in it.
-        assertEquals("Recurring", seriesLabel(entry(), emptyMap()))
-        assertEquals("Recurring · 1 of 2", seriesLabel(entry(occurrence = 1, total = 2), mapOf(8L to schedule(id = 8))))
+    @Test fun `unknown schedule falls back to Recurring and keeps the counter`() {
+        assertEquals("Recurring · 2/3", text(entry(occurrence = 2, total = 3), null))
+        assertEquals("Recurring, 2 of 3", seriesBadge(entry(occurrence = 2, total = 3), null)!!.spoken)
+        assertEquals("Recurring · ∞", text(entry(occurrence = 4), null))
+        assertEquals("Recurring", text(entry(), null))
     }
 
-    @Test fun `a position past the series length shows only the frequency`() {
-        // max_occurrences was lowered mid-series: never "4 of 2".
-        assertEquals("Monthly", seriesLabel(entry(occurrence = 4, total = 2), schedule(max = 2)))
-        assertEquals("Recurring", seriesLabel(entry(occurrence = 4, total = 2), null))
-        // The last entry of a series is still counted.
-        assertEquals("Monthly · 2 of 2", seriesLabel(entry(occurrence = 2, total = 2), schedule(max = 2)))
+    @Test fun `position past a lowered length shows only the frequency`() {
+        assertEquals("Monthly", text(entry(occurrence = 4, total = 2), schedule(max = 2)))
+        assertEquals("Recurring", text(entry(occurrence = 4, total = 2), null))
     }
 
     @Test fun `the lookup overload resolves the schedule by id`() {
         val schedules = mapOf(7L to schedule("FREQ=YEARLY", 3), 8L to schedule("FREQ=WEEKLY", id = 8))
-        assertEquals("Yearly · 3 of 3", seriesLabel(entry(occurrence = 3, total = 3), schedules))
-        assertEquals("Weekly", seriesLabel(entry(scheduledId = 8, occurrence = 1), schedules))
+        assertEquals("Yearly · 3/3", seriesBadge(entry(occurrence = 3, total = 3), schedules)?.text)
+        assertEquals("Weekly · ∞", seriesBadge(entry(scheduledId = 8, occurrence = 1), schedules)?.text)
     }
 }

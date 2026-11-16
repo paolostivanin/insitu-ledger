@@ -100,7 +100,7 @@ import com.insituledger.app.ui.common.categoryColor
 import com.insituledger.app.ui.common.categoryEmoji
 import com.insituledger.app.ui.common.currencySymbolFor
 import com.insituledger.app.ui.common.entryAttribution
-import com.insituledger.app.ui.common.seriesLabel
+import com.insituledger.app.ui.common.seriesBadge
 import com.insituledger.app.ui.common.label
 import com.insituledger.app.ui.common.primaryCurrency
 import com.insituledger.app.ui.common.rangeLabel
@@ -625,7 +625,7 @@ private fun buildRows(
             // Always lead with the avatar here, so rows stay aligned even if a
             // category is briefly missing while data loads.
             showAvatar = true,
-            seriesLabel = seriesLabel(txn, schedules)
+            series = seriesBadge(txn, schedules)
         )
     }
 }

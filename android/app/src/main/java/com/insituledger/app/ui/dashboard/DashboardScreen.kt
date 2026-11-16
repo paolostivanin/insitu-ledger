@@ -67,7 +67,7 @@ import com.insituledger.app.ui.common.categoryEmoji
 import com.insituledger.app.ui.common.currencySymbolFor
 import com.insituledger.app.ui.common.entryAttribution
 import com.insituledger.app.ui.common.primaryCurrency
-import com.insituledger.app.ui.common.seriesLabel
+import com.insituledger.app.ui.common.seriesBadge
 import com.insituledger.app.ui.theme.AppSpacing
 import com.insituledger.app.ui.theme.LocalSemanticColors
 import com.insituledger.app.ui.theme.amountLarge
@@ -547,7 +547,7 @@ private fun buildRecentRows(
 			amount = txn.amount,
 			type = txn.type,
 			symbol = currencySymbolFor(txn.currency, preferredSymbol, primary),
-			seriesLabel = seriesLabel(txn, schedules)
+			series = seriesBadge(txn, schedules)
 		)
 	}
 }
