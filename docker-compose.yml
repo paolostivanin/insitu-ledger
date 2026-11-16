@@ -8,6 +8,8 @@ services:
     environment:
       - INSITU_DATA_DIR=/data
       - INSITU_ADDR=:8080
+      # Home time zone: recurring schedules in this zone keep their local time across DST.
+      # - INSITU_TIMEZONE=Europe/Rome
     restart: unless-stopped
 
 volumes:

@@ -15,112 +15,56 @@ val InterFontFamily = FontFamily(
 	Font(R.font.inter_bold, FontWeight.Bold)
 )
 
-val AppTypography = Typography(
-	displayLarge = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.Bold,
-		fontSize = 40.sp,
-		lineHeight = 48.sp,
-		letterSpacing = (-0.75).sp
-	),
-	displayMedium = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.Bold,
-		fontSize = 32.sp,
-		lineHeight = 40.sp,
-		letterSpacing = (-0.5).sp
-	),
-	displaySmall = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.SemiBold,
-		fontSize = 28.sp,
-		lineHeight = 36.sp,
-		letterSpacing = (-0.25).sp
-	),
-	headlineLarge = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.Bold,
-		fontSize = 26.sp,
-		lineHeight = 34.sp,
-		letterSpacing = (-0.25).sp
-	),
-	headlineMedium = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.SemiBold,
-		fontSize = 22.sp,
-		lineHeight = 30.sp
-	),
-	headlineSmall = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.SemiBold,
-		fontSize = 18.sp,
-		lineHeight = 26.sp
-	),
-	titleLarge = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.SemiBold,
-		fontSize = 20.sp,
-		lineHeight = 28.sp
-	),
-	titleMedium = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.SemiBold,
-		fontSize = 16.sp,
-		lineHeight = 24.sp,
-		letterSpacing = 0.1.sp
-	),
-	titleSmall = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.Medium,
-		fontSize = 14.sp,
-		lineHeight = 20.sp,
-		letterSpacing = 0.1.sp
-	),
-	bodyLarge = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.Normal,
-		fontSize = 16.sp,
-		lineHeight = 24.sp,
-		letterSpacing = 0.15.sp
-	),
-	bodyMedium = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.Normal,
-		fontSize = 14.sp,
-		lineHeight = 20.sp,
-		letterSpacing = 0.2.sp
-	),
-	bodySmall = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.Normal,
-		fontSize = 12.sp,
-		lineHeight = 16.sp,
-		letterSpacing = 0.3.sp
-	),
-	labelLarge = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.SemiBold,
-		fontSize = 14.sp,
-		lineHeight = 20.sp,
-		letterSpacing = 0.1.sp
-	),
-	labelMedium = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.Medium,
-		fontSize = 12.sp,
-		lineHeight = 16.sp,
-		letterSpacing = 0.4.sp
-	),
-	labelSmall = TextStyle(
-		fontFamily = InterFontFamily,
-		fontWeight = FontWeight.Medium,
-		fontSize = 11.sp,
-		lineHeight = 14.sp,
-		letterSpacing = 0.5.sp
-	)
+private fun inter(
+	size: Int,
+	lineHeight: Int,
+	weight: FontWeight,
+	tracking: Double = 0.0
+) = TextStyle(
+	fontFamily = InterFontFamily,
+	fontWeight = weight,
+	fontSize = size.sp,
+	lineHeight = lineHeight.sp,
+	letterSpacing = tracking.sp
 )
 
-// Tabular numerals for amounts/balances - keeps digits aligned in lists.
-val TabularNumStyle = TextStyle(
-	fontFeatureSettings = "tnum"
+/**
+ * One consistent scale: Medium for titles and labels, Normal for body text.
+ * Screen titles are 20sp; only the balance (32sp) and amount entry (24sp)
+ * are larger. Call sites should not override fontWeight.
+ */
+val AppTypography = Typography(
+	displayLarge = inter(40, 48, FontWeight.Medium, -0.5),
+	displayMedium = inter(36, 44, FontWeight.Medium, -0.5),
+	displaySmall = inter(32, 40, FontWeight.Medium, -0.25),
+	headlineLarge = inter(28, 36, FontWeight.Medium, -0.25),
+	headlineMedium = inter(24, 32, FontWeight.Medium),
+	headlineSmall = inter(22, 28, FontWeight.Medium),
+	titleLarge = inter(20, 28, FontWeight.Medium),
+	titleMedium = inter(16, 24, FontWeight.Medium, 0.1),
+	titleSmall = inter(14, 20, FontWeight.Medium, 0.1),
+	bodyLarge = inter(16, 24, FontWeight.Normal, 0.15),
+	bodyMedium = inter(14, 20, FontWeight.Normal, 0.15),
+	bodySmall = inter(12, 16, FontWeight.Normal, 0.3),
+	labelLarge = inter(14, 20, FontWeight.Medium, 0.1),
+	labelMedium = inter(12, 16, FontWeight.Medium, 0.4),
+	labelSmall = inter(11, 16, FontWeight.Medium, 0.5)
 )
+
+private const val TABULAR = "tnum"
+
+/** Balance headline: 32/40 Medium, tabular figures. */
+val Typography.amountLarge: TextStyle
+	get() = displaySmall.copy(fontFeatureSettings = TABULAR)
+
+/** Amount entry field: 24/32 Medium, tabular figures. */
+val Typography.amountEntry: TextStyle
+	get() = headlineMedium.copy(fontFeatureSettings = TABULAR)
+
+/** List-row amounts: 16/24 Medium, tabular figures. */
+val Typography.amountMedium: TextStyle
+	get() = titleMedium.copy(fontFeatureSettings = TABULAR)
+
+/** Secondary amounts (day totals, supporting figures): 14/20 Medium, tabular. */
+val Typography.amountSmall: TextStyle
+	get() = labelLarge.copy(fontFeatureSettings = TABULAR)

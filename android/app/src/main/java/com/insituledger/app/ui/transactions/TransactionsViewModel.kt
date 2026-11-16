@@ -11,6 +11,9 @@ import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.Transaction
+import com.insituledger.app.ui.reports.DateRangePreset
+import com.insituledger.app.ui.reports.resolveRange
+import java.time.DayOfWeek
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -26,7 +29,11 @@ data class TransactionsUiState(
     val categories: List<Category> = emptyList(),
     val accounts: List<Account> = emptyList(),
     val isLoading: Boolean = true,
+    /** A reload after the first one: keep showing rows, show a thin progress bar. */
+    val isUpdating: Boolean = false,
     val isRefreshing: Boolean = false,
+    /** The date preset behind filterFrom/filterTo, for the chip label (null = custom or none). */
+    val datePreset: DateRangePreset? = null,
     val filterFrom: String? = null,
     val filterTo: String? = null,
     val filterCategoryId: Long? = null,
@@ -67,6 +74,11 @@ class TransactionsViewModel @Inject constructor(
     private val sharedAccessState: SharedAccessState,
     prefs: UserPreferences
 ) : ViewModel() {
+
+    private val weekStart: StateFlow<DayOfWeek> = prefs.weekStartDayFlow
+        .map { day -> if (day == "sunday") DayOfWeek.SUNDAY else DayOfWeek.MONDAY }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, DayOfWeek.MONDAY)
+    private var hasLoaded = false
 
     private val _uiState = MutableStateFlow(TransactionsUiState())
     val uiState: StateFlow<TransactionsUiState> = _uiState.asStateFlow()
@@ -114,7 +126,9 @@ class TransactionsViewModel @Inject constructor(
                     val accountIds: Set<Long>? = req.ownerFilter?.let { f ->
                         req.accounts.filter { it.userId == f }.map { it.id }.toSet()
                     }
-                    _uiState.update { it.copy(isLoading = true) }
+                    // Only the very first load swaps in the loading state; later
+                    // reloads (filters, sort, paging) keep the rows and scroll.
+                    _uiState.update { if (hasLoaded) it.copy(isUpdating = true) else it.copy(isLoading = true) }
                     val limit = req.pages * PAGE_SIZE
                     // Search is one more predicate on the same query, so it stacks
                     // with the date/category filters and the sort instead of
@@ -132,8 +146,9 @@ class TransactionsViewModel @Inject constructor(
                     }
                 }
                 .collect { (txns, more) ->
+                    hasLoaded = true
                     _uiState.update {
-                        it.copy(transactions = txns, isLoading = false, isLoadingMore = false, hasMore = more)
+                        it.copy(transactions = txns, isLoading = false, isUpdating = false, isLoadingMore = false, hasMore = more)
                     }
                 }
         }
@@ -146,7 +161,28 @@ class TransactionsViewModel @Inject constructor(
     }
 
     fun clearFilters() {
+        _uiState.update { it.copy(datePreset = null) }
         setFilters(null, null, null)
+    }
+
+    /** Apply a date preset (null = any time); the category filter is kept. */
+    fun setDatePreset(preset: DateRangePreset?) {
+        val (from, to) = if (preset == null) null to null
+        else resolveRange(preset, "", "", weekStart.value)
+        _uiState.update { it.copy(datePreset = preset) }
+        setFilters(from, to, _uiState.value.filterCategoryId)
+    }
+
+    /** Apply an explicit inclusive range ("yyyy-MM-dd"). */
+    fun setCustomRange(from: String, to: String) {
+        _uiState.update { it.copy(datePreset = DateRangePreset.CUSTOM) }
+        setFilters(from, to, _uiState.value.filterCategoryId)
+    }
+
+    /** Filter by category (null = all); the date range is kept. */
+    fun setCategoryFilter(categoryId: Long?) {
+        val s = _uiState.value
+        setFilters(s.filterFrom, s.filterTo, categoryId)
     }
 
     // Search and filters narrow the same query, so the empty state offers to
@@ -155,7 +191,7 @@ class TransactionsViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 searchQuery = "", isSearchActive = false,
-                filterFrom = null, filterTo = null, filterCategoryId = null
+                filterFrom = null, filterTo = null, filterCategoryId = null, datePreset = null
             )
         }
         _searchInput.value = ""

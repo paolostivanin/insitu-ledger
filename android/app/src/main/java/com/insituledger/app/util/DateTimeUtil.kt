@@ -2,9 +2,12 @@ package com.insituledger.app.util
 
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 object DateTimeUtil {
 
@@ -15,14 +18,19 @@ object DateTimeUtil {
 
     fun formatLocalDateTime(value: LocalDateTime): String = value.format(WRITE_FORMAT)
 
-    fun parseFlexibleLocalDateTime(value: String): LocalDateTime {
+    // Form dates are written at minute precision with the zone's offset, e.g.
+    // "2026-11-20T09:00+01:00" ("…Z" in UTC). The backend's parseClientDate
+    // accepts this shape ("2006-01-02T15:04Z07:00") alongside full RFC3339.
+    private val FORM_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mmXXX")
+
+    fun parseFlexibleLocalDateTime(value: String, zone: ZoneId = ZoneId.systemDefault()): LocalDateTime {
         val trimmed = value.trim()
 
         // ISO offset (e.g. 2026-04-20T12:30:00Z or +02:00) — convert to local.
         if (trimmed.endsWith("Z") || trimmed.matches(OFFSET_REGEX)) {
             return try {
                 OffsetDateTime.parse(trimmed)
-                    .atZoneSameInstant(ZoneId.systemDefault())
+                    .atZoneSameInstant(zone)
                     .toLocalDateTime()
             } catch (_: Exception) {
                 parseLenientLocal(trimmed)
@@ -52,6 +60,67 @@ object DateTimeUtil {
                     .truncatedTo(java.time.temporal.ChronoUnit.MINUTES)
             }
         }
+
+    /**
+     * Strict counterpart of [parseFormDate] for save/routing decisions: accepts
+     * the same shapes (RFC3339 with offset, legacy naive datetimes and bare
+     * dates, the latter two read in [zone]) but returns null for anything else.
+     * It never substitutes "now" — a garbage date must block the write.
+     */
+    fun parseFormDateOrNull(s: String, zone: ZoneId = ZoneId.systemDefault()): OffsetDateTime? {
+        val trimmed = s.trim()
+        if (trimmed.isEmpty()) return null
+        return try {
+            OffsetDateTime.parse(trimmed)
+        } catch (_: Exception) {
+            try {
+                parseFlexibleLocalDateTime(trimmed, zone).atZone(zone).toOffsetDateTime()
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    /**
+     * Compose a form date from a wall-clock date and time in [zone], at minute
+     * precision with that moment's offset ("2026-11-20T09:00+01:00", "…Z" in
+     * UTC). Via [ZonedDateTime.of]: a time inside a DST gap shifts forward by
+     * the gap length (02:30 → 03:30), an overlap takes the earlier offset.
+     */
+    fun composeFormDate(date: LocalDate, time: LocalTime, zone: ZoneId): String =
+        ZonedDateTime.of(date, time.truncatedTo(ChronoUnit.MINUTES), zone).format(FORM_FORMAT)
+
+    /** True when [time] on [date] does not exist in [zone] (spring-forward gap). */
+    fun isInDstGap(date: LocalDate, time: LocalTime, zone: ZoneId): Boolean =
+        zone.rules.getValidOffsets(LocalDateTime.of(date, time)).isEmpty()
+
+    /** Replace the date of a form date, keeping its time of day. See [rebuild]. */
+    fun withDatePart(original: String, date: LocalDate, zone: ZoneId): String =
+        rebuild(original, zone) { wall -> LocalDateTime.of(date, wall.toLocalTime()) }
+
+    /** Replace the time of day of a form date, keeping its date. See [rebuild]. */
+    fun withTimePart(original: String, time: LocalTime, zone: ZoneId): String =
+        rebuild(original, zone) { wall -> LocalDateTime.of(wall.toLocalDate(), time) }
+
+    // Picker edits keep the value's own wall clock. The offset is recomputed
+    // for the new moment (so moving a November date into July yields +02:00 in
+    // Rome) unless the original carried a foreign offset — an entry made while
+    // travelling — which is kept as typed. Unparseable input starts from now.
+    private inline fun rebuild(
+        original: String,
+        zone: ZoneId,
+        change: (LocalDateTime) -> LocalDateTime
+    ): String {
+        val parsed = parseFormDateOrNull(original, zone)
+            ?: OffsetDateTime.now(zone).truncatedTo(ChronoUnit.MINUTES)
+        val wall = change(parsed.toLocalDateTime()).truncatedTo(ChronoUnit.MINUTES)
+        val zoneOffsetAtOriginal = zone.rules.getOffset(parsed.toInstant())
+        return if (parsed.offset != zoneOffsetAtOriginal) {
+            OffsetDateTime.of(wall, parsed.offset).format(FORM_FORMAT)
+        } else {
+            composeFormDate(wall.toLocalDate(), wall.toLocalTime(), zone)
+        }
+    }
 
     // Render an ISO-8601 string as "YYYY-MM-DD HH:mm" using the local-time
     // portion only (strips any TZ offset or Z suffix, with or without seconds).

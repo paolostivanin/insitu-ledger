@@ -177,7 +177,15 @@ class TransactionRepository @Inject constructor(
         // Stamp authenticated creator so the "Added by [me]" badge shows
         // immediately for offline-created entries on shared accounts. The next
         // sync round-trip refreshes from the server-side creator value anyway.
+        val syncEnabled = isSyncEnabled()
         val currentUserId = prefs.userIdFlow.first()
+        val currentUserName = prefs.userNameFlow.first()
+        val payloadJson = if (syncEnabled) {
+            gson.toJson(TransactionInput(accountId, categoryId, type, amount, currency, description, note, date))
+        } else null
+
+        // Row, balance change and pending CREATE commit together; sync is
+        // triggered only after the commit.
         val localId = database.withTransaction {
             val minId = transactionDao.getMinId() ?: 0
             val id = if (minId >= 0) -1 else minId - 1
@@ -194,25 +202,24 @@ class TransactionRepository @Inject constructor(
                 date = date,
                 isLocalOnly = true,
                 createdByUserId = currentUserId,
-                createdByName = prefs.userNameFlow.first()
+                createdByName = currentUserName
             )
             transactionDao.upsert(entity)
             val delta = if (type == "income") amount else -amount
             accountDao.adjustBalance(accountId, delta)
+            if (payloadJson != null) {
+                pendingOpDao.insert(PendingOperationEntity(
+                    entityType = "transaction",
+                    operation = "CREATE",
+                    entityId = id,
+                    payloadJson = payloadJson,
+                    clientId = UUID.randomUUID().toString()
+                ))
+            }
             id
         }
 
-        if (isSyncEnabled()) {
-            val input = TransactionInput(accountId, categoryId, type, amount, currency, description, note, date)
-            pendingOpDao.insert(PendingOperationEntity(
-                entityType = "transaction",
-                operation = "CREATE",
-                entityId = localId,
-                payloadJson = gson.toJson(input),
-                clientId = UUID.randomUUID().toString()
-            ))
-            syncManager.triggerImmediateSync()
-        }
+        if (syncEnabled) syncManager.triggerImmediateSync()
         return localId
     }
 

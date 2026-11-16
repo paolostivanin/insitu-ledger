@@ -11,7 +11,11 @@ import com.insituledger.app.data.repository.TransactionRepository
 import com.insituledger.app.data.sync.SyncManager
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
+import com.insituledger.app.util.formatAmountForInput
 import com.insituledger.app.util.DateTimeUtil
+import com.insituledger.app.util.EndMode
+import com.insituledger.app.util.FieldLimits
+import com.insituledger.app.util.RecurrenceDraft
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -19,10 +23,15 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.time.Clock
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 import javax.inject.Inject
 
 data class DescriptionSuggestion(
@@ -44,11 +53,10 @@ data class TransactionFormUiState(
     val currency: String = "EUR",
     val description: String = "",
     val note: String = "",
-    // Initial value carries the device's TZ offset so the backend's
-    // future-vs-past check is correct cross-TZ from the very first save.
-    val date: String = OffsetDateTime.now(ZoneId.systemDefault())
-        .truncatedTo(ChronoUnit.MINUTES)
-        .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+    // RFC3339 with the device zone's offset (set from the injected clock by
+    // the ViewModel), so the backend's future-vs-past check is correct
+    // cross-TZ from the very first save.
+    val date: String = "",
     val accounts: List<Account> = emptyList(),
     val accountDisplays: List<AccountDisplay> = emptyList(),
     val categories: List<Category> = emptyList(),
@@ -57,7 +65,24 @@ data class TransactionFormUiState(
     val isLoading: Boolean = true,
     val isSaving: Boolean = false,
     val error: String? = null,
-    val saved: Boolean = false
+    val saved: Boolean = false,
+    /** Set = saving creates a recurring schedule starting at [date]; null = no recurrence. */
+    val recurrence: RecurrenceDraft? = null,
+    /** A one-time schedule was chosen in the sheet (as opposed to a typed future date). */
+    val explicitOnce: Boolean = false,
+    /** The form date before a schedule was applied; restored by [TransactionFormViewModel.removeSchedule]. */
+    val dateBeforeSchedule: String? = null,
+    /** null = sheet closed. */
+    val scheduleSheet: ScheduleSheetState? = null,
+    /** Result of the last successful save, for the caller's confirmation. */
+    val outcome: SaveOutcome? = null,
+    val amountError: String? = null,
+    val descriptionError: String? = null,
+    val noteError: String? = null,
+    /** The explicit one-time moment passed before saving: offer "Add now". */
+    val canAddNow: Boolean = false,
+    /** The last picked time fell in a DST gap and was shifted forward. */
+    val dstAdjusted: Boolean = false
 )
 
 @HiltViewModel
@@ -68,14 +93,33 @@ class TransactionFormViewModel @Inject constructor(
     private val categoryRepository: CategoryRepository,
     private val scheduledRepository: ScheduledRepository,
     private val syncManager: SyncManager,
-    private val prefs: UserPreferences
+    private val prefs: UserPreferences,
+    private val clock: Clock
 ) : ViewModel() {
 
+    companion object {
+        const val MSG_REQUIRED = "Please fill all required fields with valid values"
+        const val MSG_AMOUNT = "Enter an amount greater than 0"
+        const val MSG_INVALID_DATE = "That date isn't valid. Pick it again."
+        const val MSG_ONE_TIME_PAST = "Pick a time in the future"
+        const val MSG_TIME_PASSED = "That time has passed"
+        private const val UPCOMING_PREVIEW = 3
+    }
+
     private val editId: Long? = savedStateHandle.get<String>("id")?.toLongOrNull()
-    private val _uiState = MutableStateFlow(TransactionFormUiState(id = editId))
+    private val zone: ZoneId get() = clock.zone
+    private val _uiState = MutableStateFlow(TransactionFormUiState(id = editId, date = nowFormDate()))
     val uiState: StateFlow<TransactionFormUiState> = _uiState.asStateFlow()
 
     init { loadData() }
+
+    /** The clock's current moment, for [formMode] tickers in the UI. */
+    fun now(): OffsetDateTime = OffsetDateTime.now(clock)
+
+    private fun nowFormDate(): String {
+        val now = LocalDateTime.now(clock)
+        return DateTimeUtil.composeFormDate(now.toLocalDate(), now.toLocalTime(), zone)
+    }
 
     private fun loadData() {
         viewModelScope.launch {
@@ -109,7 +153,7 @@ class TransactionFormViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             accountId = txn.accountId, categoryId = txn.categoryId,
-                            type = txn.type, amount = txn.amount.toString(),
+                            type = txn.type, amount = formatAmountForInput(txn.amount),
                             currency = txn.currency, description = txn.description ?: "",
                             note = txn.note ?: "",
                             date = txn.date, isLoading = false
@@ -142,13 +186,19 @@ class TransactionFormViewModel @Inject constructor(
         viewModelScope.launch { prefs.saveLastUsedAccountId(id) }
     }
     fun updateCategoryId(id: Long) { _uiState.update { it.copy(categoryId = id) } }
-    fun updateType(type: String) { _uiState.update { it.copy(type = type) } }
-    fun updateAmount(amount: String) { _uiState.update { it.copy(amount = amount) } }
+    fun updateType(type: String) {
+        _uiState.update {
+            // A category of the other type can't be saved with this type.
+            val categoryType = it.categories.find { c -> c.id == it.categoryId }?.type
+            it.copy(type = type, categoryId = if (categoryType != null && categoryType != type) null else it.categoryId)
+        }
+    }
+    fun updateAmount(amount: String) { _uiState.update { it.copy(amount = amount, amountError = null) } }
     fun updateCurrency(currency: String) { _uiState.update { it.copy(currency = currency) } }
     private var autocompleteJob: Job? = null
 
     fun updateDescription(desc: String) {
-        _uiState.update { it.copy(description = desc) }
+        _uiState.update { it.copy(description = desc, descriptionError = null) }
         autocompleteJob?.cancel()
         if (desc.length < 2) {
             _uiState.update { it.copy(suggestions = emptyList(), showSuggestions = false) }
@@ -175,6 +225,7 @@ class TransactionFormViewModel @Inject constructor(
             val derivedType = it.categories.find { c -> c.id == suggestion.categoryId }?.type ?: it.type
             it.copy(
                 description = suggestion.description,
+                descriptionError = null,
                 categoryId = suggestion.categoryId,
                 type = derivedType,
                 suggestions = emptyList(),
@@ -189,7 +240,7 @@ class TransactionFormViewModel @Inject constructor(
                 transactionRepository.suggestedAmount(suggestion.description)?.let { (amt, ccy) ->
                     _uiState.update {
                         if (it.amount.isBlank() || it.amount.toDoubleOrNull() == 0.0) {
-                            it.copy(amount = formatAmount(amt), currency = ccy)
+                            it.copy(amount = formatAmount(amt), currency = ccy, amountError = null)
                         } else {
                             it
                         }
@@ -209,9 +260,42 @@ class TransactionFormViewModel @Inject constructor(
         _uiState.update { it.copy(showSuggestions = false) }
     }
 
-    fun updateNote(note: String) { _uiState.update { it.copy(note = note) } }
+    fun updateNote(note: String) { _uiState.update { it.copy(note = note, noteError = null) } }
 
-    fun updateDate(date: String) { _uiState.update { it.copy(date = date) } }
+    /**
+     * Raw setter, kept for callers that already hold a full form-date string.
+     * Prefer [setDate] / [setTime], which fix the offset across DST.
+     */
+    fun updateDate(date: String) {
+        _uiState.update { it.copy(date = date, explicitOnce = false, canAddNow = false, dstAdjusted = false) }
+    }
+
+    /** The form's own date picker. Clears an explicit one-time choice. */
+    fun setDate(date: LocalDate) = editDate { original ->
+        val time = DateTimeUtil.parseFormDateOrNull(original, zone)?.toLocalTime() ?: LocalTime.now(clock)
+        DateTimeUtil.withDatePart(original, date, zone) to LocalDateTime.of(date, time)
+    }
+
+    /** The form's own time picker. Clears an explicit one-time choice. */
+    fun setTime(time: LocalTime) = editDate { original ->
+        val date = DateTimeUtil.parseFormDateOrNull(original, zone)?.toLocalDate() ?: LocalDate.now(clock)
+        DateTimeUtil.withTimePart(original, time, zone) to LocalDateTime.of(date, time)
+    }
+
+    // [change] returns the new form date and the wall clock that was asked
+    // for; when they differ the time fell in a DST gap and was shifted.
+    private inline fun editDate(change: (String) -> Pair<String, LocalDateTime>) {
+        val (newDate, requested) = change(_uiState.value.date)
+        val actual = DateTimeUtil.parseFormDateOrNull(newDate, zone)?.toLocalDateTime()
+        _uiState.update {
+            it.copy(
+                date = newDate,
+                explicitOnce = false,
+                canAddNow = false,
+                dstAdjusted = actual != null && actual != requested.truncatedTo(ChronoUnit.MINUTES)
+            )
+        }
+    }
 
     fun createAccount(name: String, currency: String) {
         viewModelScope.launch {
@@ -253,59 +337,279 @@ class TransactionFormViewModel @Inject constructor(
         }
     }
 
+    // ---- Schedule sheet -------------------------------------------------
+
+    /**
+     * Opens the sheet pre-filled from the form: the current recurrence if
+     * there is one; One-time at the form date if that is an explicit one-time
+     * or a future date; otherwise Recurring (Monthly, never ends) starting at
+     * the form date — past dates included, which back-fills missed entries.
+     * No-op when editing an existing transaction.
+     */
+    fun openScheduleSheet() {
+        if (editId != null) return
+        val state = _uiState.value
+        val now = now()
+        val parsed = DateTimeUtil.parseFormDateOrNull(state.date, zone)
+        val wall = (parsed ?: now).toLocalDateTime().truncatedTo(ChronoUnit.MINUTES)
+        val future = parsed != null && parsed.isAfter(now)
+        val sheet = when {
+            state.recurrence != null -> ScheduleSheetState(
+                mode = ScheduleMode.RECURRING, date = wall.toLocalDate(), time = wall.toLocalTime(),
+                draft = state.recurrence, isEditingExisting = true
+            )
+            state.explicitOnce || future -> ScheduleSheetState(
+                mode = ScheduleMode.ONE_TIME, date = wall.toLocalDate(), time = wall.toLocalTime(),
+                isEditingExisting = true
+            )
+            else -> ScheduleSheetState(
+                mode = ScheduleMode.RECURRING, date = wall.toLocalDate(), time = wall.toLocalTime()
+            )
+        }
+        _uiState.update { it.copy(scheduleSheet = recompute(sheet)) }
+    }
+
+    fun setSheetMode(mode: ScheduleMode) = updateSheet { it.copy(mode = mode) }
+    fun setSheetDate(date: LocalDate) = updateSheet { it.copy(date = date) }
+    fun setSheetTime(time: LocalTime) = updateSheet { it.copy(time = time.truncatedTo(ChronoUnit.MINUTES)) }
+    fun updateSheetDraft(transform: (RecurrenceDraft) -> RecurrenceDraft) = updateSheet { it.copy(draft = transform(it.draft)) }
+
+    /** "Tomorrow" / "In a week" / "In a month" at the sheet's time of day, as a one-time schedule. */
+    fun applyQuickPick(pick: QuickPick) {
+        val today = LocalDate.now(clock)
+        val date = when (pick) {
+            QuickPick.TOMORROW -> today.plusDays(1)
+            QuickPick.IN_A_WEEK -> today.plusWeeks(1)
+            QuickPick.IN_A_MONTH -> today.plusMonths(1)
+        }
+        updateSheet { it.copy(mode = ScheduleMode.ONE_TIME, date = date) }
+    }
+
+    /**
+     * Validates strictly and, if valid, applies the sheet to the form: the
+     * form date becomes the chosen moment (One-time) or the start (Recurring).
+     * Returns false, leaving the sheet open with its error, when invalid.
+     */
+    fun applySchedule(): Boolean {
+        val state = _uiState.value
+        val sheet = state.scheduleSheet?.let(::recompute) ?: return false
+        if (sheet.error != null) {
+            _uiState.update { it.copy(scheduleSheet = sheet) }
+            return false
+        }
+        val newDate = DateTimeUtil.composeFormDate(sheet.date, sheet.time, zone)
+        _uiState.update {
+            it.copy(
+                date = newDate,
+                recurrence = if (sheet.mode == ScheduleMode.RECURRING) sheet.draft else null,
+                // One-time saves through the existing future-date path.
+                explicitOnce = sheet.mode == ScheduleMode.ONE_TIME,
+                dateBeforeSchedule = it.dateBeforeSchedule ?: it.date,
+                scheduleSheet = null,
+                dstAdjusted = sheet.dstAdjusted,
+                canAddNow = false,
+                error = null
+            )
+        }
+        return true
+    }
+
+    /** Back, swipe, scrim or Cancel: discards only the sheet's draft. */
+    fun dismissScheduleSheet() {
+        _uiState.update { it.copy(scheduleSheet = null) }
+    }
+
+    /**
+     * Clears the schedule. The date goes back to what it was before the
+     * schedule if that is not in the future, otherwise to now — removing
+     * always yields an immediate entry.
+     */
+    fun removeSchedule() {
+        val now = now()
+        _uiState.update {
+            val restored = it.dateBeforeSchedule
+                ?.takeIf { d -> DateTimeUtil.parseFormDateOrNull(d, zone)?.isAfter(now) == false }
+            it.copy(
+                recurrence = null,
+                explicitOnce = false,
+                date = restored ?: nowFormDate(),
+                dateBeforeSchedule = null,
+                scheduleSheet = null,
+                canAddNow = false,
+                dstAdjusted = false,
+                error = null
+            )
+        }
+    }
+
+    /** After "That time has passed": record the entry now instead. */
+    fun addNow() {
+        if (editId != null || !_uiState.value.canAddNow) return
+        _uiState.update {
+            it.copy(
+                date = nowFormDate(),
+                explicitOnce = false,
+                dateBeforeSchedule = null,
+                canAddNow = false,
+                dstAdjusted = false,
+                error = null
+            )
+        }
+        save()
+    }
+
+    private inline fun updateSheet(change: (ScheduleSheetState) -> ScheduleSheetState) {
+        val sheet = _uiState.value.scheduleSheet ?: return
+        _uiState.update { it.copy(scheduleSheet = recompute(change(sheet))) }
+    }
+
+    private fun recompute(sheet: ScheduleSheetState): ScheduleSheetState {
+        val nowLocal = LocalDateTime.now(clock)
+        // The moment actually saved: a DST-gap time shifts forward.
+        val effective = ZonedDateTime.of(sheet.date, sheet.time, zone)
+        val start = effective.toLocalDateTime()
+        val dstAdjusted = DateTimeUtil.isInDstGap(sheet.date, sheet.time, zone)
+        return when (sheet.mode) {
+            ScheduleMode.ONE_TIME -> sheet.copy(
+                error = if (effective.toInstant().isAfter(clock.instant())) null else MSG_ONE_TIME_PAST,
+                upcoming = listOf(start),
+                pastEntries = emptyList(),
+                endsDuringCatchUp = false,
+                dstAdjusted = dstAdjusted
+            )
+            ScheduleMode.RECURRING -> {
+                val past = sheet.draft.pastOccurrences(start, nowLocal, RecurrenceDraft.MAX_PAST_OCCURRENCES + 1)
+                val upcoming = sheet.draft.upcoming(start, UPCOMING_PREVIEW, after = nowLocal)
+                sheet.copy(
+                    error = sheet.draft.validate(start, nowLocal, strict = true),
+                    upcoming = upcoming,
+                    pastEntries = past,
+                    endsDuringCatchUp = past.isNotEmpty() && upcoming.isEmpty(),
+                    dstAdjusted = dstAdjusted
+                )
+            }
+        }
+    }
+
+    // ---- Save -----------------------------------------------------------
+
+    private sealed interface Write {
+        data object Update : Write
+        data object Create : Write
+        data class Once(val at: LocalDateTime) : Write
+        data class Recurring(val draft: RecurrenceDraft, val start: LocalDateTime, val pastEntries: Int) : Write
+    }
+
+    /**
+     * Exactly one write per save, routed in this order: editing → update;
+     * recurrence → schedule; explicit one-time that has passed → error with
+     * "Add now"; future date → one-time schedule (the existing path,
+     * `FREQ=DAILY` with max 1); otherwise → transaction.
+     */
     fun save() {
         val state = _uiState.value
+        if (state.isSaving || state.saved) return
+
         val amount = state.amount.toDoubleOrNull()
-        if (state.accountId == null || state.categoryId == null || amount == null || amount <= 0) {
-            _uiState.update { it.copy(error = "Please fill all required fields with valid values") }
+        val amountError = if (amount == null || !amount.isFinite() || amount <= 0) MSG_AMOUNT else null
+        val descriptionError = FieldLimits.descriptionError(state.description)
+        val noteError = FieldLimits.noteError(state.note)
+        val missing = state.accountId == null || state.categoryId == null
+        if (missing || amount == null || amountError != null || descriptionError != null || noteError != null) {
+            _uiState.update {
+                it.copy(
+                    amountError = amountError,
+                    descriptionError = descriptionError,
+                    noteError = noteError,
+                    error = if (missing || amountError != null) MSG_REQUIRED else descriptionError ?: noteError
+                )
+            }
             return
         }
+        val accountId = state.accountId!!
+        val categoryId = state.categoryId!!
+
+        val parsed = DateTimeUtil.parseFormDateOrNull(state.date, zone)
+        if (parsed == null) {
+            _uiState.update { it.copy(error = MSG_INVALID_DATE) }
+            return
+        }
+        val now = now()
+        val nowLocal = LocalDateTime.now(clock)
+        val recurrence = state.recurrence
+        val write: Write = when {
+            editId != null -> Write.Update
+            recurrence != null -> {
+                val start = parsed.toLocalDateTime()
+                val error = recurrence.validate(start, nowLocal, strict = true)
+                if (error != null) {
+                    _uiState.update { it.copy(error = error) }
+                    return
+                }
+                val past = recurrence.pastOccurrences(start, nowLocal, RecurrenceDraft.MAX_PAST_OCCURRENCES + 1).size
+                Write.Recurring(recurrence, start, past)
+            }
+            state.explicitOnce && !parsed.isAfter(now) -> {
+                _uiState.update { it.copy(error = MSG_TIME_PASSED, canAddNow = true) }
+                return
+            }
+            parsed.isAfter(now) -> Write.Once(parsed.toLocalDateTime())
+            else -> Write.Create
+        }
+
+        _uiState.update {
+            it.copy(isSaving = true, error = null, canAddNow = false, amountError = null, descriptionError = null, noteError = null)
+        }
+        val description = state.description.ifBlank { null }
+        val note = state.note.ifBlank { null }
         viewModelScope.launch {
-            _uiState.update { it.copy(isSaving = true) }
             try {
                 // Persist last-used account
-                prefs.saveLastUsedAccountId(state.accountId)
+                prefs.saveLastUsedAccountId(accountId)
 
-                if (editId != null) {
-                    transactionRepository.update(
-                        editId, state.accountId, state.categoryId, state.type,
-                        amount, state.currency, state.description.ifBlank { null },
-                        state.note.ifBlank { null }, state.date
-                    )
-                } else {
-                    val isFuture = try {
-                        DateTimeUtil.parseFormDate(state.date).isAfter(OffsetDateTime.now())
-                    } catch (_: Exception) { false }
-
-                    if (isFuture) {
-                        scheduledRepository.create(
-                            state.accountId, state.categoryId, state.type,
-                            amount, state.currency, state.description.ifBlank { null },
-                            state.note.ifBlank { null },
-                            rrule = "FREQ=DAILY", nextOccurrence = state.date, maxOccurrences = 1
+                val outcome: SaveOutcome = when (write) {
+                    Write.Update -> {
+                        transactionRepository.update(
+                            editId!!, accountId, categoryId, state.type,
+                            amount, state.currency, description, note, state.date
                         )
-                        // Schedule a check at the exact future time. parseFormDate
-                        // handles every shape (RFC3339 with offset, naive, date-only)
-                        // without throwing on the offset form — v1.27.x's
-                        // ofPattern("yyyy-MM-dd'T'HH:mm") parse would crash the save.
-                        val targetTime = try {
-                            DateTimeUtil.parseFormDate(state.date).toLocalDateTime()
-                        } catch (_: Exception) { null }
-                        if (targetTime != null) {
-                            val delayMs = targetTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() - System.currentTimeMillis()
-                            if (delayMs > 0) {
-                                syncManager.scheduleDelayedScheduledCheck(delayMs)
-                            }
-                        }
-                    } else {
-                        transactionRepository.create(
-                            state.accountId, state.categoryId, state.type,
-                            amount, state.currency, state.description.ifBlank { null },
-                            state.note.ifBlank { null }, state.date
+                        SaveOutcome.Updated
+                    }
+                    is Write.Recurring -> {
+                        scheduledRepository.create(
+                            accountId, categoryId, state.type,
+                            amount, state.currency, description, note,
+                            rrule = write.draft.rrule(),
+                            nextOccurrence = state.date,
+                            maxOccurrences = write.draft.maxOccurrences()
+                        )
+                        syncManager.kickScheduler(state.date, clock)
+                        SaveOutcome.ScheduledRecurring(
+                            summary = write.draft.copy(endMode = EndMode.NEVER).summary(write.start, Locale.ENGLISH),
+                            startsNow = write.pastEntries > 0,
+                            start = write.start,
+                            pastEntries = write.pastEntries
                         )
                     }
+                    is Write.Once -> {
+                        scheduledRepository.create(
+                            accountId, categoryId, state.type,
+                            amount, state.currency, description, note,
+                            rrule = "FREQ=DAILY", nextOccurrence = state.date, maxOccurrences = 1
+                        )
+                        // Wakes the local worker at that moment (wall-clock delay).
+                        syncManager.kickScheduler(state.date, clock)
+                        SaveOutcome.ScheduledOnce(write.at)
+                    }
+                    Write.Create -> {
+                        transactionRepository.create(
+                            accountId, categoryId, state.type,
+                            amount, state.currency, description, note, state.date
+                        )
+                        SaveOutcome.Created(state.type)
+                    }
                 }
-                _uiState.update { it.copy(isSaving = false, saved = true) }
+                _uiState.update { it.copy(isSaving = false, saved = true, outcome = outcome) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isSaving = false, error = e.message) }
             }

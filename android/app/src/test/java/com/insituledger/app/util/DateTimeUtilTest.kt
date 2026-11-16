@@ -1,10 +1,16 @@
 package com.insituledger.app.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
 
 class DateTimeUtilTest {
 
@@ -129,5 +135,103 @@ class DateTimeUtilTest {
         assertNotNull(DateTimeUtil.parseFormDate("garbage"))
         assertNotNull(DateTimeUtil.parseFormDate(""))
         assertNotNull(DateTimeUtil.parseFormDate("2026-13-99T99:99"))
+    }
+
+    // --- composeFormDate / DST ---
+
+    private val rome = ZoneId.of("Europe/Rome")
+
+    private fun compose(date: String, time: String, zone: ZoneId = rome) =
+        DateTimeUtil.composeFormDate(LocalDate.parse(date), LocalTime.parse(time), zone)
+
+    @Test
+    fun composeUsesWinterAndSummerOffsets() {
+        assertEquals("2026-11-20T09:00+01:00", compose("2026-11-20", "09:00"))
+        assertEquals("2026-07-14T09:00+02:00", compose("2026-07-14", "09:00"))
+    }
+
+    @Test
+    fun composeShiftsAGapTimeForward() {
+        assertEquals("2026-03-29T03:30+02:00", compose("2026-03-29", "02:30"))
+        assertTrue(DateTimeUtil.isInDstGap(LocalDate.parse("2026-03-29"), LocalTime.parse("02:30"), rome))
+        assertFalse(DateTimeUtil.isInDstGap(LocalDate.parse("2026-03-29"), LocalTime.parse("03:30"), rome))
+    }
+
+    @Test
+    fun composeTakesTheEarlierOffsetInAnOverlap() {
+        assertEquals("2026-10-25T02:30+02:00", compose("2026-10-25", "02:30"))
+        assertFalse(DateTimeUtil.isInDstGap(LocalDate.parse("2026-10-25"), LocalTime.parse("02:30"), rome))
+    }
+
+    @Test
+    fun composeHandlesOtherZones() {
+        assertEquals("2026-03-08T03:30-04:00", compose("2026-03-08", "02:30", ZoneId.of("America/New_York")))
+        // Lord Howe springs forward by 30 minutes at 02:00 → 02:15 becomes 02:45.
+        assertEquals("2026-10-04T02:45+11:00", compose("2026-10-04", "02:15", ZoneId.of("Australia/Lord_Howe")))
+        assertEquals("2026-11-20T09:00Z", compose("2026-11-20", "09:00", ZoneId.of("UTC")))
+    }
+
+    @Test
+    fun composeDropsSeconds() {
+        assertEquals("2026-11-20T09:00+01:00", compose("2026-11-20", "09:00:59"))
+    }
+
+    @Test
+    fun withDatePartRecomputesTheOffsetAcrossDst() {
+        assertEquals(
+            "2026-07-14T09:00+02:00",
+            DateTimeUtil.withDatePart("2026-11-20T09:00+01:00", LocalDate.parse("2026-07-14"), rome)
+        )
+        assertEquals(
+            "2026-07-14T09:00+02:00",
+            DateTimeUtil.withDatePart("2026-11-20T09:00:00+01:00", LocalDate.parse("2026-07-14"), rome)
+        )
+    }
+
+    @Test
+    fun withDatePartKeepsAForeignOffset() {
+        assertEquals(
+            "2026-07-14T09:00+05:30",
+            DateTimeUtil.withDatePart("2026-11-20T09:00+05:30", LocalDate.parse("2026-07-14"), rome)
+        )
+    }
+
+    @Test
+    fun withTimePartRecomputesAndShiftsGapTimes() {
+        assertEquals(
+            "2026-03-29T03:30+02:00",
+            DateTimeUtil.withTimePart("2026-03-29T01:00+01:00", LocalTime.parse("02:30"), rome)
+        )
+        assertEquals(
+            "2026-11-20T18:45+05:30",
+            DateTimeUtil.withTimePart("2026-11-20T09:00+05:30", LocalTime.parse("18:45"), rome)
+        )
+    }
+
+    @Test
+    fun withDatePartReadsLegacyNaiveValuesInTheZone() {
+        assertEquals(
+            "2026-07-14T15:30+02:00",
+            DateTimeUtil.withDatePart("2026-01-20T15:30", LocalDate.parse("2026-07-14"), rome)
+        )
+    }
+
+    @Test
+    fun parseFormDateOrNullIsStrict() {
+        assertNull(DateTimeUtil.parseFormDateOrNull("garbage"))
+        assertNull(DateTimeUtil.parseFormDateOrNull(""))
+        assertNull(DateTimeUtil.parseFormDateOrNull("2026-13-99T99:99"))
+        assertEquals(
+            OffsetDateTime.parse("2026-11-20T09:00+01:00"),
+            DateTimeUtil.parseFormDateOrNull("2026-11-20T09:00+01:00")
+        )
+        assertEquals(
+            OffsetDateTime.parse("2026-07-14T15:30+02:00"),
+            DateTimeUtil.parseFormDateOrNull("2026-07-14T15:30", rome)
+        )
+        assertEquals(
+            OffsetDateTime.parse("2026-07-14T00:00+02:00"),
+            DateTimeUtil.parseFormDateOrNull("2026-07-14", rome)
+        )
     }
 }

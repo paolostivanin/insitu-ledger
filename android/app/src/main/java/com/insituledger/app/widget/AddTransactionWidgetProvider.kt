@@ -30,6 +30,8 @@ class AddTransactionWidgetProvider : AppWidgetProvider() {
             )
 
             val views = RemoteViews(context.packageName, R.layout.widget_add_transaction).apply {
+                // The whole tile is the touch target, not just the glyph.
+                setOnClickPendingIntent(android.R.id.background, pendingIntent)
                 setOnClickPendingIntent(R.id.widget_icon, pendingIntent)
             }
 

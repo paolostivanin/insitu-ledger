@@ -57,39 +57,50 @@ class ScheduledRepository @Inject constructor(
         amount: Double, currency: String, description: String?, note: String?,
         rrule: String, nextOccurrence: String, maxOccurrences: Int? = null
     ): Long {
+        // Everything that can suspend on DataStore or allocate the payload
+        // happens before the transaction; the row and its pending CREATE commit
+        // together (a crash in between used to leave an unsynced schedule), and
+        // sync is only triggered once they have.
+        val syncEnabled = isSyncEnabled()
         val currentUserId = prefs.userIdFlow.first()
-        val minId = scheduledDao.getMinId() ?: 0
-        val localId = if (minId >= 0) -1 else minId - 1
-        val entity = ScheduledTransactionEntity(
-            id = localId,
-            accountId = accountId,
-            categoryId = categoryId,
-            userId = 0,
-            type = type,
-            amount = amount,
-            currency = currency,
-            description = description,
-            note = note,
-            rrule = rrule,
-            nextOccurrence = nextOccurrence,
-            maxOccurrences = maxOccurrences,
-            isLocalOnly = true,
-            createdByUserId = currentUserId,
-            createdByName = prefs.userNameFlow.first()
-        )
-        scheduledDao.upsert(entity)
+        val currentUserName = prefs.userNameFlow.first()
+        val payloadJson = if (syncEnabled) {
+            gson.toJson(ScheduledInput(accountId, categoryId, type, amount, currency, description, note, rrule, nextOccurrence, maxOccurrences))
+        } else null
 
-        if (isSyncEnabled()) {
-            val input = ScheduledInput(accountId, categoryId, type, amount, currency, description, note, rrule, nextOccurrence, maxOccurrences)
-            pendingOpDao.insert(PendingOperationEntity(
-                entityType = "scheduled",
-                operation = "CREATE",
-                entityId = localId,
-                payloadJson = gson.toJson(input),
-                clientId = UUID.randomUUID().toString()
+        val localId = database.withTransaction {
+            val minId = scheduledDao.getMinId() ?: 0
+            val id = if (minId >= 0) -1 else minId - 1
+            scheduledDao.upsert(ScheduledTransactionEntity(
+                id = id,
+                accountId = accountId,
+                categoryId = categoryId,
+                userId = 0,
+                type = type,
+                amount = amount,
+                currency = currency,
+                description = description,
+                note = note,
+                rrule = rrule,
+                nextOccurrence = nextOccurrence,
+                maxOccurrences = maxOccurrences,
+                isLocalOnly = true,
+                createdByUserId = currentUserId,
+                createdByName = currentUserName
             ))
-            syncManager.triggerImmediateSync()
+            if (payloadJson != null) {
+                pendingOpDao.insert(PendingOperationEntity(
+                    entityType = "scheduled",
+                    operation = "CREATE",
+                    entityId = id,
+                    payloadJson = payloadJson,
+                    clientId = UUID.randomUUID().toString()
+                ))
+            }
+            id
         }
+
+        if (syncEnabled) syncManager.triggerImmediateSync()
         return localId
     }
 
@@ -99,25 +110,32 @@ class ScheduledRepository @Inject constructor(
         rrule: String, nextOccurrence: String, maxOccurrences: Int? = null,
         active: Boolean? = null
     ) {
-        val existing = scheduledDao.getById(id) ?: return
-        scheduledDao.upsert(existing.copy(
-            accountId = accountId, categoryId = categoryId, type = type,
-            amount = amount, currency = currency, description = description, note = note,
-            rrule = rrule, nextOccurrence = nextOccurrence, maxOccurrences = maxOccurrences,
-            active = active ?: existing.active
-        ))
+        val syncEnabled = isSyncEnabled()
+        val payloadJson = if (syncEnabled) {
+            gson.toJson(ScheduledInput(accountId, categoryId, type, amount, currency, description, note, rrule, nextOccurrence, maxOccurrences, active))
+        } else null
 
-        if (isSyncEnabled()) {
-            val input = ScheduledInput(accountId, categoryId, type, amount, currency, description, note, rrule, nextOccurrence, maxOccurrences, active)
-            pendingOpDao.insert(PendingOperationEntity(
-                entityType = "scheduled",
-                operation = "UPDATE",
-                entityId = id,
-                serverId = if (id > 0) id else null,
-                payloadJson = gson.toJson(input)
+        val changed = database.withTransaction {
+            val existing = scheduledDao.getById(id) ?: return@withTransaction false
+            scheduledDao.upsert(existing.copy(
+                accountId = accountId, categoryId = categoryId, type = type,
+                amount = amount, currency = currency, description = description, note = note,
+                rrule = rrule, nextOccurrence = nextOccurrence, maxOccurrences = maxOccurrences,
+                active = active ?: existing.active
             ))
-            syncManager.triggerImmediateSync()
+            if (payloadJson != null) {
+                pendingOpDao.insert(PendingOperationEntity(
+                    entityType = "scheduled",
+                    operation = "UPDATE",
+                    entityId = id,
+                    serverId = if (id > 0) id else null,
+                    payloadJson = payloadJson
+                ))
+            }
+            true
         }
+
+        if (changed && syncEnabled) syncManager.triggerImmediateSync()
     }
 
     suspend fun delete(id: Long) {

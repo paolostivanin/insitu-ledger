@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.repository.AccountRepository
+import com.insituledger.app.data.repository.CategoryRepository
+import com.insituledger.app.domain.model.Category
 import com.insituledger.app.data.repository.ScheduledRepository
 import com.insituledger.app.data.repository.SharedAccessState
 import com.insituledger.app.domain.model.Account
@@ -16,6 +18,7 @@ import javax.inject.Inject
 data class ScheduledUiState(
     val items: List<ScheduledTransaction> = emptyList(),
     val accounts: List<Account> = emptyList(),
+    val categories: List<Category> = emptyList(),
     val isLoading: Boolean = true,
     val currentUserId: Long? = null
 )
@@ -25,7 +28,8 @@ class ScheduledViewModel @Inject constructor(
     private val scheduledRepository: ScheduledRepository,
     accountRepository: AccountRepository,
     private val sharedAccessState: SharedAccessState,
-    prefs: UserPreferences
+    prefs: UserPreferences,
+    categoryRepository: CategoryRepository
 ) : ViewModel() {
 
     val uiState: StateFlow<ScheduledUiState> = combine(
@@ -40,6 +44,8 @@ class ScheduledViewModel @Inject constructor(
             items.filter { it.accountId in ownedIds }
         }
         ScheduledUiState(items = filteredItems, accounts = accounts, isLoading = false, currentUserId = currentUserId)
+    }.combine(categoryRepository.getAll().onStart { emit(emptyList()) }) { state, cats ->
+        state.copy(categories = cats)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ScheduledUiState())
 
     suspend fun delete(id: Long): Result<Unit> = runCatching { scheduledRepository.delete(id) }

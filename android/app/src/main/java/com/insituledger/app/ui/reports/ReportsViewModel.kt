@@ -116,6 +116,9 @@ class ReportsViewModel @Inject constructor(
 
     private var weekStartDay: DayOfWeek = DayOfWeek.MONDAY
 
+    /** The user's first day of the week, for labelling the resolved range in the UI. */
+    val weekStartFlow: StateFlow<DayOfWeek> get() = weekStart
+
     // Cancelled and restarted on every keystroke, so only the pause at the end
     // of typing reaches the database.
     private var searchJob: Job? = null

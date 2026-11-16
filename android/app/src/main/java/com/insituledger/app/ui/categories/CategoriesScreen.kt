@@ -1,61 +1,111 @@
 package com.insituledger.app.ui.categories
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Category
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.*
+import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.insituledger.app.data.repository.CategoryDeleteResult
 import com.insituledger.app.domain.model.Category
-import com.insituledger.app.ui.common.AppCard
+import com.insituledger.app.ui.common.AddFab
+import com.insituledger.app.ui.common.CategoryDot
 import com.insituledger.app.ui.common.ColorUtils
+import com.insituledger.app.ui.common.ConfirmDialog
 import com.insituledger.app.ui.common.EmptyState
+import com.insituledger.app.ui.common.ListRow
 import com.insituledger.app.ui.common.LoadingIndicator
-import com.insituledger.app.ui.common.LocalSnackbarHostState
+import com.insituledger.app.ui.common.LocalContentPadding
+import com.insituledger.app.ui.common.LocalSnackbarController
+import com.insituledger.app.ui.common.RowAction
 import com.insituledger.app.ui.common.SectionHeader
+import com.insituledger.app.ui.common.displayName
 import com.insituledger.app.ui.theme.AppSpacing
-import com.insituledger.app.ui.theme.BrandGradients
 
-private data class CategoryNode(
+/**
+ * A top-level category and everything filed beneath it. [descendants] is
+ * depth-first, so a grandchild follows its own parent.
+ */
+internal data class CategoryNode(
     val category: Category,
-    val children: List<Category>
+    val descendants: List<Category>
 )
 
-private enum class CategoryFilter { ALL, EXPENSE, INCOME }
+/**
+ * Two-level tree for the list. Every category appears exactly once:
+ * - a category whose parent is missing from [categories] (deleted, or of the
+ *   other type) is shown as top-level instead of vanishing;
+ * - deeper descendants (legacy grandchildren) are listed under their nearest
+ *   top-level ancestor, still one level in;
+ * - categories caught in a parent cycle are promoted to top-level.
+ *
+ * Pure and top-level so it can be tested without Hilt.
+ */
+internal fun buildCategoryTree(categories: List<Category>): List<CategoryNode> {
+    val ids = categories.mapTo(HashSet()) { it.id }
+    fun isRoot(c: Category) = c.parentId == null || c.parentId == c.id || c.parentId !in ids
+    val childrenOf = categories.filterNot(::isRoot).groupBy { it.parentId }
+    val placed = HashSet<Long>()
 
-private fun buildTree(categories: List<Category>): List<CategoryNode> {
-    val parents = categories.filter { it.parentId == null }
-    val childMap = categories.filter { it.parentId != null }.groupBy { it.parentId }
-    return parents.map { parent ->
-        CategoryNode(parent, childMap[parent.id] ?: emptyList())
+    fun collect(parentId: Long, into: MutableList<Category>) {
+        childrenOf[parentId].orEmpty().forEach { child ->
+            if (placed.add(child.id)) {
+                into += child
+                collect(child.id, into)
+            }
+        }
     }
+
+    fun node(root: Category): CategoryNode {
+        val descendants = mutableListOf<Category>()
+        collect(root.id, descendants)
+        return CategoryNode(root, descendants)
+    }
+
+    val nodes = mutableListOf<CategoryNode>()
+    categories.filter(::isRoot).forEach { if (placed.add(it.id)) nodes += node(it) }
+    // Whatever is left only reaches itself through its parents: a cycle.
+    categories.forEach { if (placed.add(it.id)) nodes += node(it) }
+    return nodes
 }
 
-private fun List<CategoryNode>.totalCount(): Int = sumOf { 1 + it.children.size }
+private enum class CategoryFilter(val label: String) { ALL("All"), EXPENSE("Expense"), INCOME("Income") }
+
+/** Extra start inset for subcategory rows: lines their dot up with the parent's name. */
+private val ChildIndent = 28.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,8 +116,12 @@ fun CategoriesScreen(
     viewModel: CategoriesViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = LocalSnackbarHostState.current
-    val haptics = LocalHapticFeedback.current
+    val snackbar = LocalSnackbarController.current
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val pad = LocalContentPadding.current
+    var filter by rememberSaveable { mutableStateOf(CategoryFilter.ALL) }
+    var deleteTarget by remember { mutableStateOf<Category?>(null) }
+
     // Show the snackbar AFTER the repository reports back so a delete that
     // can't proceed (live transactions / scheduled txns) surfaces the real
     // reason instead of a lying "Category deleted".
@@ -76,16 +130,15 @@ fun CategoriesScreen(
             val msg = when (result) {
                 CategoryDeleteResult.Success -> "Category deleted"
                 CategoryDeleteResult.NotFound -> "Category not found"
-                CategoryDeleteResult.HasTransactions -> "Cannot delete: category has transactions"
-                CategoryDeleteResult.HasScheduled -> "Cannot delete: category has scheduled transactions"
+                CategoryDeleteResult.HasTransactions -> "Can't delete: the category has transactions"
+                CategoryDeleteResult.HasScheduled -> "Can't delete: the category has schedules"
             }
-            snackbarHostState.showSnackbar(msg)
+            snackbar.show(msg)
         }
     }
-    val onDelete: (Long) -> Unit = { id -> viewModel.delete(id) }
-    var filter by remember { mutableStateOf(CategoryFilter.ALL) }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
                 title = { Text("Categories") },
@@ -93,23 +146,16 @@ fun CategoriesScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                scrollBehavior = scrollBehavior
             )
         },
-        floatingActionButton = {
-            BrandFab(
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onAddClick()
-                },
-                contentDescription = "Add Category"
-            )
-        }
+        floatingActionButton = { AddFab(onClick = onAddClick, contentDescription = "Add category") }
     ) { padding ->
         when {
             uiState.isLoading -> LoadingIndicator(modifier = Modifier.padding(padding))
             uiState.incomeCategories.isEmpty() && uiState.expenseCategories.isEmpty() -> EmptyState(
-                icon = Icons.Default.Category,
+                icon = Icons.Outlined.Category,
                 title = "No categories yet",
                 message = "Create categories to organize your transactions.",
                 actionLabel = "Add category",
@@ -117,87 +163,147 @@ fun CategoriesScreen(
                 modifier = Modifier.padding(padding)
             )
             else -> {
-                val expenseTree = remember(uiState.expenseCategories) { buildTree(uiState.expenseCategories) }
-                val incomeTree = remember(uiState.incomeCategories) { buildTree(uiState.incomeCategories) }
-                val showExpense = filter == CategoryFilter.ALL || filter == CategoryFilter.EXPENSE
-                val showIncome = filter == CategoryFilter.ALL || filter == CategoryFilter.INCOME
+                val expenseTree = remember(uiState.expenseCategories) { buildCategoryTree(uiState.expenseCategories) }
+                val incomeTree = remember(uiState.incomeCategories) { buildCategoryTree(uiState.incomeCategories) }
+                val allById = remember(uiState.expenseCategories, uiState.incomeCategories) {
+                    (uiState.expenseCategories + uiState.incomeCategories).associateBy { it.id }
+                }
+                val rowContext = RowContext(
+                    allById = allById,
+                    pad = pad,
+                    onEdit = onEditClick,
+                    onDelete = { deleteTarget = it }
+                )
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(padding),
-                    contentPadding = PaddingValues(
-                        start = AppSpacing.screenPadding,
-                        end = AppSpacing.screenPadding,
-                        top = AppSpacing.sm,
-                        bottom = AppSpacing.xxl
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(AppSpacing.xxs)
+                    contentPadding = PaddingValues(bottom = AppSpacing.fabClearance)
                 ) {
-                    item(key = "filter") {
+                    item(key = "filter", contentType = "filter") {
                         FilterRow(
                             selected = filter,
                             onSelect = { filter = it },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = AppSpacing.sm)
+                            modifier = Modifier.padding(start = pad, end = pad, top = AppSpacing.sm, bottom = AppSpacing.xs)
                         )
                     }
-
-                    if (showExpense && expenseTree.isNotEmpty()) {
-                        item(key = "expense_header") {
-                            SectionHeader(
-                                title = "EXPENSE · ${expenseTree.totalCount()}",
-                                modifier = Modifier.animateItem()
-                            )
+                    when (filter) {
+                        CategoryFilter.ALL -> {
+                            categorySection("expense", "Expense", expenseTree, rowContext, showHeader = true)
+                            categorySection("income", "Income", incomeTree, rowContext, showHeader = true)
                         }
-                        expenseTree.forEach { node ->
-                            item(key = "expense_${node.category.id}") {
-                                CategoryParentRow(
-                                    category = node.category,
-                                    onEdit = onEditClick,
-                                    onDelete = onDelete,
-                                    modifier = Modifier.animateItem()
-                                )
-                            }
-                            items(node.children, key = { "expense_child_${it.id}" }) { child ->
-                                CategoryChildRow(
-                                    child = child,
-                                    onEdit = onEditClick,
-                                    onDelete = onDelete,
-                                    modifier = Modifier.animateItem()
-                                )
-                            }
-                        }
-                    }
-                    if (showIncome && incomeTree.isNotEmpty()) {
-                        item(key = "income_header") {
-                            SectionHeader(
-                                title = "INCOME · ${incomeTree.totalCount()}",
-                                modifier = Modifier.animateItem()
-                            )
-                        }
-                        incomeTree.forEach { node ->
-                            item(key = "income_${node.category.id}") {
-                                CategoryParentRow(
-                                    category = node.category,
-                                    onEdit = onEditClick,
-                                    onDelete = onDelete,
-                                    modifier = Modifier.animateItem()
-                                )
-                            }
-                            items(node.children, key = { "income_child_${it.id}" }) { child ->
-                                CategoryChildRow(
-                                    child = child,
-                                    onEdit = onEditClick,
-                                    onDelete = onDelete,
-                                    modifier = Modifier.animateItem()
-                                )
-                            }
-                        }
+                        CategoryFilter.EXPENSE ->
+                            categorySection("expense", "Expense", expenseTree, rowContext, showHeader = false)
+                        CategoryFilter.INCOME ->
+                            categorySection("income", "Income", incomeTree, rowContext, showHeader = false)
                     }
                 }
             }
         }
     }
+
+    deleteTarget?.let { target ->
+        ConfirmDialog(
+            title = "Delete ${target.name}?",
+            text = "This can't be undone. Categories used by transactions or schedules can't be deleted.",
+            confirmLabel = "Delete",
+            onConfirm = {
+                deleteTarget = null
+                viewModel.delete(target.id)
+            },
+            onDismiss = { deleteTarget = null }
+        )
+    }
+}
+
+private class RowContext(
+    val allById: Map<Long, Category>,
+    val pad: Dp,
+    val onEdit: (Long) -> Unit,
+    val onDelete: (Category) -> Unit
+)
+
+private fun LazyListScope.categorySection(
+    keyPrefix: String,
+    title: String,
+    tree: List<CategoryNode>,
+    ctx: RowContext,
+    showHeader: Boolean
+) {
+    if (showHeader) {
+        item(key = "${keyPrefix}_header", contentType = "header") {
+            SectionHeader(title = title, horizontalPadding = ctx.pad, topPadding = AppSpacing.lg)
+        }
+    }
+    if (tree.isEmpty()) {
+        item(key = "${keyPrefix}_empty", contentType = "empty") {
+            Text(
+                "No ${title.lowercase()} categories yet",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = if (showHeader) TextAlign.Start else TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = ctx.pad, vertical = if (showHeader) AppSpacing.sm else AppSpacing.xxl)
+            )
+        }
+        return
+    }
+    tree.forEach { node ->
+        item(key = "cat_${node.category.id}", contentType = "parent") {
+            ParentRow(node, ctx, Modifier.animateItem())
+        }
+        node.descendants.forEach { child ->
+            item(key = "cat_${child.id}", contentType = "child") {
+                ChildRow(child, node.category, ctx, Modifier.animateItem())
+            }
+        }
+    }
+}
+
+private fun Category.dotColor() = color?.takeIf { it.isNotBlank() }?.let { ColorUtils.parseHex(it) }
+
+private fun rowActions(category: Category, ctx: RowContext) = listOf(
+    RowAction("Edit") { ctx.onEdit(category.id) },
+    RowAction("Delete", destructive = true) { ctx.onDelete(category) }
+)
+
+@Composable
+private fun ParentRow(node: CategoryNode, ctx: RowContext, modifier: Modifier = Modifier) {
+    val count = node.descendants.size
+    ListRow(
+        headline = node.category.displayName(),
+        supporting = when (count) {
+            0 -> null
+            1 -> "1 subcategory"
+            else -> "$count subcategories"
+        },
+        leading = { CategoryDot(node.category.dotColor(), size = 12.dp) },
+        onClick = { ctx.onEdit(node.category.id) },
+        actions = rowActions(node.category, ctx),
+        horizontalPadding = ctx.pad,
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun ChildRow(child: Category, root: Category, ctx: RowContext, modifier: Modifier = Modifier) {
+    // Legacy grandchildren sit at the same indent; name their direct parent.
+    val directParent = child.parentId?.let { ctx.allById[it] }
+    val supporting = if (directParent != null && directParent.id != root.id) "In ${directParent.name}" else null
+    ListRow(
+        headline = child.displayName(),
+        supporting = supporting,
+        leading = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.width(ChildIndent))
+                CategoryDot(child.dotColor() ?: root.dotColor(), size = 8.dp)
+            }
+        },
+        onClick = { ctx.onEdit(child.id) },
+        actions = rowActions(child, ctx),
+        horizontalPadding = ctx.pad,
+        modifier = modifier
+    )
 }
 
 @Composable
@@ -206,213 +312,18 @@ private fun FilterRow(
     onSelect: (CategoryFilter) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(AppSpacing.xs)
-    ) {
-        FilterChipItem(label = "All", selected = selected == CategoryFilter.ALL) {
-            onSelect(CategoryFilter.ALL)
-        }
-        FilterChipItem(label = "Expense", selected = selected == CategoryFilter.EXPENSE) {
-            onSelect(CategoryFilter.EXPENSE)
-        }
-        FilterChipItem(label = "Income", selected = selected == CategoryFilter.INCOME) {
-            onSelect(CategoryFilter.INCOME)
-        }
-    }
-}
-
-@Composable
-private fun FilterChipItem(label: String, selected: Boolean, onClick: () -> Unit) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(label) }
-    )
-}
-
-@Composable
-private fun CategoryParentRow(
-    category: Category,
-    onEdit: (Long) -> Unit,
-    onDelete: (Long) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val accent = if (category.color != null) ColorUtils.parseHex(category.color) else MaterialTheme.colorScheme.primary
-    AppCard(modifier = modifier.fillMaxWidth(), level = 1) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(4.dp)
-                    .fillMaxHeight()
-                    .background(accent)
-            )
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = AppSpacing.md, vertical = AppSpacing.xs),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+    val options = CategoryFilter.entries
+    SingleChoiceSegmentedButtonRow(modifier = modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, option ->
+            SegmentedButton(
+                selected = selected == option,
+                onClick = { onSelect(option) },
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                icon = {},
+                modifier = Modifier.heightIn(min = 48.dp)
             ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CategoryDot(category.color, size = 20.dp, dotSize = 8.dp)
-                    Text(
-                        category.name,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                OverflowMenu(
-                    onEdit = { onEdit(category.id) },
-                    onDelete = { onDelete(category.id) }
-                )
+                Text(option.label, maxLines = 1)
             }
-        }
-    }
-}
-
-@Composable
-private fun CategoryChildRow(
-    child: Category,
-    onEdit: (Long) -> Unit,
-    onDelete: (Long) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(start = AppSpacing.lg)
-            .height(IntrinsicSize.Min),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .width(1.dp)
-                .fillMaxHeight()
-                .background(MaterialTheme.colorScheme.outlineVariant)
-        )
-        Spacer(modifier = Modifier.width(AppSpacing.sm))
-        AppCard(modifier = Modifier.weight(1f), level = 0) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = AppSpacing.md, vertical = AppSpacing.xxs),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CategoryDot(child.color, size = 14.dp, dotSize = 6.dp)
-                    Text(
-                        child.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                OverflowMenu(
-                    onEdit = { onEdit(child.id) },
-                    onDelete = { onDelete(child.id) },
-                    compact = true
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun OverflowMenu(
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    compact: Boolean = false
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        IconButton(
-            onClick = { expanded = true },
-            modifier = if (compact) Modifier.size(32.dp) else Modifier
-        ) {
-            Icon(
-                Icons.Default.MoreVert,
-                contentDescription = "More",
-                modifier = Modifier.size(if (compact) 18.dp else 20.dp)
-            )
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("Edit") },
-                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                onClick = {
-                    expanded = false
-                    onEdit()
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                leadingIcon = {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                },
-                onClick = {
-                    expanded = false
-                    onDelete()
-                }
-            )
-        }
-    }
-}
-
-@Composable
-private fun CategoryDot(hexColor: String?, size: androidx.compose.ui.unit.Dp, dotSize: androidx.compose.ui.unit.Dp) {
-    val color = if (hexColor != null) ColorUtils.parseHex(hexColor) else MaterialTheme.colorScheme.primary
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(CircleShape)
-            .background(color.copy(alpha = 0.18f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(dotSize)
-                .clip(CircleShape)
-                .background(color)
-        )
-    }
-}
-
-@Composable
-private fun BrandFab(onClick: () -> Unit, contentDescription: String) {
-    val gradient = BrandGradients.hero()
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        color = Color.Transparent,
-        shadowElevation = 8.dp,
-        modifier = Modifier.size(64.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(gradient),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.Add,
-                contentDescription = contentDescription,
-                tint = Color.White,
-                modifier = Modifier.size(28.dp)
-            )
         }
     }
 }
