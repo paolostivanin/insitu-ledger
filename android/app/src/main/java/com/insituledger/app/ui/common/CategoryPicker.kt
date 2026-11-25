@@ -95,10 +95,13 @@ fun CategorySelectorRow(
     selectedId: Long?,
     type: String,
     onSelect: (Long) -> Unit,
-    onCreateCategory: (name: String, type: String) -> Unit,
+    // null hides "New category" (e.g. bulk edit, where a category created
+    // offline couldn't be sent until it syncs).
+    onCreateCategory: ((name: String, type: String) -> Unit)?,
     modifier: Modifier = Modifier,
     isError: Boolean = false,
-    supporting: String? = null
+    supporting: String? = null,
+    enabled: Boolean = true
 ) {
     var showSheet by remember { mutableStateOf(false) }
     SelectorRow(
@@ -106,12 +109,13 @@ fun CategorySelectorRow(
         label = "Category",
         value = categoryPath(categories, selectedId),
         valueLeading = { CategoryDot(categoryColor(categories, selectedId), size = 10.dp) },
-        onClick = { showSheet = true },
+        onClick = { if (enabled) showSheet = true },
         isError = isError,
         supporting = supporting,
+        enabled = enabled,
         modifier = modifier
     )
-    if (showSheet) {
+    if (showSheet && enabled) {
         CategoryPickerSheet(
             categories = categories,
             selectedId = selectedId,

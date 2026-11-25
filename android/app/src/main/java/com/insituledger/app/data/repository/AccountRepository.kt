@@ -3,6 +3,7 @@ package com.insituledger.app.data.repository
 import androidx.room.withTransaction
 import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.datastore.UserPreferences
+import com.insituledger.app.data.local.db.nextLocalId
 import com.insituledger.app.data.local.db.dao.AccountDao
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.entity.AccountEntity
@@ -56,8 +57,7 @@ class AccountRepository @Inject constructor(
     suspend fun getById(id: Long): Account? = accountDao.getById(id)?.toDomain()
 
     suspend fun create(name: String, currency: String, balance: Double): Long {
-        val minId = accountDao.getMinId() ?: 0
-        val localId = if (minId >= 0) -1 else minId - 1
+        val localId = nextLocalId(accountDao.getMinId(), pendingOpDao.getMinEntityId("account"))
         val entity = AccountEntity(
             id = localId,
             userId = 0,

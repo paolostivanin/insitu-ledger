@@ -10,6 +10,7 @@ import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
 import com.insituledger.app.data.remote.api.TransactionApi
 import com.insituledger.app.data.sync.SyncManager
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -128,4 +129,140 @@ class TransactionRepositoryGetSortedTest {
         assertEquals(listOf(100L, 0L), args)
     }
 
+    // The builder was extracted from getSorted; its text for the old filters
+    // must not have moved by a byte.
+    @Test
+    fun `every pre-existing filter keeps its exact SQL text and argument order`() = runTest {
+        val (sql, args) = capture {
+            getSorted(
+                from = "2026-08-01", to = "2026-08-31", categoryId = 3L, search = " valencia ",
+                sortBy = "description", sortDir = "asc", limit = 50, offset = 100, accountIds = setOf(9L, 2L)
+            )
+        }
+
+        assertEquals(
+            "SELECT * FROM transactions WHERE deleted_at IS NULL AND account_id IN (?, ?) AND date >= ?" +
+                " AND SUBSTR(date, 1, 10) <= ?" +
+                " AND category_id IN (SELECT id FROM categories WHERE id = ? OR parent_id = ?)" +
+                " AND description LIKE ? ESCAPE '\\' ORDER BY description ASC, id DESC LIMIT ? OFFSET ?",
+            sql
+        )
+        assertEquals(listOf<Any?>(2L, 9L, "2026-08-01", "2026-08-31", 3L, 3L, "%valencia%", 50L, 100L), args)
+    }
+
+    @Test
+    fun `exact match compares the trimmed description case-insensitively instead of LIKE`() = runTest {
+        val (sql, args) = capture { getSorted(search = "  Stipendio ", exactMatch = true, limit = 100, offset = 0) }
+
+        assertTrue(sql, sql.contains(" AND TRIM(description) = ? COLLATE NOCASE"))
+        assertFalse("no substring match in exact mode: $sql", sql.contains("LIKE"))
+        assertEquals(listOf<Any?>("Stipendio", 100L, 0L), args)
+    }
+
+    // = is not LIKE: %, _ and \ are ordinary characters and must not be escaped.
+    @Test
+    fun `exact match keeps wildcard characters literal`() = runTest {
+        val (_, args) = capture { getSorted(search = "50% a_b c\\d", exactMatch = true, limit = 100, offset = 0) }
+
+        assertEquals("50% a_b c\\d", args[0])
+    }
+
+    @Test
+    fun `exact match without a search term adds nothing`() = runTest {
+        val (sql, args) = capture { getSorted(search = "  ", exactMatch = true, limit = 100, offset = 0) }
+
+        assertFalse(sql, sql.contains("TRIM(description)"))
+        assertEquals(listOf<Any?>(100L, 0L), args)
+    }
+
+    @Test
+    fun `added by me matches the creator or an unsynced local row`() = runTest {
+        val (sql, args) = capture { getSorted(search = "pizza", onlyMineUserId = 7L, limit = 100, offset = 0) }
+
+        assertTrue(
+            sql,
+            sql.contains(" AND (created_by_user_id = ? OR (created_by_user_id IS NULL AND is_local_only = 1))")
+        )
+        assertTrue("applied before pagination: $sql", sql.indexOf("created_by_user_id") < sql.indexOf("ORDER BY"))
+        assertEquals(listOf<Any?>("%pizza%", 7L, 100L, 0L), args)
+    }
+
+    @Test
+    fun `added by me is ignored without a user id`() {
+        val where = buildTransactionWhere(TransactionFilter(onlyMine = true, currentUserId = null))
+
+        assertEquals("WHERE deleted_at IS NULL", where.sql)
+        assertTrue(where.args.isEmpty())
+    }
+
+    private suspend fun captureIds(filter: TransactionFilter, limit: Int): Pair<String, List<Any?>> {
+        val slot = slot<SupportSQLiteQuery>()
+        coEvery { transactionDao.getIdsRaw(capture(slot)) } returns emptyList()
+        repository().getMatchingIds(filter, limit)
+        val program = RecordingProgram()
+        slot.captured.bindTo(program)
+        return slot.captured.sql to program.bound
+    }
+
+    private suspend fun captureCount(filter: TransactionFilter): Pair<String, List<Any?>> {
+        val slot = slot<SupportSQLiteQuery>()
+        coEvery { transactionDao.countRaw(capture(slot)) } returns 0
+        repository().countMatching(filter)
+        val program = RecordingProgram()
+        slot.captured.bindTo(program)
+        return slot.captured.sql to program.bound
+    }
+
+    private fun whereOf(sql: String) = sql.substringAfter("FROM transactions ").substringBefore(" ORDER BY")
+
+    // "Select all matching" must pick exactly what the list shows: same WHERE
+    // text, same arguments, for every combination of the new toggles with
+    // every other filter set.
+    @Test
+    fun `getMatchingIds and countMatching use the same WHERE clause and arguments as getSorted`() = runTest {
+        for (exact in listOf(false, true)) {
+            for (mine in listOf(false, true)) {
+                val filter = TransactionFilter(
+                    from = "2026-01-01", to = "2026-12-31", categoryId = 4L, search = " Stipendio ",
+                    exactMatch = exact, accountIds = setOf(5L, 3L),
+                    onlyMine = mine, currentUserId = 9L
+                )
+                val (listSql, listArgs) = capture {
+                    getSorted(
+                        from = filter.from, to = filter.to, categoryId = filter.categoryId,
+                        search = filter.search, sortBy = "amount", sortDir = "asc",
+                        limit = 101, offset = 0, accountIds = filter.accountIds,
+                        exactMatch = filter.exactMatch,
+                        onlyMineUserId = filter.currentUserId.takeIf { filter.onlyMine }
+                    )
+                }
+                val (idsSql, idsArgs) = captureIds(filter, 5001)
+                val (countSql, countArgs) = captureCount(filter)
+                val label = "exact=$exact mine=$mine"
+
+                assertEquals(label, whereOf(listSql), whereOf(idsSql))
+                assertEquals(label, listArgs.dropLast(2), idsArgs.dropLast(1))
+                assertEquals(label, 5001L, idsArgs.last())
+                assertTrue(label, idsSql.startsWith("SELECT id FROM transactions WHERE "))
+                assertEquals(label, whereOf(listSql), countSql.substringAfter("FROM transactions "))
+                assertEquals(label, listArgs.dropLast(2), countArgs)
+
+                assertEquals(label, exact, listSql.contains("TRIM(description) = ?"))
+                assertEquals(label, !exact, listSql.contains("description LIKE ?"))
+                assertEquals(label, mine, listSql.contains("created_by_user_id = ?"))
+                assertEquals(label, mine, listArgs.contains(9L))
+            }
+        }
+    }
+
+    @Test
+    fun `the filter overload of getSorted builds the same query as the parameter list`() = runTest {
+        val filter = TransactionFilter(search = "a", exactMatch = true, onlyMine = true, currentUserId = 3L, accountIds = setOf(1L))
+        val viaFilter = capture { getSorted(filter, sortBy = "date", sortDir = "desc", limit = 10, offset = 0) }
+        val viaParams = capture {
+            getSorted(search = "a", exactMatch = true, onlyMineUserId = 3L, accountIds = setOf(1L), limit = 10, offset = 0)
+        }
+
+        assertEquals(viaParams, viaFilter)
+    }
 }

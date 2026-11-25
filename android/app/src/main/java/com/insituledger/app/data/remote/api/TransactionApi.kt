@@ -26,6 +26,16 @@ interface TransactionApi {
     @DELETE("transactions/{id}")
     suspend fun delete(@Path("id") id: Long, @Query("owner_id") ownerId: Long? = null): Response<Unit>
 
+    // Partial update (description and/or category). Server >= 1.27; an older
+    // server answers 405, which the push loop treats as a permanent failure.
+    @POST("transactions/batch-update")
+    suspend fun batchUpdate(@Body input: BatchUpdateRequest): Response<BatchUpdateResponse>
+
+    // Soft-deletes many rows at once; 204 even when some ids are already gone.
+    // Exists on every server version.
+    @POST("transactions/batch-delete")
+    suspend fun batchDelete(@Body input: BatchDeleteRequest): Response<Unit>
+
     @GET("transactions/autocomplete")
     suspend fun autocomplete(@Query("q") query: String, @Query("owner_id") ownerId: Long? = null): Response<List<AutocompleteSuggestion>>
 }

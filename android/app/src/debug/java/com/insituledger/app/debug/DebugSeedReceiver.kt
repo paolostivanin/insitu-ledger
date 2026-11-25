@@ -159,7 +159,10 @@ class DebugSeedReceiver : BroadcastReceiver() {
             scheduled.create(checking, home, "expense", 25.0, "EUR", "Cleaning", null, "FREQ=WEEKLY", at(13, 18, 0))
             scheduled.create(checking, transport, "expense", 180.0, "EUR", "Car service", null, "FREQ=DAILY", at(1, 9, 0), 1)
             val db = ep.database()
-            ScheduledMaterializer(db, db.scheduledTransactionDao(), db.transactionDao(), db.accountDao(), ep.clock()).run()
+            ScheduledMaterializer(
+                db, db.scheduledTransactionDao(), db.transactionDao(), db.accountDao(),
+                db.pendingOperationDao(), ep.clock()
+            ).run()
 
             if (profile == "stress") seedStress(checking, groceries, salary)
         }

@@ -3,6 +3,7 @@ package com.insituledger.app.data.sync
 import androidx.room.withTransaction
 import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.db.dao.AccountDao
+import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.ScheduledTransactionDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
 import com.insituledger.app.data.local.db.entity.ScheduledTransactionEntity
@@ -34,6 +35,7 @@ class ScheduledMaterializerTest {
     private val scheduledDao: ScheduledTransactionDao = mockk()
     private val transactionDao: TransactionDao = mockk()
     private val accountDao: AccountDao = mockk(relaxed = true)
+    private val pendingOpDao: PendingOperationDao = mockk()
 
     // 2026-11-13 10:00 in Rome.
     private val clock = Clock.fixed(Instant.parse("2026-11-13T09:00:00Z"), ZoneId.of("Europe/Rome"))
@@ -67,13 +69,14 @@ class ScheduledMaterializerTest {
             rows[e.id] = e
         }
         coEvery { transactionDao.getMinId() } answers { created.minOfOrNull { it.id } }
+        coEvery { pendingOpDao.getMinEntityId("transaction") } returns null
         coEvery { transactionDao.upsert(any()) } answers { created += firstArg<TransactionEntity>() }
     }
 
     @After fun teardown() { unmockkStatic("androidx.room.RoomDatabaseKt") }
 
     private fun materializer() = ScheduledMaterializer(
-        db, scheduledDao, transactionDao, accountDao, clock,
+        db, scheduledDao, transactionDao, accountDao, pendingOpDao, clock,
         log = { _, error -> if (error != null) errors += error }
     )
 
@@ -89,6 +92,17 @@ class ScheduledMaterializerTest {
         id = id, accountId = accountId, categoryId = 2, userId = 0, type = "expense", amount = amount,
         rrule = rrule, nextOccurrence = next, maxOccurrences = max, occurrenceCount = count
     ).also { rows[id] = it }
+
+    // A purged local row's failed CREATE/DELETE still names -1..-5: new
+    // entries must not reuse those ids (a later remap would rename them).
+    @Test fun newLocalIdSkipsIdsReferencedByPendingOps() = runTest {
+        coEvery { pendingOpDao.getMinEntityId("transaction") } returns -5L
+        schedule(next = "2026-11-06T10:00+01:00")
+
+        assertEquals(2, materializer().run())
+
+        assertEquals(listOf(-6L, -7L), created.map { it.id })
+    }
 
     @Test fun nothingDueDoesNothing() = runTest {
         schedule(next = "2026-11-20T09:00+01:00")

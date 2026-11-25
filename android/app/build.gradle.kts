@@ -14,8 +14,8 @@ android {
         applicationId = "com.insituledger.app"
         minSdk = 34
         targetSdk = 35
-        versionCode = 52
-        versionName = "1.38.1"
+        versionCode = 53
+        versionName = "1.39.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

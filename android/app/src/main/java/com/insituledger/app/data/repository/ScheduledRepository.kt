@@ -3,6 +3,7 @@ package com.insituledger.app.data.repository
 import com.insituledger.app.data.local.datastore.UserPreferences
 import androidx.room.withTransaction
 import com.insituledger.app.data.local.db.AppDatabase
+import com.insituledger.app.data.local.db.nextLocalId
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.ScheduledTransactionDao
 import com.insituledger.app.data.local.db.entity.PendingOperationEntity
@@ -77,8 +78,7 @@ class ScheduledRepository @Inject constructor(
         } else null
 
         val localId = database.withTransaction {
-            val minId = scheduledDao.getMinId() ?: 0
-            val id = if (minId >= 0) -1 else minId - 1
+            val id = nextLocalId(scheduledDao.getMinId(), pendingOpDao.getMinEntityId("scheduled"))
             scheduledDao.upsert(ScheduledTransactionEntity(
                 id = id,
                 accountId = accountId,

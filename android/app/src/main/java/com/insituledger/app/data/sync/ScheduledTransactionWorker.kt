@@ -8,6 +8,7 @@ import androidx.work.WorkerParameters
 import com.insituledger.app.data.local.datastore.UserPreferences
 import com.insituledger.app.data.local.db.AppDatabase
 import com.insituledger.app.data.local.db.dao.AccountDao
+import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.ScheduledTransactionDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
 import dagger.assisted.Assisted
@@ -22,6 +23,7 @@ class ScheduledTransactionWorker @AssistedInject constructor(
     private val scheduledDao: ScheduledTransactionDao,
     private val transactionDao: TransactionDao,
     private val accountDao: AccountDao,
+    private val pendingOpDao: PendingOperationDao,
     private val prefs: UserPreferences,
     private val clock: Clock
 ) : CoroutineWorker(context, params) {
@@ -37,7 +39,7 @@ class ScheduledTransactionWorker @AssistedInject constructor(
         if (prefs.getSyncModeImmediate() == "webapp") return Result.success()
 
         ScheduledMaterializer(
-            database, scheduledDao, transactionDao, accountDao, clock,
+            database, scheduledDao, transactionDao, accountDao, pendingOpDao, clock,
             log = { message, error ->
                 if (error != null) Log.w(TAG, message, error) else Log.d(TAG, message)
             }

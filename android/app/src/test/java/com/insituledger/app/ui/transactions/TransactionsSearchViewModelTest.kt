@@ -55,7 +55,7 @@ class TransactionsSearchViewModelTest {
 
     private fun viewModel() = TransactionsViewModel(
         transactionRepository, categoryRepository, accountRepository,
-        syncManager, sharedAccessState, prefs, scheduledRepository
+        syncManager, sharedAccessState, prefs, scheduledRepository, mockk(relaxed = true)
     )
 
     // The bug this replaced: searching swapped in an unfiltered, unsorted,

@@ -79,6 +79,21 @@ interface TransactionDao {
     @RawQuery(observedEntities = [TransactionEntity::class])
     fun getSorted(query: SupportSQLiteQuery): Flow<List<TransactionEntity>>
 
+    // One-shot id list for "select all matching". The WHERE clause comes from
+    // TransactionRepository.buildTransactionWhere, the same one getSorted uses.
+    @RawQuery
+    suspend fun getIdsRaw(query: SupportSQLiteQuery): List<Long>
+
+    // One-shot COUNT(*) over the same WHERE clause, for the "Select all N
+    // matching" banner.
+    @RawQuery
+    suspend fun countRaw(query: SupportSQLiteQuery): Int
+
+    // Soft-deleted rows included: the caller decides what "live" means.
+    // Callers chunk the id list to stay under SQLite's bound-variable limit.
+    @Query("SELECT * FROM transactions WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<Long>): List<TransactionEntity>
+
     @Query("DELETE FROM transactions WHERE deleted_at IS NOT NULL")
     suspend fun purgeDeleted()
 

@@ -1,6 +1,7 @@
 package com.insituledger.app.data.repository
 
 import com.insituledger.app.data.local.datastore.UserPreferences
+import com.insituledger.app.data.local.db.nextLocalId
 import com.insituledger.app.data.local.db.dao.CategoryDao
 import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.ScheduledTransactionDao
@@ -69,8 +70,7 @@ class CategoryRepository @Inject constructor(
     suspend fun getById(id: Long): Category? = categoryDao.getById(id)?.toDomain()
 
     suspend fun create(name: String, type: String, parentId: Long?, icon: String?, color: String?): Long {
-        val minId = categoryDao.getMinId() ?: 0
-        val localId = if (minId >= 0) -1 else minId - 1
+        val localId = nextLocalId(categoryDao.getMinId(), pendingOpDao.getMinEntityId("category"))
         val entity = CategoryEntity(
             id = localId,
             userId = 0,

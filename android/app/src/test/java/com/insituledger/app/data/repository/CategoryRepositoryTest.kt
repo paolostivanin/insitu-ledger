@@ -60,4 +60,17 @@ class CategoryRepositoryTest {
         assertSame(CategoryDeleteResult.Success, result)
         coVerify(exactly = 1) { categoryDao.upsert(match { it.deletedAt == "deleted" }) }
     }
+
+    @Test
+    fun newLocalIdSkipsIdsReferencedByPendingOps() = runTest {
+        io.mockk.every { prefs.getSyncModeImmediate() } returns "webapp"
+        coEvery { categoryDao.getMinId() } returns -1L
+        coEvery { pendingOpDao.getMinEntityId("category") } returns -6L
+
+        val id = repository().create("Food", "expense", null, null, null)
+
+        org.junit.Assert.assertEquals(-7L, id)
+        coVerify { categoryDao.upsert(match { it.id == -7L }) }
+        coVerify { pendingOpDao.insert(match { it.operation == "CREATE" && it.entityId == -7L }) }
+    }
 }

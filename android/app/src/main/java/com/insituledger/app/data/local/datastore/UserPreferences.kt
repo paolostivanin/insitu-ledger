@@ -67,6 +67,10 @@ class UserPreferences @Inject constructor(
         // surfaced the next time the user opens the app.
         val AUTH_NOTICE = stringPreferencesKey("auth_notice")
         val AUTO_LOGOUT_PENDING = booleanPreferencesKey("auto_logout_pending")
+        // Version reported by GET /api/health on the last sync (ServerVersion.OLD
+        // when the server is too old to report one). Unset until the first
+        // sync, and cleared when the server URL changes.
+        val SERVER_VERSION = stringPreferencesKey("server_version")
     }
 
     val tokenFlow: Flow<String?> = secureStore.stringFlow(SecureStore.KEY_TOKEN)
@@ -106,13 +110,23 @@ class UserPreferences @Inject constructor(
     val dashboardShowNetWorthFlow: Flow<Boolean> = context.dataStore.data.map { it[DASHBOARD_SHOW_NET_WORTH] ?: true }
     val authNoticeFlow: Flow<String> = context.dataStore.data.map { it[AUTH_NOTICE] ?: "You've been signed out." }
     val autoLogoutPendingFlow: Flow<Boolean> = context.dataStore.data.map { it[AUTO_LOGOUT_PENDING] ?: false }
+    val serverVersionFlow: Flow<String?> = context.dataStore.data.map { it[SERVER_VERSION] }
 
     suspend fun saveToken(token: String) {
         secureStore.putString(SecureStore.KEY_TOKEN, token)
     }
 
     suspend fun saveServerUrl(url: String) {
-        context.dataStore.edit { it[SERVER_URL] = url }
+        context.dataStore.edit {
+            // A different server: what we knew about the old one's version
+            // no longer applies until the next sync reads it again.
+            if (it[SERVER_URL] != url) it.remove(SERVER_VERSION)
+            it[SERVER_URL] = url
+        }
+    }
+
+    suspend fun saveServerVersion(version: String) {
+        context.dataStore.edit { it[SERVER_VERSION] = version }
     }
 
     suspend fun saveLoginData(userId: Long, name: String, isAdmin: Boolean, forcePasswordChange: Boolean, totpEnabled: Boolean) {

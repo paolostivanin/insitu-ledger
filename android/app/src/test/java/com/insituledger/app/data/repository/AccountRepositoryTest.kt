@@ -57,4 +57,16 @@ class AccountRepositoryTest {
         coVerify { pending.insert(match { it.entityType == "account" && it.operation == "DELETE" && it.entityId == -1L && it.serverId == null }) }
         verify { sync.triggerImmediateSync() }
     }
+
+    @Test fun newLocalIdSkipsIdsReferencedByPendingOps() = runTest {
+        every { prefs.getSyncModeImmediate() } returns "webapp"
+        coEvery { accounts.getMinId() } returns 5L
+        coEvery { pending.getMinEntityId("account") } returns -4L
+
+        val id = repository().create("Cash", "EUR", 0.0)
+
+        org.junit.Assert.assertEquals(-5L, id)
+        coVerify { accounts.upsert(match { it.id == -5L }) }
+        coVerify { pending.insert(match { it.operation == "CREATE" && it.entityId == -5L }) }
+    }
 }

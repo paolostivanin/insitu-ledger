@@ -39,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.Role
@@ -218,6 +219,7 @@ fun SelectorRow(
     valueLeading: (@Composable () -> Unit)? = null,
     supporting: String? = null,
     isError: Boolean = false,
+    enabled: Boolean = true,
     trailing: (@Composable () -> Unit)? = {
         Icon(
             Icons.Default.ChevronRight,
@@ -230,7 +232,9 @@ fun SelectorRow(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = AppSpacing.rowMinHeight)
-            .clickable(role = Role.Button, onClickLabel = "Change $label", onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = "Change $label", onClick = onClick)
+            // Disabled rows fade like other disabled Material controls.
+            .alpha(if (enabled) 1f else 0.38f)
             .semantics(mergeDescendants = true) {
                 contentDescription = "$label: ${value ?: "not set"}"
             }

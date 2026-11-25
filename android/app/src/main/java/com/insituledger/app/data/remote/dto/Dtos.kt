@@ -205,6 +205,57 @@ data class CreateTransactionResponse(
     val scheduled: Boolean = false,
 )
 
+// POST /api/transactions/batch-update (server >= 1.27). Absent / null fields
+// mean "leave unchanged"; the app's Gson (default config, no serializeNulls)
+// omits nulls, so a rename-only request never carries a category_id key.
+// The push loop sends a run of identical PATCH ops as one request (up to 500
+// ids) and never sets updateSchedules: linked schedules get their own PATCH
+// ops against POST /api/scheduled/batch-update.
+data class BatchUpdateRequest(
+    val ids: List<Long>,
+    val description: String? = null,
+    @SerializedName("category_id") val categoryId: Long? = null,
+    @SerializedName("update_schedules") val updateSchedules: Boolean? = null
+)
+
+// POST /api/scheduled/batch-update. Only description and category change
+// server-side; next_occurrence, rrule, amount and the rest are never touched.
+data class ScheduledBatchUpdateRequest(
+    val ids: List<Long>,
+    val description: String? = null,
+    @SerializedName("category_id") val categoryId: Long? = null
+)
+
+data class BatchUpdateResponse(
+    val updated: Int = 0,
+    val unchanged: Int = 0,
+    val skipped: Int = 0,
+    @SerializedName("schedules_updated") val schedulesUpdated: Int = 0,
+    @SerializedName("schedules_unchanged") val schedulesUnchanged: Int = 0,
+    @SerializedName("schedules_skipped") val schedulesSkipped: Int = 0
+)
+
+// POST /api/transactions/batch-delete (every server version): soft-deletes the
+// live rows among ids and answers 204; ids already gone are skipped. The push
+// loop coalesces queued transaction DELETEs into it.
+data class BatchDeleteRequest(val ids: List<Long>)
+
+// GET /api/health (unauthenticated). Servers >= 1.27 report their version;
+// older ones send only {"status":"ok"}.
+data class HealthResponse(
+    val status: String? = null,
+    val version: String? = null
+)
+
+// payload_json of a queued "PATCH" operation (bulk edit). Carries only the
+// fields the user asked to change; null = unchanged, and Gson drops it from
+// the JSON. Unlike an UPDATE it never carries a full row, so a stale local
+// copy can't roll back amount/date/note or a schedule's next_occurrence.
+data class BulkPatchPayload(
+    val description: String? = null,
+    @SerializedName("category_id") val categoryId: Long? = null
+)
+
 data class AccessibleOwnerDto(
     @SerializedName("owner_user_id") val ownerUserId: Long,
     val name: String,
