@@ -4,7 +4,7 @@
 
 A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, and Android app with offline-first local storage and optional sync.
 
-**Current release:** backend + frontend `v1.26.2` · Android `v1.38.1` · MIT licensed
+**Current release:** backend + frontend `v1.27.0` · Android `v1.39.0` · MIT licensed
 
 ## Contents
 
@@ -32,7 +32,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 ### Core ledger
 
 - **Transactions** — record income and expenses across multiple accounts with date, time, and free-text notes
-- **Search** — free-text search across transaction descriptions
+- **Search** — free-text search across transaction descriptions; tick **Match exactly** to find only entries named exactly that ("Stipendio" without "Stipendio Lisa"; case and surrounding spaces ignored), and **Added by me** on shared accounts to hide what co-owners entered
 - **Autocomplete** — typing a description suggests previously used entries and prefills the category, and the amount for recurring ones
 - **Accounts** — multiple accounts with independent balances and currencies (default EUR)
 - **Categories** — hierarchical categories (parent/child, icons, colors) for income and expense
@@ -40,7 +40,7 @@ A self-hosted personal finance tracker with a Go backend, SvelteKit frontend, an
 - **Inline scheduling (Android)** — schedule straight from the add-transaction screen: the calendar-clock button next to the date opens a sheet for a one-time entry at a future date or a recurring series. Start a series in the past to back-fill a forgotten expense ("paid rent last Friday, repeat monthly") — the missed entries are created right away. Existing transactions are never converted into schedules
 - **Reports** — spending by category or rolled up into parent categories, over a period (this week/month/year, last month/year, or a custom range), plus by-month and trend analysis (ECharts)
 - **Search summary** — total any description search into money in, money out and the net, one row per currency. Tag a trip or project in the description ("Valencia") and see what you spent, what people paid back, and where it landed
-- **Batch operations** — multi-select transactions for bulk delete or category change
+- **Bulk edit** — select entries (or every entry matching the current search and filters, up to 5000) and rename them, change their category, or both, in one step on web and Android. The category picker only offers categories of the right owner and type, and can optionally update the linked recurring schedules so future entries follow. Bulk delete works on the same selection
 - **CSV import/export** — export filtered transactions; import with category/account name matching
 - **Soft deletes** — entities are tombstoned with `deleted_at` so sync clients can converge
 
@@ -186,14 +186,14 @@ When the backend starts against an empty database, it creates a single admin use
 
 ### Docker
 
-Every release publishes a multi-arch image (amd64 + arm64) to GitHub Container Registry: `ghcr.io/paolostivanin/insitu-ledger`, tagged `1.26.2`, `1.26`, `1` and `latest`.
+Every release publishes a multi-arch image (amd64 + arm64) to GitHub Container Registry: `ghcr.io/paolostivanin/insitu-ledger`, tagged `1.27.0`, `1.27`, `1` and `latest`.
 
 ```bash
 docker compose up -d                     # pulls the image and starts the server on :8080
 docker compose pull && docker compose up -d   # upgrade
 ```
 
-Pin a release in `docker-compose.yml` (`ghcr.io/paolostivanin/insitu-ledger:1.26.2`) if you prefer to upgrade deliberately; to build from a checkout instead, replace `image:` with `build: .`. Data is persisted in a named Docker volume (`<project>_ledger_data`, unchanged from earlier releases); a bind mount (`./data:/data`) works too and is easier to back up.
+Pin a release in `docker-compose.yml` (`ghcr.io/paolostivanin/insitu-ledger:1.27.0`) if you prefer to upgrade deliberately; to build from a checkout instead, replace `image:` with `build: .`. Data is persisted in a named Docker volume (`<project>_ledger_data`, unchanged from earlier releases); a bind mount (`./data:/data`) works too and is easier to back up.
 
 The server never runs as root: the entrypoint starts it as the owner of `/data` (or `PUID`/`PGID`, default `1000`), fixing ownership on first start. The image has a health check on `/api/health` (it assumes the default port; keep `INSITU_ADDR=:8080` inside the container and remap with `ports:`). On SELinux hosts, add `:Z` to a bind mount.
 
@@ -445,7 +445,7 @@ Full interactive documentation is available at `/api/docs` (Swagger UI). The spe
 | TOTP | `POST /api/auth/totp/setup`, `POST /api/auth/totp/verify`, `POST /api/auth/totp/reset` |
 | Trusted devices | `GET /api/auth/trusted-devices`, `DELETE /api/auth/trusted-devices`, `DELETE /api/auth/trusted-devices/{id}` |
 | Transactions | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/transactions`, plus `GET /api/transactions/autocomplete` |
-| Batch | `POST /api/transactions/batch-delete`, `POST /api/transactions/batch-update-category` |
+| Batch | `POST /api/transactions/batch-delete`, `POST /api/transactions/batch-update`, `POST /api/scheduled/batch-update`, `POST /api/transactions/batch-update-category` (deprecated) |
 | CSV | `GET /api/transactions/export`, `POST /api/transactions/import` |
 | Categories | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/categories` |
 | Accounts | `GET`, `POST`, `PUT {id}`, `DELETE {id}` under `/api/accounts` |
