@@ -2,7 +2,7 @@ openapi: "3.0.3"
 info:
   title: InSitu Ledger API
   description: Self-hosted personal finance tracker API
-  version: "1.26.2"
+  version: "1.27.0"
 
 servers:
   - url: /api
@@ -15,6 +15,34 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
+
+  parameters:
+    MatchParam:
+      name: match
+      in: query
+      description: >-
+        How `q` matches the description (since v1.27.0). `contains` (default)
+        is the case-insensitive infix search. `exact` matches the whole
+        description, ignoring surrounding spaces, case-insensitively for ASCII
+        (`TRIM(description) = q COLLATE NOCASE`); `%`, `_` and `\` are literal
+        and null descriptions never match. No effect when `q` is empty. Any
+        other value is 400 `invalid match: use 'contains' or 'exact'`.
+      schema:
+        type: string
+        enum: [contains, exact]
+        default: contains
+    AddedByParam:
+      name: added_by
+      in: query
+      description: >-
+        `me` (since v1.27.0) keeps only the entries the caller entered
+        (`created_by_user_id` = the authenticated user; scheduler-created
+        entries carry the schedule creator). Entries whose creator was deleted
+        never match. Composes with every other filter. Only `me` is accepted;
+        any other value is 400 `invalid added_by: use 'me'`.
+      schema:
+        type: string
+        enum: [me]
 
   schemas:
     Error:
@@ -550,6 +578,81 @@ components:
           type: integer
           description: Number of matching transactions in this currency.
 
+    BatchEditInput:
+      type: object
+      required: [ids]
+      description: >-
+        At least one of `description` / `category_id` must be set; absent or
+        null leaves that field unchanged. Only those two columns are ever
+        written.
+      properties:
+        ids:
+          type: array
+          description: >-
+            Positive ids, at most 5000 after removing duplicates (duplicates
+            count once). Missing or soft-deleted ids are skipped, never
+            resurrected.
+          items:
+            type: integer
+        description:
+          type: string
+          nullable: true
+          description: >-
+            New description, replacing the whole name. Stored trimmed; must not
+            be blank after trimming or exceed 500 bytes.
+        category_id:
+          type: integer
+          nullable: true
+          description: >-
+            New category. Must be a live category of the entries' single owner,
+            with the same type as every selected entry.
+
+    BatchUpdateTransactionsInput:
+      allOf:
+        - $ref: "#/components/schemas/BatchEditInput"
+        - type: object
+          properties:
+            update_schedules:
+              type: boolean
+              default: false
+              description: >-
+                Also apply the edit to the live recurring schedules the
+                selected entries were created from (distinct `scheduled_id`),
+                so future occurrences follow. Soft-deleted (including finished)
+                schedules and schedules in accounts the caller cannot access
+                are skipped; paused schedules are updated. With `category_id`,
+                every such schedule must have the entries' owner and the
+                category's type.
+
+    BatchEditResult:
+      type: object
+      properties:
+        updated:
+          type: integer
+          description: Rows written (their value actually changed).
+        unchanged:
+          type: integer
+          description: Live rows that already had the requested values (not written, sync_version untouched).
+        skipped:
+          type: integer
+          description: Requested ids that are missing or soft-deleted.
+
+    BatchUpdateTransactionsResult:
+      allOf:
+        - $ref: "#/components/schemas/BatchEditResult"
+        - type: object
+          properties:
+            schedules_updated:
+              type: integer
+            schedules_unchanged:
+              type: integer
+            schedules_skipped:
+              type: integer
+              description: >-
+                Linked schedules that are missing, soft-deleted (finished) or
+                in an account the caller cannot access. All three schedule
+                counts are 0 unless `update_schedules` is set.
+
     CategoryReport:
       type: object
       properties:
@@ -670,6 +773,9 @@ paths:
                 properties:
                   status:
                     type: string
+                  version:
+                    type: string
+                    description: Server version (e.g. "1.27.0"). Android 1.39+ reads it to decide whether bulk edits can sync.
 
   /auth/login:
     post:
@@ -864,6 +970,8 @@ paths:
           schema:
             type: string
             maxLength: 200
+        - $ref: "#/components/parameters/MatchParam"
+        - $ref: "#/components/parameters/AddedByParam"
         - name: limit
           in: query
           schema:
@@ -969,6 +1077,11 @@ paths:
     post:
       tags: [Transactions]
       summary: Batch delete transactions
+      description: >-
+        Soft-deletes every live selected entry and reverses its balance effect
+        once, in one database transaction. Missing or already deleted ids are
+        ignored. Since v1.27.0 ids must be positive and are capped at 5000
+        after removing duplicates.
       requestBody:
         required: true
         content:
@@ -984,11 +1097,29 @@ paths:
       responses:
         "204":
           description: Deleted
+        "400":
+          description: "`invalid request body`, `ids required`, `invalid id`, `too many ids (max 5000)`"
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: "`forbidden: no shared access`: a selected entry is in an inaccessible account. Nothing is deleted."
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /transactions/batch-update-category:
     post:
       tags: [Transactions]
-      summary: Batch update category
+      summary: Batch update category (deprecated)
+      deprecated: true
+      description: >-
+        Deprecated since v1.27.0; use `POST /transactions/batch-update`. Kept
+        for older clients. Since v1.27.0 it also rejects a category whose type
+        differs from any selected entry, removes duplicate ids and caps them at
+        5000.
       requestBody:
         required: true
         content:
@@ -1005,7 +1136,79 @@ paths:
                   type: integer
       responses:
         "204":
-          description: Updated
+          description: Updated (also when none of the ids is live)
+        "400":
+          description: >-
+            `invalid request body`, `ids and category_id required`,
+            `too many ids (max 5000)`, `category not found`,
+            `category type does not match the selected entries`
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: >-
+            `forbidden: no shared access` (an entry is in an inaccessible
+            account) or `forbidden: transactions span multiple owners`
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /transactions/batch-update:
+    post:
+      tags: [Transactions]
+      summary: Rename and/or recategorize many transactions
+      description: >-
+        Since v1.27.0. Applies one edit to every selected entry inside a
+        single database transaction. All checks run before anything is
+        written, in this order: body decodes; `ids` non-empty; a field is set;
+        every id positive; at most 5000 distinct ids; description not blank
+        and at most 500 bytes; `category_id` positive; then, on the live
+        entries: every account accessible (else 403 for the whole request);
+        with a category, one owner, a live category of that owner, one entry
+        type, matching the category type; with `update_schedules`, the linked
+        schedule checks. Only rows whose value actually changes are written,
+        so unchanged rows keep their `sync_version`. `next_occurrence`,
+        `rrule`, `amount` and every other column are never touched. If no
+        selected entry is live, returns 200 with zero updated/unchanged counts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchUpdateTransactionsInput"
+      responses:
+        "200":
+          description: Counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchUpdateTransactionsResult"
+        "400":
+          description: >-
+            `invalid request body`; `ids required`;
+            `nothing to update: set description and/or category_id`;
+            `invalid id`; `too many ids (max 5000)`;
+            `description must not be empty`;
+            `description must not exceed 500 characters` (bytes);
+            `invalid category_id`;
+            `selected entries belong to different owners; change the category for one owner at a time`;
+            `category not found`;
+            `selected entries mix income and expense; change the category for one type at a time`;
+            `category type does not match the selected entries`;
+            `a linked recurring schedule belongs to a different owner`;
+            `a linked recurring schedule has a different type than the new category`
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: "`forbidden: no shared access`: a live selected entry is in an account the caller cannot access. Nothing is written."
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /transactions/export:
     get:
@@ -1039,6 +1242,8 @@ paths:
           schema:
             type: string
             maxLength: 200
+        - $ref: "#/components/parameters/MatchParam"
+        - $ref: "#/components/parameters/AddedByParam"
       responses:
         "200":
           description: CSV file
@@ -1309,6 +1514,44 @@ paths:
         "204":
           description: Deleted
 
+  /scheduled/batch-update:
+    post:
+      tags: [Scheduled]
+      summary: Rename and/or recategorize many scheduled transactions
+      description: >-
+        Since v1.27.0. Same request rules, check order and error messages as
+        `POST /transactions/batch-update` (without `update_schedules`, which
+        is ignored), applied to scheduled transactions. Only `description`
+        and `category_id` are written; `next_occurrence`, `rrule`, `amount`,
+        `active`, the occurrence counters and every other column are never
+        touched. Soft-deleted (including finished) schedules are skipped;
+        paused ones are updated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchEditInput"
+      responses:
+        "200":
+          description: Counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchEditResult"
+        "400":
+          description: See `POST /transactions/batch-update` (the schedule-link messages do not apply).
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: "`forbidden: no shared access`. Nothing is written."
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /sync:
     get:
       tags: [Sync]
@@ -1381,6 +1624,8 @@ paths:
           schema:
             type: string
             maxLength: 200
+        - $ref: "#/components/parameters/MatchParam"
+        - $ref: "#/components/parameters/AddedByParam"
         - name: owner_id
           in: query
           schema:

@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"runtime/debug"
@@ -70,6 +71,11 @@ type scheduled struct {
 	occurrenceCount int64
 }
 
+// errScheduleChanged: the schedule was edited, paused, deleted or advanced
+// between queryDue and processOne's transaction. Nothing was written; the
+// next pass re-reads it (or no longer finds it due).
+var errScheduleChanged = errors.New("schedule changed since it was queried")
+
 // processDue materializes every due occurrence, re-querying after each pass
 // until nothing is due (capped at maxCatchUpPasses). A schedule that is
 // several periods overdue therefore catches up in one tick instead of one
@@ -112,6 +118,9 @@ func processDue(db *sql.DB, home *time.Location) {
 					break
 				}
 				time.Sleep(time.Duration(50*(attempt+1)) * time.Millisecond)
+			}
+			if errors.Is(err, errScheduleChanged) {
+				continue
 			}
 			if err != nil {
 				log.Printf("scheduler: scheduled %d failed: %v", s.id, err)
@@ -166,6 +175,29 @@ func processOne(db *sql.DB, s scheduled, now time.Time, home *time.Location) (st
 		return "", fmt.Errorf("begin: %w", err)
 	}
 
+	// queryDue read s outside this transaction, so the schedule may have been
+	// edited (e.g. a bulk rename/recategorise), paused, deleted or advanced
+	// since. Re-read it here and materialize only if it is still active and on
+	// the same occurrence, using its current values. Without this, a stale copy
+	// booked one more entry against a just-deleted schedule and the closing
+	// UPDATE revived it (active=1, deleted_at=NULL), or wrote the old name and
+	// category into the occurrence right after the user changed them.
+	err = tx.QueryRow(
+		`SELECT account_id, category_id, user_id, created_by_user_id, type, amount, currency, description, note, rrule, max_occurrences
+		 FROM scheduled_transactions
+		 WHERE id = ? AND active = 1 AND deleted_at IS NULL AND next_occurrence = ? AND occurrence_count = ?`,
+		s.id, s.nextOccurrence, s.occurrenceCount,
+	).Scan(&s.accountID, &s.categoryID, &s.userID, &s.createdByUserID, &s.typ, &s.amount, &s.currency,
+		&s.description, &s.note, &s.rrule, &s.maxOccurrences)
+	if errors.Is(err, sql.ErrNoRows) {
+		tx.Rollback()
+		return "", errScheduleChanged
+	}
+	if err != nil {
+		tx.Rollback()
+		return "", fmt.Errorf("re-read schedule: %w", err)
+	}
+
 	// Deterministic client_id per (scheduled, occurrence): if this exact
 	// occurrence was already materialized (e.g. multi-instance race, or a
 	// crafted collision), the partial UNIQUE index on
@@ -212,12 +244,21 @@ func processOne(db *sql.DB, s scheduled, now time.Time, home *time.Location) (st
 		deletedAt = sql.NullString{String: now.UTC().Format(time.DateTime), Valid: true}
 	}
 
-	if _, err := tx.Exec(
-		"UPDATE scheduled_transactions SET next_occurrence = ?, occurrence_count = ?, active = ?, deleted_at = ? WHERE id = ?",
-		next, newCount, active, deletedAt, s.id,
-	); err != nil {
+	res, err := tx.Exec(
+		`UPDATE scheduled_transactions SET next_occurrence = ?, occurrence_count = ?, active = ?, deleted_at = ?
+		 WHERE id = ? AND active = 1 AND deleted_at IS NULL AND next_occurrence = ? AND occurrence_count = ?`,
+		next, newCount, active, deletedAt, s.id, s.nextOccurrence, s.occurrenceCount,
+	)
+	if err != nil {
 		tx.Rollback()
 		return "", fmt.Errorf("advance next_occurrence: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		tx.Rollback()
+		if err != nil {
+			return "", fmt.Errorf("advance next_occurrence: %w", err)
+		}
+		return "", errScheduleChanged
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/pstivanin/insitu-ledger/backend/internal"
 	"github.com/pstivanin/insitu-ledger/backend/internal/auth"
 )
 
@@ -51,7 +52,7 @@ func NewRouter(s *Server) http.Handler {
 			json.NewEncoder(w).Encode(map[string]string{"status": "db_unavailable"})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": internal.Version})
 	})
 
 	// API docs (unauthenticated)
@@ -116,7 +117,9 @@ func NewRouter(s *Server) http.Handler {
 
 	// Batch operations
 	protected.HandleFunc("POST /api/transactions/batch-delete", s.handleBatchDeleteTransactions)
-	protected.HandleFunc("POST /api/transactions/batch-update-category", s.handleBatchUpdateCategory)
+	protected.HandleFunc("POST /api/transactions/batch-update-category", s.handleBatchUpdateCategory) // deprecated since 1.27.0
+	protected.HandleFunc("POST /api/transactions/batch-update", s.handleBatchUpdateTransactions)
+	protected.HandleFunc("POST /api/scheduled/batch-update", s.handleBatchUpdateScheduled)
 
 	// CSV import/export
 	protected.HandleFunc("GET /api/transactions/export", s.handleExportTransactions)

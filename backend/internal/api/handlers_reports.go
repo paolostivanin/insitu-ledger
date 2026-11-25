@@ -125,6 +125,16 @@ func (s *Server) handleReportSummary(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	matchMode, err := parseMatchMode(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	addedByMe, err := parseAddedBy(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	query := `SELECT t.currency,
 	                 COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount END), 0) AS income,
@@ -148,10 +158,16 @@ func (s *Server) handleReportSummary(w http.ResponseWriter, r *http.Request) {
 		args = append(args, catID, catID)
 	}
 	if q != "" {
-		// Description only, matching GET /api/transactions — so the rows behind
-		// a total are the rows the same search shows in the list.
-		query += ` AND t.description LIKE ? ESCAPE '\'`
-		args = append(args, "%"+escapeLike(q)+"%")
+		// Description only, matching GET /api/transactions (same helper, same
+		// match modes) — so the rows behind a total are the rows the same
+		// search shows in the list.
+		clause, arg := descriptionSearchClause(q, matchMode)
+		query += clause
+		args = append(args, arg)
+	}
+	if addedByMe {
+		query += addedByMeClause
+		args = append(args, userID)
 	}
 
 	// SUM(t.amount) is income+expense (amounts are stored positive; `type`
