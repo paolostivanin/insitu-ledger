@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { scheduled, categories, accounts, type ScheduledTransaction, type Category, type Account } from '$lib/api/client';
 	import CategoryPicker from '$lib/components/CategoryPicker.svelte';
+	import { categoryForType, formCategoryError, keepFormCategory, type OriginalCategory } from '$lib/categoryTree';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { currencySymbol } from '$lib/stores/auth';
 	import { formatMoney } from '$lib/format';
@@ -28,6 +29,8 @@
 	let error = $state('');
 	let loadError = $state('');
 	let submitting = $state(false);
+	// The edited schedule's category as loaded; it may be soft-deleted (unlisted).
+	let editOriginal: OriginalCategory | null = null;
 
 	// Confirm dialog
 	let confirmOpen = $state(false);
@@ -91,7 +94,9 @@
 			if (seq !== loadSeq) return;
 			items = s; cats = c; accts = a;
 			if (!accts.some(a => a.id === fAccountId)) fAccountId = accts[0]?.id || 0;
-			if (!cats.some(c => c.id === fCategoryId)) fCategoryId = cats[0]?.id || 0;
+			if (!keepFormCategory(cats, fCategoryId, editId !== null ? editOriginal : null)) {
+				fCategoryId = categoryForType(cats, fType, 0);
+			}
 		} catch (e) {
 			if (seq === loadSeq) loadError = e instanceof Error ? e.message : 'Failed to load scheduled entries.';
 		} finally {
@@ -119,6 +124,7 @@
 
 	function resetForm() {
 		editId = null;
+		editOriginal = null;
 		fType = 'expense';
 		fAmount = 0;
 		fCurrency = 'EUR';
@@ -134,11 +140,19 @@
 		fEndDate = '';
 		fActive = true;
 		if (accts.length) fAccountId = accts[0].id;
-		if (cats.length) fCategoryId = cats[0].id;
+		fCategoryId = categoryForType(cats, fType, 0);
+	}
+
+	// Switching type swaps an incompatible category for the first one of the
+	// new type, so the form never holds (or submits) a mismatched category.
+	function setType(type: 'income' | 'expense') {
+		fType = type;
+		fCategoryId = categoryForType(cats, type, fCategoryId);
 	}
 
 	function startEdit(item: ScheduledTransaction) {
 		editId = item.id;
+		editOriginal = { categoryId: item.category_id, type: item.type };
 		fType = item.type;
 		fAccountId = item.account_id;
 		fCategoryId = item.category_id;
@@ -186,6 +200,11 @@
 	async function submit(e: Event) {
 		e.preventDefault();
 		error = '';
+		const categoryError = formCategoryError(cats, fType, fCategoryId, editId !== null ? editOriginal : null);
+		if (categoryError) {
+			error = categoryError;
+			return;
+		}
 		if (fEndMode === 'date' && !fEndDate) {
 			error = 'Pick an end date';
 			return;
@@ -264,7 +283,7 @@
 				<div class="form-row">
 					<div class="form-group">
 						<label for="type">Type</label>
-						<select id="type" bind:value={fType}>
+						<select id="type" value={fType} onchange={(e) => setType(e.currentTarget.value as 'income' | 'expense')}>
 							<option value="expense">Expense</option>
 							<option value="income">Income</option>
 						</select>

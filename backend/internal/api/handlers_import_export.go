@@ -22,8 +22,19 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 
 	from := r.URL.Query().Get("from")
 	to := r.URL.Query().Get("to")
+	catID := r.URL.Query().Get("category_id")
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if err := validateLength("q", q, maxSearchLen); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	matchMode, err := parseMatchMode(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	addedByMe, err := parseAddedBy(r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -31,7 +42,7 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 	// "added_by" projects the creator's display name unconditionally — solo
 	// accounts get the same column populated, which is simpler than per-row
 	// branching and keeps the CSV schema stable across share/un-share.
-	query := `SELECT t.date, t.type, t.amount, t.currency, t.description, COALESCE(t.note, ''),
+	query := `SELECT t.date, t.type, t.amount, t.currency, COALESCE(t.description, ''), COALESCE(t.note, ''),
 		COALESCE(c.name, ''), COALESCE(a.name, ''), COALESCE(cu.name, '')
 		FROM transactions t
 		LEFT JOIN categories c ON c.id = t.category_id
@@ -49,11 +60,23 @@ func (s *Server) handleExportTransactions(w http.ResponseWriter, r *http.Request
 		query += " AND SUBSTR(t.date, 1, 10) <= ?"
 		args = append(args, to)
 	}
+	if catID != "" {
+		// Same parent → direct-children expansion as the list, so exporting a
+		// filtered list exports exactly what it shows.
+		query += " AND t.category_id IN (SELECT id FROM categories WHERE id = ? OR parent_id = ?)"
+		args = append(args, catID, catID)
+	}
 	if q != "" {
-		// Keep the export in step with the list view's search, so exporting
-		// while a search is active doesn't silently dump everything.
-		query += ` AND t.description LIKE ? ESCAPE '\'`
-		args = append(args, "%"+escapeLike(q)+"%")
+		// Keep the export in step with the list view's search (including the
+		// match mode), so exporting while a search is active doesn't silently
+		// dump everything.
+		clause, arg := descriptionSearchClause(q, matchMode)
+		query += clause
+		args = append(args, arg)
+	}
+	if addedByMe {
+		query += addedByMeClause
+		args = append(args, userID)
 	}
 	query += " ORDER BY t.date DESC"
 

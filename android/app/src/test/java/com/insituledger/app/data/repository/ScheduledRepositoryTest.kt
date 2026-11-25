@@ -176,4 +176,13 @@ class ScheduledRepositoryTest {
         assertTrue(inserted.isEmpty())
         verify(exactly = 0) { sync.triggerImmediateSync() }
     }
+
+    @Test fun newLocalIdSkipsIdsReferencedByPendingOps() = runTest {
+        every { prefs.getSyncModeImmediate() } returns "webapp"
+        // Table min is -3 (setup); a leftover op still names -8.
+        coEvery { pending.getMinEntityId("scheduled") } returns -8L
+
+        assertEquals(-9L, create())
+        assertEquals(-9L, inserted.single().entityId)
+    }
 }

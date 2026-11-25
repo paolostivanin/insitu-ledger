@@ -16,6 +16,10 @@ import com.insituledger.app.data.remote.api.ScheduledApi
 import com.insituledger.app.data.remote.api.SyncApi
 import com.insituledger.app.data.remote.api.TransactionApi
 import com.insituledger.app.data.remote.dto.AccountInput
+import com.insituledger.app.data.remote.dto.BatchUpdateRequest
+import com.insituledger.app.data.remote.dto.BatchUpdateResponse
+import com.insituledger.app.data.remote.dto.BulkPatchPayload
+import com.insituledger.app.data.remote.dto.ScheduledBatchUpdateRequest
 import com.insituledger.app.data.remote.dto.CategoryInput
 import com.insituledger.app.data.remote.dto.CreateTransactionResponse
 import com.insituledger.app.data.remote.dto.IdResponse
@@ -27,6 +31,9 @@ import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.slot
 import io.mockk.unmockkStatic
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -60,6 +67,8 @@ class SyncRepositoryTest {
     // dependent UPDATE) observe queue state changes the way Room would.
     private val queue = mutableListOf<PendingOperationEntity>()
     private var nextOpId = 1L
+    // Same as the DAO's ORDER BY id ASC: queue order, never the wall clock.
+    private val queueOrder = compareBy<PendingOperationEntity> { it.id }
 
     private fun newRepository() = SyncRepository(
         database, syncApi, transactionApi, categoryApi, accountApi, scheduledApi,
@@ -79,7 +88,28 @@ class SyncRepositoryTest {
         coEvery { database.withTransaction(capture(block)) } coAnswers { block.captured.invoke() }
 
         coEvery { pendingOpDao.getAll() } answers {
-            queue.filter { it.state == PendingOperationEntity.STATE_PENDING }
+            queue.filter { it.state == PendingOperationEntity.STATE_PENDING }.sortedWith(queueOrder)
+        }
+        coEvery { pendingOpDao.deleteFailed() } answers {
+            queue.removeAll { it.state == PendingOperationEntity.STATE_FAILED }
+        }
+        // Mirrors the DAO: same entity (COALESCE(server_id, entity_id)), queued
+        // earlier, any state, never a CREATE.
+        coEvery { pendingOpDao.getOlderOpsForEntity(any(), any(), any()) } answers {
+            val type = firstArg<String>()
+            val entityId = secondArg<Long>()
+            val beforeId = thirdArg<Long>()
+            queue.filter {
+                it.entityType == type && (it.serverId ?: it.entityId) == entityId &&
+                    it.id < beforeId && it.operation != "CREATE"
+            }.sortedWith(queueOrder)
+        }
+        coEvery { pendingOpDao.retryFailed() } answers {
+            for (i in queue.indices) {
+                if (queue[i].state == PendingOperationEntity.STATE_FAILED) {
+                    queue[i] = queue[i].copy(state = PendingOperationEntity.STATE_PENDING, lastError = null)
+                }
+            }
         }
         coEvery { pendingOpDao.delete(any()) } answers {
             val op = firstArg<PendingOperationEntity>()
@@ -120,15 +150,45 @@ class SyncRepositoryTest {
             val id = secondArg<Long>()
             queue.removeAll { it.entityType == type && it.entityId == id }
         }
+        // Like the real query: pending ops only, in queue order.
         coEvery { pendingOpDao.findByEntityTypeAndOperation(any(), any()) } answers {
             val type = firstArg<String>()
             val op = secondArg<String>()
-            queue.filter { it.entityType == type && it.operation == op }
+            queue.filter {
+                it.state == PendingOperationEntity.STATE_PENDING && it.entityType == type && it.operation == op
+            }.sortedWith(queueOrder)
         }
         coEvery { pendingOpDao.getById(any()) } answers {
             val id = firstArg<Long>()
             queue.firstOrNull { it.id == id }
         }
+        coEvery { pendingOpDao.insert(any()) } answers { enqueue(firstArg()).id }
+        // Like the real queries: CREATEs only, any state, oldest first.
+        coEvery { pendingOpDao.findCreatesAnyState(any(), any()) } answers {
+            val type = firstArg<String>()
+            val entityId = secondArg<Long>()
+            queue.filter { it.entityType == type && it.operation == "CREATE" && it.entityId == entityId }
+                .sortedWith(queueOrder)
+        }
+        coEvery { pendingOpDao.requeueCreate(any(), any()) } answers {
+            val id = firstArg<Long>()
+            val payload = secondArg<String>()
+            for (i in queue.indices) {
+                if (queue[i].id == id) {
+                    queue[i] = queue[i].copy(state = PendingOperationEntity.STATE_PENDING, lastError = null, payloadJson = payload)
+                }
+            }
+        }
+        coEvery { pendingOpDao.deleteOtherCreates(any(), any(), any()) } answers {
+            val type = firstArg<String>()
+            val ids = secondArg<List<Long>>()
+            val keepId = thirdArg<Long>()
+            queue.removeAll { it.entityType == type && it.operation == "CREATE" && it.entityId in ids && it.id != keepId }
+        }
+        coEvery { accountDao.getAllSync() } returns emptyList()
+        coEvery { categoryDao.getAllSync() } returns emptyList()
+        coEvery { transactionDao.getAllSync() } returns emptyList()
+        coEvery { scheduledDao.getAllSync() } returns emptyList()
     }
 
     @After
@@ -233,6 +293,44 @@ class SyncRepositoryTest {
     private inline fun <reified T> errorBody(code: Int): Response<T> = Response.error(
         code, "".toResponseBody("application/json".toMediaTypeOrNull())
     )
+
+    // Bulk-edit PATCH, as BulkEditRepository queues it.
+    private fun txPatch(
+        entityId: Long,
+        description: String? = "Stipendio",
+        categoryId: Long? = null,
+        createdAt: Long = System.currentTimeMillis()
+    ): PendingOperationEntity = enqueue(PendingOperationEntity(
+        entityType = "transaction", operation = "PATCH", entityId = entityId,
+        serverId = entityId.takeIf { it > 0 },
+        payloadJson = gson.toJson(BulkPatchPayload(description, categoryId)),
+        createdAt = createdAt
+    ))
+
+    private fun schedPatch(entityId: Long, description: String? = null, categoryId: Long? = 11): PendingOperationEntity =
+        enqueue(PendingOperationEntity(
+            entityType = "scheduled", operation = "PATCH", entityId = entityId,
+            serverId = entityId.takeIf { it > 0 },
+            payloadJson = gson.toJson(BulkPatchPayload(description, categoryId))
+        ))
+
+    private fun ok() = Response.success(BatchUpdateResponse(updated = 1))
+
+    private fun txInput(op: PendingOperationEntity): TransactionInput =
+        gson.fromJson(op.payloadJson, TransactionInput::class.java)
+
+    private fun payloadKeys(op: PendingOperationEntity): Set<String> =
+        com.google.gson.JsonParser.parseString(op.payloadJson).asJsonObject.keySet()
+
+    private fun emptySync() {
+        coEvery { prefs.lastSyncVersionFlow } returns kotlinx.coroutines.flow.flowOf(0L)
+        coEvery { syncApi.sync(any()) } returns Response.success(
+            com.insituledger.app.data.remote.dto.SyncResponse(
+                currentVersion = 1, transactions = emptyList(), categories = emptyList(),
+                accounts = emptyList(), scheduledTransactions = emptyList()
+            )
+        )
+    }
 
     // ====================
     // Pre-existing behaviour: preserved by the rewrite.
@@ -921,4 +1019,1034 @@ class SyncRepositoryTest {
         coVerify(exactly = 0) { prefs.saveSyncCheckpoint(any(), any()) }
     }
 
+    // ====================
+    // 429: rate limited is transient and ends the drain.
+    // ====================
+
+    @Test
+    fun push429IsTransientAndStopsDrain() = runTest {
+        txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        txUpdate(entityId = 43L, accountId = 1L, categoryId = 2L)
+        txCreate(localId = -7L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns errorBody(429)
+
+        val result = newRepository().pushPendingOperations()
+
+        val ex = result.exceptionOrNull() as SyncPushException
+        assertEquals(1, ex.transientCount)
+        assertEquals(0, ex.permanentCount)
+        assertTrue("SyncWorker retries with backoff", ex.canRetry)
+        // Nothing after the 429 was sent; everything is still pending.
+        coVerify(exactly = 0) { transactionApi.update(eq(43L), any(), isNull()) }
+        coVerify(exactly = 0) { transactionApi.create(any(), any()) }
+        assertEquals(3, queue.size)
+        assertTrue(queue.all { it.state == PendingOperationEntity.STATE_PENDING })
+    }
+
+    @Test
+    fun cancellationDuringSinglePushPropagatesAndKeepsOpPending() = runTest {
+        txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } throws kotlinx.coroutines.CancellationException("drain cancelled")
+
+        try {
+            newRepository().pushPendingOperations()
+            org.junit.Assert.fail("cancellation must propagate, not be reported as a push failure")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // expected
+        }
+        assertEquals(1, queue.size)
+        assertEquals(PendingOperationEntity.STATE_PENDING, queue.single().state)
+        assertNull(queue.single().lastError)
+    }
+
+    // ===== Duplicate server rows: 401 → logout → login → Settings Retry =====
+
+    private fun localTx(id: Long, amount: Double = 4.15) = com.insituledger.app.data.local.db.entity.TransactionEntity(
+        id = id, accountId = 1L, categoryId = 2L, userId = 0L, type = "expense", amount = amount,
+        currency = "EUR", date = "2026-06-12T08:41:00+03:00", isLocalOnly = true
+    )
+
+    private fun creates(entityType: String = "transaction") = queue.filter { it.entityType == entityType && it.operation == "CREATE" }
+
+    @Test
+    fun duplicateScenario_401ThenReloginThenRetry_createsExactlyOneServerRow() = runTest {
+        // An unsynced entry on the phone.
+        txCreate(localId = -7L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionDao.getAllSync() } returns listOf(localTx(-7L))
+        val sentClientIds = mutableListOf<String?>()
+        coEvery { transactionApi.create(any(), isNull()) } answers {
+            sentClientIds += firstArg<TransactionInput>().clientId
+            errorBody<CreateTransactionResponse>(401)
+        }
+
+        // 1. The session is rejected: the CREATE is kept pending, not failed.
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+        assertEquals(1, ex.transientCount)
+        assertEquals(0, ex.permanentCount)
+        assertEquals(PendingOperationEntity.STATE_PENDING, creates().single().state)
+
+        // 2. Log in again: the row still has exactly one CREATE, same client_id.
+        newRepository().enqueueLocalDataForSync()
+        assertEquals(listOf("tx--7"), creates().map { it.clientId })
+
+        // 3. It syncs once.
+        coEvery { transactionApi.create(any(), isNull()) } answers {
+            sentClientIds += firstArg<TransactionInput>().clientId
+            Response.success(CreateTransactionResponse(id = 99))
+        }
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        // 4. Settings → Retry has nothing left that could create a second row.
+        pendingOpDao.retryFailed()
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        assertEquals("one 401 attempt and one successful attempt, same client_id", listOf("tx--7", "tx--7"), sentClientIds)
+        assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun leftoverDuplicateCreatesFromOlderBuilds_onlyOneReachesTheServer() = runTest {
+        // What an older build left behind: the 401-failed CREATE plus the one
+        // re-queued at login with a fresh client_id.
+        enqueue(txCreate(-7L, 1L, 2L).also { queue.remove(it) }
+            .copy(state = PendingOperationEntity.STATE_FAILED, lastError = "HTTP 401", clientId = "A"))
+        enqueue(txCreate(-7L, 1L, 2L).also { queue.remove(it) }.copy(id = 0, clientId = "B"))
+        coEvery { transactionApi.create(any(), isNull()) } returns Response.success(CreateTransactionResponse(id = 99))
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+        pendingOpDao.retryFailed()
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 1) { transactionApi.create(any(), isNull()) }
+        coVerify(exactly = 1) { transactionApi.create(match { it.clientId == "B" }, isNull()) }
+        assertTrue("the failed duplicate was dropped, not left for Retry", queue.isEmpty())
+    }
+
+    @Test
+    fun twoPendingCreatesForOneRow_secondIsDroppedWhenTheFirstSucceeds() = runTest {
+        txCreate(-7L, 1L, 2L)
+        enqueue(txCreate(-7L, 1L, 2L).also { queue.remove(it) }.copy(id = 0, clientId = "second"))
+        coEvery { transactionApi.create(any(), isNull()) } returns Response.success(CreateTransactionResponse(id = 99))
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 1) { transactionApi.create(any(), isNull()) }
+        coVerify(exactly = 1) { transactionApi.create(match { it.clientId == "tx--7" }, isNull()) }
+        assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun duplicateAccountCreates_onlyOneReachesTheServer() = runTest {
+        acctCreate(-1L)
+        enqueue(queue.last().copy(id = 0, clientId = "second"))
+        coEvery { accountApi.create(any(), isNull()) } returns Response.success(IdResponse(10L))
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 1) { accountApi.create(any(), isNull()) }
+        assertTrue(creates("account").isEmpty())
+    }
+
+    @Test
+    fun enqueueRequeuesAFailedCreateWithCurrentValuesAndItsOriginalClientId() = runTest {
+        val failed = txCreate(-7L, 1L, 2L).also { queue.remove(it) }
+            .copy(state = PendingOperationEntity.STATE_FAILED, lastError = "HTTP 401")
+        enqueue(failed)
+        coEvery { transactionDao.getAllSync() } returns listOf(localTx(-7L, amount = 12.0))
+
+        newRepository().enqueueLocalDataForSync()
+
+        val op = creates().single()
+        assertEquals(failed.id, op.id)
+        assertEquals("tx--7", op.clientId)
+        assertEquals(PendingOperationEntity.STATE_PENDING, op.state)
+        assertNull(op.lastError)
+        assertEquals(12.0, gson.fromJson(op.payloadJson, TransactionInput::class.java).amount, 0.0)
+    }
+
+    @Test
+    fun enqueueKeepsThePendingCreateAndDropsFailedDuplicates() = runTest {
+        enqueue(txCreate(-7L, 1L, 2L).also { queue.remove(it) }
+            .copy(state = PendingOperationEntity.STATE_FAILED, clientId = "A"))
+        val pending = enqueue(txCreate(-7L, 1L, 2L).also { queue.remove(it) }.copy(id = 0, clientId = "B"))
+        coEvery { transactionDao.getAllSync() } returns listOf(localTx(-7L, amount = 12.0))
+
+        newRepository().enqueueLocalDataForSync()
+
+        assertEquals(listOf(pending), creates())
+    }
+
+    @Test
+    fun enqueueAddsOneCreateForARowWithoutOne_andNeverASecond() = runTest {
+        coEvery { transactionDao.getAllSync() } returns listOf(localTx(-7L))
+
+        newRepository().enqueueLocalDataForSync()
+        newRepository().enqueueLocalDataForSync()
+
+        val op = creates().single()
+        assertEquals(-7L, op.entityId)
+        assertNotNull(op.clientId)
+    }
+
+    @Test
+    fun push401StopsTheDrainAndKeepsEveryOpPending() = runTest {
+        txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        txUpdate(entityId = 43L, accountId = 1L, categoryId = 2L)
+        txCreate(localId = -7L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns errorBody(401)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(1, ex.transientCount)
+        assertEquals(0, ex.permanentCount)
+        coVerify(exactly = 0) { transactionApi.update(eq(43L), any(), isNull()) }
+        coVerify(exactly = 0) { transactionApi.create(any(), any()) }
+        assertEquals(3, queue.size)
+        assertTrue(queue.all { it.state == PendingOperationEntity.STATE_PENDING && it.lastError == null })
+    }
+
+    @Test
+    fun batch401StopsTheDrainWithoutFallingBackToSingles() = runTest {
+        txPatch(41L)
+        txPatch(42L)
+        txDelete(43L)
+        coEvery { transactionApi.batchUpdate(any()) } returns errorBody(401)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(0, ex.permanentCount)
+        coVerify(exactly = 1) { transactionApi.batchUpdate(any()) }
+        coVerify(exactly = 0) { transactionApi.delete(any(), any()) }
+        coVerify(exactly = 0) { transactionApi.batchDelete(any()) }
+        assertTrue(queue.all { it.state == PendingOperationEntity.STATE_PENDING })
+    }
+
+    @Test
+    fun push429OnCreatePatchAndDeleteIsTransientNotPermanent() = runTest {
+        for (setup in listOf<() -> Unit>(
+            { txCreate(-7L, 1L, 2L); coEvery { transactionApi.create(any(), isNull()) } returns errorBody(429) },
+            { txPatch(42L); coEvery { transactionApi.batchUpdate(any()) } returns errorBody(429) },
+            { txDelete(42L); coEvery { transactionApi.delete(eq(42L), isNull()) } returns errorBody(429) }
+        )) {
+            queue.clear()
+            setup()
+
+            val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+            assertEquals(1, ex.transientCount)
+            assertEquals(0, ex.permanentCount)
+            assertEquals(PendingOperationEntity.STATE_PENDING, queue.single().state)
+        }
+    }
+
+    // ====================
+    // Per-entity FIFO.
+    // ====================
+
+    @Test
+    fun transientFailureSkipsLaterOpsSameEntity() = runTest {
+        txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        val patch = txPatch(entityId = 42L)
+        txUpdate(entityId = 43L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns errorBody(503)
+        coEvery { transactionApi.update(eq(43L), any(), isNull()) } returns Response.success(Unit)
+
+        val result = newRepository().pushPendingOperations()
+
+        val ex = result.exceptionOrNull() as SyncPushException
+        assertEquals(1, ex.transientCount)
+        assertEquals(0, ex.permanentCount)
+        coVerify(exactly = 0) { transactionApi.batchUpdate(any()) }
+        // The unrelated entity still went through.
+        coVerify(exactly = 1) { transactionApi.update(eq(43L), any(), isNull()) }
+        assertEquals(listOf(1L, patch.id), queue.map { it.id })
+        assertTrue(queue.all { it.state == PendingOperationEntity.STATE_PENDING })
+    }
+
+    @Test
+    fun skippedOpPushedAfterEarlierNextDrain() = runTest {
+        txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        txPatch(entityId = 42L, description = "Stipendio")
+        val calls = mutableListOf<String>()
+        var updateFails = true
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } answers {
+            calls += "UPDATE"
+            if (updateFails) errorBody(503) else Response.success(Unit)
+        }
+        coEvery { transactionApi.batchUpdate(any()) } answers { calls += "PATCH"; ok() }
+        val repository = newRepository()
+
+        assertTrue(repository.pushPendingOperations().isFailure)
+        updateFails = false
+        assertTrue(repository.pushPendingOperations().isSuccess)
+
+        assertEquals(listOf("UPDATE", "UPDATE", "PATCH"), calls)
+        assertTrue(queue.isEmpty())
+    }
+
+    // Was permanentFailureBlocksLaterSameEntityOps: the newer op used to be
+    // marked failed ("blocked by earlier failed operation") without being
+    // sent. Now it is sent, and its success rewrites the failed op so a later
+    // retry can't undo it.
+    @Test
+    fun permanentFailureDoesNotBlockLaterSameEntityOps() = runTest {
+        val update = txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        txPatch(entityId = 42L, description = "Stipendio")
+        txUpdate(entityId = 43L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns errorBody(400)
+        coEvery { transactionApi.update(eq(43L), any(), isNull()) } returns Response.success(Unit)
+        coEvery { transactionApi.batchUpdate(any()) } returns ok()
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(1, ex.permanentCount)
+        assertEquals(0, ex.transientCount)
+        coVerify(exactly = 1) { transactionApi.batchUpdate(match { it.ids == listOf(42L) }) }
+        coVerify(exactly = 1) { transactionApi.update(eq(43L), any(), isNull()) }
+        val failed = queue.single()
+        assertEquals(update.id, failed.id)
+        assertEquals(PendingOperationEntity.STATE_FAILED, failed.state)
+        assertEquals("the newer PATCH's name wins on retry", "Stipendio", txInput(failed).description)
+    }
+
+    // Was lostAccessBlocksLaterSameEntityOps: same change as above.
+    @Test
+    fun lostAccessDoesNotBlockLaterSameEntityOps() = runTest {
+        txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        val patch = txPatch(entityId = 42L)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns errorBody(403)
+        coEvery { transactionApi.batchUpdate(any()) } returns errorBody(403)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        coVerify(exactly = 1) { transactionApi.batchUpdate(match { it.ids == listOf(42L) }) }
+        assertEquals(2, ex.lostAccessCount)
+        val failedPatch = queue.single { it.id == patch.id }
+        assertEquals(PendingOperationEntity.STATE_FAILED, failedPatch.state)
+        assertTrue(failedPatch.lastError!!.endsWith("possible lost access"))
+    }
+
+    // Was existingFailedOpBlocksNewerOps: an op left failed by an earlier
+    // drain no longer holds the entity's newer ops back.
+    @Test
+    fun existingFailedOpDoesNotBlockNewerOps() = runTest {
+        // Failed in an earlier drain; the user hasn't retried or discarded it.
+        val failed = enqueue(PendingOperationEntity(
+            entityType = "transaction", operation = "UPDATE", entityId = 42L, serverId = 42L,
+            payloadJson = gson.toJson(TransactionInput(1L, 2L, "expense", 9.99, "EUR", "x", null, "2026-06-12")),
+            state = PendingOperationEntity.STATE_FAILED, lastError = "HTTP 400"
+        ))
+        txPatch(entityId = 42L)
+        txPatch(entityId = 43L)
+        coEvery { transactionApi.batchUpdate(any()) } returns ok()
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        // Identical payloads: one request for both.
+        coVerify(exactly = 1) { transactionApi.batchUpdate(any()) }
+        coVerify(exactly = 1) { transactionApi.batchUpdate(match { it.ids == listOf(42L, 43L) }) }
+        val left = queue.single()
+        assertEquals(failed.id, left.id)
+        assertEquals(PendingOperationEntity.STATE_FAILED, left.state)
+        assertEquals("Stipendio", txInput(left).description)
+        assertEquals("other fields untouched", 9.99, txInput(left).amount, 0.0)
+    }
+
+    // Now asserts insertion (id) order: created_at is reversed on purpose and
+    // must not matter. Both ops fail on the first drain (nothing blocks the
+    // second), and Retry replays them in the order they were queued.
+    @Test
+    fun retryFailedPushesInOriginalOrder() = runTest {
+        val update = enqueue(PendingOperationEntity(
+            entityType = "transaction", operation = "UPDATE", entityId = 42L, serverId = 42L,
+            payloadJson = gson.toJson(TransactionInput(1L, 2L, "income", 1500.0, "EUR", "Paga", null, "2026-06-12")),
+            createdAt = 2_000L
+        ))
+        val patch = txPatch(entityId = 42L, description = null, categoryId = 11L, createdAt = 1_000L)
+        val calls = mutableListOf<String>()
+        var fail = true
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } answers {
+            calls += "UPDATE"
+            if (fail) errorBody(400) else Response.success(Unit)
+        }
+        coEvery { transactionApi.batchUpdate(any()) } answers {
+            calls += "PATCH"
+            if (fail) errorBody(400) else ok()
+        }
+        val repository = newRepository()
+
+        val ex = repository.pushPendingOperations().exceptionOrNull() as SyncPushException
+        assertEquals(2, ex.permanentCount)
+        assertEquals(listOf("UPDATE", "PATCH"), calls)
+        assertTrue(queue.all { it.state == PendingOperationEntity.STATE_FAILED })
+
+        pendingOpDao.retryFailed()
+        fail = false
+        assertTrue(repository.pushPendingOperations().isSuccess)
+
+        assertEquals(listOf("UPDATE", "PATCH", "UPDATE", "PATCH"), calls)
+        assertTrue(queue.isEmpty())
+        assertTrue(update.id < patch.id)
+    }
+
+    @Test
+    fun sameTimestampPushesInIdOrder() = runTest {
+        val first = txPatch(entityId = 42L, description = "First", createdAt = 5_000L)
+        val second = txPatch(entityId = 42L, description = "Second", createdAt = 5_000L)
+        // Simulate a table scan returning them in the other order.
+        queue.reverse()
+        val sent = mutableListOf<String?>()
+        coEvery { transactionApi.batchUpdate(any()) } answers { sent += firstArg<BatchUpdateRequest>().description; ok() }
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        assertTrue(first.id < second.id)
+        assertEquals(listOf("First", "Second"), sent)
+    }
+
+    // ====================
+    // PATCH ops (bulk edit).
+    // ====================
+
+    @Test
+    fun patchTransactionSendsServerIdAndOnlyPatchedFields() = runTest {
+        txPatch(entityId = 42L, description = "Stipendio", categoryId = null)
+        val request = slot<BatchUpdateRequest>()
+        coEvery { transactionApi.batchUpdate(capture(request)) } returns ok()
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        assertEquals(BatchUpdateRequest(ids = listOf(42L), description = "Stipendio"), request.captured)
+        val json = com.google.gson.JsonParser.parseString(gson.toJson(request.captured)).asJsonObject
+        assertEquals("only the patched field goes over the wire", setOf("ids", "description"), json.keySet())
+        // Never a full-row PUT built from the local copy.
+        coVerify(exactly = 0) { transactionApi.update(any(), any(), any()) }
+        assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun patchCategoryOnlySendsCategoryId() = runTest {
+        txPatch(entityId = 42L, description = null, categoryId = 11L)
+        val request = slot<BatchUpdateRequest>()
+        coEvery { transactionApi.batchUpdate(capture(request)) } returns ok()
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        val json = com.google.gson.JsonParser.parseString(gson.toJson(request.captured)).asJsonObject
+        assertEquals(setOf("ids", "category_id"), json.keySet())
+        assertEquals(11L, json.get("category_id").asLong)
+    }
+
+    @Test
+    fun patchScheduledUsesScheduledBatchUpdate() = runTest {
+        schedPatch(entityId = 70L, description = "Stipendio", categoryId = 11L)
+        val request = slot<ScheduledBatchUpdateRequest>()
+        coEvery { scheduledApi.batchUpdate(capture(request)) } returns ok()
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        assertEquals(ScheduledBatchUpdateRequest(ids = listOf(70L), description = "Stipendio", categoryId = 11L), request.captured)
+        // A full-row PUT would rewrite next_occurrence from the local copy.
+        coVerify(exactly = 0) { scheduledApi.update(any(), any(), any()) }
+        coVerify(exactly = 0) { transactionApi.batchUpdate(any()) }
+        assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun negativeIdPatchDefersUntilCreateRemaps() = runTest {
+        txCreate(localId = -7L, accountId = 1L, categoryId = 2L)
+        txPatch(entityId = -7L, description = "Stipendio")
+        coEvery { transactionApi.create(any(), isNull()) } returns Response.success(CreateTransactionResponse(id = 99))
+        val request = slot<BatchUpdateRequest>()
+        coEvery { transactionApi.batchUpdate(capture(request)) } returns ok()
+
+        val result = newRepository().pushPendingOperations()
+
+        assertTrue("got ${result.exceptionOrNull()?.message}", result.isSuccess)
+        assertEquals(listOf(99L), request.captured.ids)
+        coVerify(exactly = 1) { transactionApi.batchUpdate(any()) }
+        assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun negativeIdPatchWaitsWhileItsCreateFailsTransiently() = runTest {
+        txCreate(localId = -7L, accountId = 1L, categoryId = 2L)
+        txPatch(entityId = -7L)
+        coEvery { transactionApi.create(any(), isNull()) } returns errorBody(503)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(1, ex.transientCount)
+        coVerify(exactly = 0) { transactionApi.batchUpdate(any()) }
+        assertEquals(2, queue.size)
+        assertTrue(queue.all { it.state == PendingOperationEntity.STATE_PENDING })
+    }
+
+    @Test
+    fun negativeScheduledPatchUsesRemappedId() = runTest {
+        schedCreate(-1L)
+        schedPatch(-1L, categoryId = 11L)
+        coEvery { scheduledApi.create(any(), isNull()) } returns Response.success(IdResponse(70L))
+        coEvery { scheduledApi.batchUpdate(any()) } returns ok()
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 1) { scheduledApi.batchUpdate(match { it.ids == listOf(70L) }) }
+    }
+
+    @Test
+    fun patch403IsLostAccess() = runTest {
+        val op = txPatch(entityId = 42L)
+        coEvery { transactionApi.batchUpdate(any()) } returns errorBody(403)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(1, ex.lostAccessCount)
+        assertEquals(PendingOperationEntity.STATE_FAILED, queue.single().state)
+        coVerify(exactly = 0) { pendingOpDao.delete(op) }
+    }
+
+    @Test
+    fun patch400IsPermanent() = runTest {
+        // e.g. the entry's type was flipped on the web and the new category no longer fits.
+        txPatch(entityId = 42L, description = null, categoryId = 11L)
+        coEvery { transactionApi.batchUpdate(any()) } returns errorBody(400)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(1, ex.permanentCount)
+        assertFalse(ex.canRetry)
+        assertEquals(PendingOperationEntity.STATE_FAILED, queue.single().state)
+    }
+
+    @Test
+    fun patchOnOldServer405IsPermanentNotDropped() = runTest {
+        txPatch(entityId = 42L)
+        coEvery { transactionApi.batchUpdate(any()) } returns errorBody(405)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(1, ex.permanentCount)
+        assertEquals(PendingOperationEntity.STATE_FAILED, queue.single().state)
+    }
+
+    @Test
+    fun emptyPatchPayloadIsPermanentWithoutARequest() = runTest {
+        txPatch(entityId = 42L, description = null, categoryId = null)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(1, ex.permanentCount)
+        coVerify(exactly = 0) { transactionApi.batchUpdate(any()) }
+        assertEquals(PendingOperationEntity.STATE_FAILED, queue.single().state)
+    }
+
+    // ====================
+    // Safety.
+    // ====================
+
+    @Test
+    fun unknownOperationIsPermanent() = runTest {
+        for (type in listOf("account", "category", "transaction", "scheduled", "budget")) {
+            queue.clear()
+            enqueue(PendingOperationEntity(entityType = type, operation = "MERGE", entityId = 5L, serverId = 5L))
+
+            val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+            assertEquals(type, 1, ex.permanentCount)
+            assertEquals("never silently dropped: $type", PendingOperationEntity.STATE_FAILED, queue.single().state)
+        }
+        enqueue(PendingOperationEntity(entityType = "account", operation = "PATCH", entityId = 6L, serverId = 6L))
+        newRepository().pushPendingOperations()
+        assertEquals(PendingOperationEntity.STATE_FAILED, queue.single { it.entityId == 6L }.state)
+    }
+
+    @Test
+    fun concurrentSyncCallsSerialized() = runTest {
+        txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        emptySync()
+        var inFlight = 0
+        var maxInFlight = 0
+        val gate = CompletableDeferred<Unit>()
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } coAnswers {
+            inFlight++
+            maxInFlight = maxOf(maxInFlight, inFlight)
+            gate.await()
+            inFlight--
+            Response.success(Unit)
+        }
+        val repository = newRepository()
+
+        val first = async { repository.sync() }
+        val second = async { repository.sync() }
+        runCurrent()
+        assertEquals("the second drain waits for the first", 1, maxInFlight)
+        gate.complete(Unit)
+
+        assertTrue(first.await().isSuccess)
+        assertTrue(second.await().isSuccess)
+        assertEquals(1, maxInFlight)
+        // The second drain found the op already pushed.
+        coVerify(exactly = 1) { transactionApi.update(eq(42L), any(), isNull()) }
+        coVerify(exactly = 2) { syncApi.sync(any()) }
+    }
+
+    // ====================
+    // Supersede-on-success: nothing waits behind a permanent failure, and a
+    // retry can never regress what a newer successful op set.
+    // ====================
+
+    private fun failedTxUpdate(entityId: Long, description: String?, amount: Double = 1500.0, categoryId: Long = 2L) =
+        enqueue(PendingOperationEntity(
+            entityType = "transaction", operation = "UPDATE", entityId = entityId, serverId = entityId,
+            payloadJson = gson.toJson(TransactionInput(1L, categoryId, "income", amount, "EUR", description, "note", "2026-06-12")),
+            state = PendingOperationEntity.STATE_FAILED, lastError = "HTTP 400"
+        ))
+
+    private fun failedTxPatch(entityId: Long, description: String?, categoryId: Long?) =
+        enqueue(PendingOperationEntity(
+            entityType = "transaction", operation = "PATCH", entityId = entityId, serverId = entityId,
+            payloadJson = gson.toJson(BulkPatchPayload(description, categoryId)),
+            state = PendingOperationEntity.STATE_FAILED, lastError = "HTTP 400"
+        ))
+
+    @Test
+    fun deleteAfterPermanentlyFailedPatchIsSentAndDropsSupersededOps() = runTest {
+        // Failed earlier, and fails again this drain.
+        failedTxPatch(42L, "Stipendio", null)
+        pendingOpDao.retryFailed()
+        txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        txDelete(42L)
+        coEvery { transactionApi.batchUpdate(any()) } returns errorBody(400)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns errorBody(400)
+        coEvery { transactionApi.delete(eq(42L), isNull()) } returns Response.success(Unit)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        // The device deleted the row: the DELETE reached the server...
+        coVerify(exactly = 1) { transactionApi.delete(eq(42L), isNull()) }
+        // ...and took the failed PATCH and UPDATE with it, so neither Retry
+        // nor Discard can leave the row alive or edit it afterwards.
+        assertTrue("queue: $queue", queue.isEmpty())
+        assertEquals(2, ex.permanentCount)
+        pendingOpDao.retryFailed()
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+        coVerify(exactly = 1) { transactionApi.batchUpdate(any()) }
+    }
+
+    @Test
+    fun deleteSupersedesFailedOpsFromAnEarlierDrainButNotCreates() = runTest {
+        failedTxPatch(42L, "Stipendio", null)
+        failedTxUpdate(42L, "Paga")
+        // A failed CREATE of another row that happens to share the number:
+        // CREATEs are never touched by reconciliation.
+        val create = enqueue(PendingOperationEntity(
+            entityType = "transaction", operation = "CREATE", entityId = 42L,
+            payloadJson = gson.toJson(TransactionInput(1L, 2L, "expense", 1.0, "EUR", null, null, "2026-06-12")),
+            clientId = "c", state = PendingOperationEntity.STATE_FAILED, lastError = "HTTP 400"
+        ))
+        val otherEntity = failedTxUpdate(43L, "Other")
+        txDelete(42L)
+        coEvery { transactionApi.delete(eq(42L), isNull()) } returns Response.success(Unit)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        assertEquals(listOf(create.id, otherEntity.id), queue.map { it.id })
+    }
+
+    @Test
+    fun retryAfterNewerUpdateSucceededCannotRegress() = runTest {
+        // (1) An older failed PATCH and UPDATE, then a newer full UPDATE that
+        // succeeds: the UPDATE was built from the local row, which already
+        // holds both older edits, so both are dropped.
+        failedTxPatch(42L, "Old name", 11L)
+        failedTxUpdate(42L, "Old name", amount = 10.0)
+        txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L) // "edited", 9.99
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns Response.success(Unit)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+        assertTrue("superseded ops dropped: $queue", queue.isEmpty())
+
+        // (2) An older failed UPDATE, then a newer PATCH that succeeds: the
+        // UPDATE keeps its own amount but takes the PATCH's name and category,
+        // so retrying it can't put the old name back.
+        failedTxUpdate(50L, "Paga", amount = 1500.0, categoryId = 2L)
+        txPatch(entityId = 50L, description = "Stipendio", categoryId = 11L)
+        val sent = mutableListOf<TransactionInput>()
+        coEvery { transactionApi.batchUpdate(any()) } returns ok()
+        coEvery { transactionApi.update(eq(50L), capture(sent), isNull()) } returns Response.success(Unit)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+        pendingOpDao.retryFailed()
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        val retried = sent.single()
+        assertEquals("Stipendio", retried.description)
+        assertEquals(11L, retried.categoryId)
+        assertEquals(1500.0, retried.amount, 0.0)
+        assertEquals("note", retried.note)
+        assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun patchSupersedesOlderPatchFieldsOnly() = runTest {
+        // Older PATCH set both fields, newer one only the name: the older
+        // keeps its category, loses the name.
+        val both = failedTxPatch(42L, "Old name", 11L)
+        // Older PATCH that only set the name: nothing left, dropped.
+        failedTxPatch(42L, "Older name", null)
+        // A newer op of the same entity is not touched.
+        txPatch(entityId = 42L, description = "Stipendio")
+        val newer = txPatch(entityId = 42L, description = null, categoryId = 12L)
+        val requests = mutableListOf<BatchUpdateRequest>()
+        coEvery { transactionApi.batchUpdate(capture(requests)) } answers {
+            // Fail the newest so it stays queued for inspection.
+            if (firstArg<BatchUpdateRequest>().categoryId == 12L) errorBody(400) else ok()
+        }
+
+        newRepository().pushPendingOperations()
+
+        assertEquals(listOf(both.id, newer.id), queue.map { it.id })
+        val trimmed = queue.first()
+        assertEquals(setOf("category_id"), payloadKeys(trimmed))
+        assertEquals(11L, gson.fromJson(trimmed.payloadJson, BulkPatchPayload::class.java).categoryId)
+        assertEquals("newer op untouched", setOf("category_id"), payloadKeys(queue.last()))
+        assertEquals(12L, gson.fromJson(queue.last().payloadJson, BulkPatchPayload::class.java).categoryId)
+
+        // Retrying the trimmed op re-sends only the category.
+        requests.clear()
+        coEvery { transactionApi.batchUpdate(capture(requests)) } returns ok()
+        pendingOpDao.retryFailed()
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+        assertEquals(BatchUpdateRequest(ids = listOf(42L), categoryId = 11L), requests.first())
+    }
+
+    @Test
+    fun retryDuringDrainIsSentNotReblocked() = runTest {
+        val failed = failedTxUpdate(42L, "Paga")
+        txUpdate(entityId = 43L, accountId = 1L, categoryId = 2L)
+        txPatch(entityId = 42L, description = "Stipendio")
+        val sent42 = mutableListOf<TransactionInput>()
+        // The user taps Retry in Settings while the drain is talking to the server.
+        coEvery { transactionApi.update(eq(43L), any(), isNull()) } coAnswers {
+            pendingOpDao.retryFailed()
+            Response.success(Unit)
+        }
+        coEvery { transactionApi.batchUpdate(any()) } returns ok()
+        coEvery { transactionApi.update(eq(42L), capture(sent42), isNull()) } returns Response.success(Unit)
+
+        val result = newRepository().pushPendingOperations()
+
+        assertTrue("nothing re-failed: ${result.exceptionOrNull()?.message}", result.isSuccess)
+        coVerify(exactly = 1) { transactionApi.batchUpdate(match { it.ids == listOf(42L) }) }
+        // The retried op went out in the same drain, carrying the newer name.
+        assertEquals("Stipendio", sent42.single().description)
+        assertTrue(queue.none { it.id == failed.id })
+        assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun discardOnlyDropsGenuinelyFailedOps() = runTest {
+        val bad = txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        txPatch(entityId = 42L, description = null, categoryId = 11L)
+        txDelete(43L)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns errorBody(400)
+        coEvery { transactionApi.batchUpdate(any()) } returns ok()
+        coEvery { transactionApi.delete(eq(43L), isNull()) } returns Response.success(Unit)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(1, ex.permanentCount)
+        assertEquals(listOf(bad.id), queue.map { it.id })
+        // Everything else reached the server before the user could discard.
+        coVerify(exactly = 1) { transactionApi.batchUpdate(any()) }
+        coVerify(exactly = 1) { transactionApi.delete(eq(43L), isNull()) }
+
+        pendingOpDao.deleteFailed()
+
+        assertTrue(queue.isEmpty())
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+    }
+
+    @Test
+    fun transientStillSkipsLaterOpsOfSameEntity() = runTest {
+        txUpdate(entityId = 42L, accountId = 1L, categoryId = 2L)
+        val held = txPatch(entityId = 42L)
+        txPatch(entityId = 43L)
+        txPatch(entityId = 44L)
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } returns errorBody(503)
+        coEvery { transactionApi.batchUpdate(any()) } returns ok()
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(1, ex.transientCount)
+        assertEquals(0, ex.permanentCount)
+        // The held PATCH is neither sent nor folded into the others' batch.
+        coVerify(exactly = 1) { transactionApi.batchUpdate(any()) }
+        coVerify(exactly = 1) { transactionApi.batchUpdate(match { it.ids == listOf(43L, 44L) }) }
+        assertEquals(listOf(1L, held.id), queue.map { it.id })
+        assertTrue(queue.all { it.state == PendingOperationEntity.STATE_PENDING })
+    }
+
+    @Test
+    fun clockSkewDoesNotReorderOps() = runTest {
+        // The clock went back between the two edits: the newer op has the
+        // older timestamp. Queue (id) order still wins.
+        enqueue(PendingOperationEntity(
+            entityType = "transaction", operation = "UPDATE", entityId = 42L, serverId = 42L,
+            payloadJson = gson.toJson(TransactionInput(1L, 2L, "income", 1500.0, "EUR", "Paga", null, "2026-06-12")),
+            createdAt = 5_000_000L
+        ))
+        txPatch(entityId = 42L, description = "Stipendio", createdAt = 1_000L)
+        val calls = mutableListOf<String>()
+        coEvery { transactionApi.update(eq(42L), any(), isNull()) } answers { calls += "UPDATE"; Response.success(Unit) }
+        coEvery { transactionApi.batchUpdate(any()) } answers { calls += "PATCH"; ok() }
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        assertEquals(listOf("UPDATE", "PATCH"), calls)
+    }
+
+    // ====================
+    // Coalescing.
+    // ====================
+
+    @Test
+    fun identicalPatchesSentAsOneBatch() = runTest {
+        // An older failed UPDATE of one of the batched rows: reconciled by the
+        // batch's success like after a single PATCH.
+        val failed = failedTxUpdate(43L, "Paga")
+        txPatch(entityId = 42L, description = "Stipendio", categoryId = 11L)
+        txPatch(entityId = 43L, description = "Stipendio", categoryId = 11L)
+        txPatch(entityId = 44L, description = "Stipendio", categoryId = 11L)
+        schedPatch(70L, description = "Stipendio", categoryId = 11L)
+        schedPatch(71L, description = "Stipendio", categoryId = 11L)
+        val txRequests = mutableListOf<BatchUpdateRequest>()
+        val schedRequests = mutableListOf<ScheduledBatchUpdateRequest>()
+        coEvery { transactionApi.batchUpdate(capture(txRequests)) } returns ok()
+        coEvery { scheduledApi.batchUpdate(capture(schedRequests)) } returns ok()
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        assertEquals(
+            listOf(BatchUpdateRequest(ids = listOf(42L, 43L, 44L), description = "Stipendio", categoryId = 11L)),
+            txRequests
+        )
+        assertEquals(
+            listOf(ScheduledBatchUpdateRequest(ids = listOf(70L, 71L), description = "Stipendio", categoryId = 11L)),
+            schedRequests
+        )
+        val left = queue.single()
+        assertEquals(failed.id, left.id)
+        assertEquals("Stipendio", txInput(left).description)
+        assertEquals(11L, txInput(left).categoryId)
+    }
+
+    @Test
+    fun batchOf500Splits() = runTest {
+        for (id in 1L..1201L) txPatch(entityId = id, description = "Stipendio")
+        val requests = mutableListOf<BatchUpdateRequest>()
+        coEvery { transactionApi.batchUpdate(capture(requests)) } returns ok()
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        assertEquals(listOf(500, 500, 201), requests.map { it.ids.size })
+        assertEquals((1L..1201L).toList(), requests.flatMap { it.ids })
+        assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun batchFailureFallsBackToSingles() = runTest {
+        txPatch(entityId = 42L)
+        txPatch(entityId = 43L)
+        txPatch(entityId = 44L)
+        coEvery { transactionApi.batchUpdate(any()) } answers {
+            val ids = firstArg<BatchUpdateRequest>().ids
+            when {
+                ids.size > 1 -> errorBody(403) // the whole batch is refused...
+                ids == listOf(43L) -> errorBody(403) // ...because of this one
+                else -> ok()
+            }
+        }
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(1, ex.lostAccessCount)
+        assertEquals(1, ex.permanentCount)
+        coVerify(exactly = 1) { transactionApi.batchUpdate(match { it.ids == listOf(42L, 43L, 44L) }) }
+        for (id in listOf(42L, 43L, 44L)) {
+            coVerify(exactly = 1) { transactionApi.batchUpdate(match { it.ids == listOf(id) }) }
+        }
+        val failed = queue.single()
+        assertEquals(43L, failed.entityId)
+        assertEquals(PendingOperationEntity.STATE_FAILED, failed.state)
+        assertTrue(failed.lastError!!.endsWith("possible lost access"))
+    }
+
+    @Test
+    fun batchExceptionFallsBackToSingles() = runTest {
+        txDelete(42L)
+        txDelete(43L)
+        coEvery { transactionApi.batchDelete(any()) } throws java.io.IOException("reset")
+        coEvery { transactionApi.delete(any(), isNull()) } returns Response.success(Unit)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 1) { transactionApi.delete(eq(42L), isNull()) }
+        coVerify(exactly = 1) { transactionApi.delete(eq(43L), isNull()) }
+        assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun batch429StopsDrainAllPending() = runTest {
+        txPatch(entityId = 42L)
+        txPatch(entityId = 43L)
+        txUpdate(entityId = 50L, accountId = 1L, categoryId = 2L)
+        coEvery { transactionApi.batchUpdate(any()) } returns errorBody(429)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(2, ex.transientCount)
+        assertEquals(0, ex.permanentCount)
+        assertTrue(ex.canRetry)
+        // One request, no per-op fallback, nothing after it.
+        coVerify(exactly = 1) { transactionApi.batchUpdate(any()) }
+        coVerify(exactly = 0) { transactionApi.update(any(), any(), any()) }
+        assertEquals(3, queue.size)
+        assertTrue(queue.all { it.state == PendingOperationEntity.STATE_PENDING })
+    }
+
+    @Test
+    fun differentPayloadsNotMerged() = runTest {
+        txPatch(entityId = 42L, description = "A")
+        txPatch(entityId = 43L, description = "B")
+        txPatch(entityId = 44L, description = "A") // same as 42 but not adjacent
+        // Same payload bytes, different entity type: never one request.
+        schedPatch(70L, description = "A", categoryId = null)
+        val txRequests = mutableListOf<BatchUpdateRequest>()
+        val schedRequests = mutableListOf<ScheduledBatchUpdateRequest>()
+        coEvery { transactionApi.batchUpdate(capture(txRequests)) } returns ok()
+        coEvery { scheduledApi.batchUpdate(capture(schedRequests)) } returns ok()
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        assertEquals(listOf(listOf(42L), listOf(43L), listOf(44L)), txRequests.map { it.ids })
+        assertEquals(listOf("A", "B", "A"), txRequests.map { it.description })
+        assertEquals(listOf(listOf(70L)), schedRequests.map { it.ids })
+    }
+
+    @Test
+    fun negativeOrSkippedOpsNotMerged() = runTest {
+        txUpdate(entityId = 44L, accountId = 1L, categoryId = 2L) // fails transiently
+        txPatch(entityId = 42L)
+        txPatch(entityId = -7L) // its CREATE hasn't been pushed
+        txPatch(entityId = 43L)
+        txPatch(entityId = 44L) // held behind the failed UPDATE
+        txPatch(entityId = 45L)
+        txPatch(entityId = 45L) // same entity twice: never in one batch
+        coEvery { transactionApi.update(eq(44L), any(), isNull()) } returns errorBody(503)
+        val requests = mutableListOf<BatchUpdateRequest>()
+        coEvery { transactionApi.batchUpdate(capture(requests)) } returns ok()
+
+        newRepository().pushPendingOperations()
+
+        assertEquals(listOf(listOf(42L), listOf(43L), listOf(45L), listOf(45L)), requests.map { it.ids })
+        assertTrue(requests.none { -7L in it.ids || 44L in it.ids })
+        assertEquals(listOf(-7L, 44L, 44L), queue.map { it.entityId }.sorted())
+    }
+
+    @Test
+    fun deletesSentViaBatchDelete() = runTest {
+        txDelete(42L)
+        txDelete(43L)
+        txDelete(44L)
+        schedDelete(70L)
+        schedDelete(71L)
+        val request = slot<com.insituledger.app.data.remote.dto.BatchDeleteRequest>()
+        coEvery { transactionApi.batchDelete(capture(request)) } returns Response.success(Unit)
+        coEvery { scheduledApi.delete(any(), isNull()) } returns Response.success(Unit)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        assertEquals(listOf(42L, 43L, 44L), request.captured.ids)
+        coVerify(exactly = 1) { transactionApi.batchDelete(any()) }
+        coVerify(exactly = 0) { transactionApi.delete(any(), any()) }
+        // Schedules have no batch endpoint: still one DELETE each.
+        coVerify(exactly = 1) { scheduledApi.delete(eq(70L), isNull()) }
+        coVerify(exactly = 1) { scheduledApi.delete(eq(71L), isNull()) }
+        assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun batchDelete404IsSuccess() = runTest {
+        txDelete(42L)
+        txDelete(43L)
+        coEvery { transactionApi.batchDelete(any()) } returns errorBody(404)
+
+        assertTrue(newRepository().pushPendingOperations().isSuccess)
+
+        coVerify(exactly = 0) { transactionApi.delete(any(), any()) }
+        assertTrue(queue.isEmpty())
+    }
+
+    @Test
+    fun batchDelete429StopsDrain() = runTest {
+        txDelete(42L)
+        txDelete(43L)
+        coEvery { transactionApi.batchDelete(any()) } returns errorBody(429)
+
+        val ex = newRepository().pushPendingOperations().exceptionOrNull() as SyncPushException
+
+        assertEquals(2, ex.transientCount)
+        coVerify(exactly = 0) { transactionApi.delete(any(), any()) }
+        assertTrue(queue.all { it.state == PendingOperationEntity.STATE_PENDING })
+    }
+
+    // ====================
+    // Server version (bulk-edit gate).
+    // ====================
+
+    @Test
+    fun syncStoresTheServerVersion() = runTest {
+        emptySync()
+        coEvery { syncApi.health() } returns Response.success(
+            com.insituledger.app.data.remote.dto.HealthResponse(status = "ok", version = "1.27.0")
+        )
+
+        assertTrue(newRepository().sync().isSuccess)
+
+        coVerify(exactly = 1) { prefs.saveServerVersion("1.27.0") }
+    }
+
+    @Test
+    fun serverWithoutVersionIsStoredAsOld() = runTest {
+        emptySync()
+        coEvery { syncApi.health() } returns Response.success(
+            com.insituledger.app.data.remote.dto.HealthResponse(status = "ok")
+        )
+
+        assertTrue(newRepository().sync().isSuccess)
+
+        coVerify(exactly = 1) { prefs.saveServerVersion(com.insituledger.app.util.ServerVersion.OLD) }
+    }
+
+    @Test
+    fun healthFetchFailureDoesNotBreakSync() = runTest {
+        txPatch(entityId = 42L)
+        coEvery { transactionApi.batchUpdate(any()) } returns ok()
+        for (failure in listOf<suspend () -> Response<com.insituledger.app.data.remote.dto.HealthResponse>>(
+            { throw java.io.IOException("no route") },
+            { errorBody(503) },
+            { throw com.google.gson.JsonSyntaxException("<html>") }
+        )) {
+            emptySync()
+            coEvery { syncApi.health() } coAnswers { failure() }
+
+            assertTrue(newRepository().sync().isSuccess)
+        }
+
+        coVerify(exactly = 0) { prefs.saveServerVersion(any()) }
+        coVerify(exactly = 1) { transactionApi.batchUpdate(any()) }
+        coVerify(exactly = 3) { syncApi.sync(any()) }
+    }
 }

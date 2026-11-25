@@ -11,7 +11,7 @@ import { sharedOwnerUserId } from './stores/shared';
 vi.mock('./api/client', () => ({
 	accounts: { list: vi.fn(), create: vi.fn() }, categories: { list: vi.fn(), create: vi.fn() }, scheduled: { list: vi.fn(), create: vi.fn() },
 	transactions: { list: vi.fn(), create: vi.fn() }, reports: { byCategory: vi.fn(), byMonth: vi.fn() },
-	batch: {}, csv: {},
+	batch: { deleteTransactions: vi.fn(), updateTransactions: vi.fn() }, csv: {},
 	isAuthenticated: vi.fn(() => true)
 }));
 beforeEach(() => { vi.resetAllMocks(); sharedOwnerUserId.set(null); });

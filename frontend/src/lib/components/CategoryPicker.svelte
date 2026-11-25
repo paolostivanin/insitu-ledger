@@ -1,17 +1,23 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { categories, type Category, type CategoryInput } from '$lib/api/client';
+	import { categoryTree } from '$lib/categoryTree';
 
 	interface Props {
 		cats: Category[];
 		type: 'income' | 'expense';
 		value: number;
 		onchange: (id: number) => void;
-		onCreated: (cat: Category) => void;
+		onCreated?: (cat: Category) => void;
 		id?: string;
+		// Offer "+ New category..." (quick create). Bulk edit turns it off.
+		allowCreate?: boolean;
+		disabled?: boolean;
 	}
 
-	let { cats, type, value, onchange, onCreated, id }: Props = $props();
+	let { cats, type, value, onchange, onCreated, id, allowCreate = true, disabled = false }: Props = $props();
 
+	let selectEl: HTMLSelectElement | undefined = $state();
 	let showQuickCreate = $state(false);
 	let newName = $state('');
 	let newParentId = $state<number | null>(null);
@@ -19,28 +25,36 @@
 	let creating = $state(false);
 	let quickError = $state('');
 
-	function filtered(): Category[] {
-		return cats.filter(c => c.type === type);
+	const nodes = $derived(categoryTree(cats, type));
+	// A <select> whose value matches no option shows whatever the browser
+	// picks (often the first option) while the bound value stays unchanged, so
+	// a stale or 0 value would look like a real choice. Show it explicitly.
+	const matched = $derived(nodes.some(node => node.cat.id === value));
+
+	function prefix(depth: number): string {
+		return depth === 0 ? '' : '\u00a0\u00a0'.repeat(depth) + '↳ ';
 	}
 
+	// Parents offered by quick create: real roots only. categoryTree also lists
+	// orphans (parent soft-deleted) and parent_id-cycle members at depth 0, but
+	// those still have a parent and must not become one here.
 	function topLevel(): Category[] {
-		return filtered().filter(c => c.parent_id === null);
+		return nodes.filter(node => node.depth === 0 && node.cat.parent_id == null).map(node => node.cat);
 	}
 
-	function childrenOf(parentId: number): Category[] {
-		return filtered().filter(c => c.parent_id === parentId);
-	}
-
-	function handleSelect(e: Event) {
-		const val = (e.target as HTMLSelectElement).value;
+	async function handleSelect(e: Event) {
+		const val = (e.currentTarget as HTMLSelectElement).value;
 		if (val === '__new__') {
 			showQuickCreate = true;
-			// Reset to previous valid value
-			onchange(value);
 		} else {
 			showQuickCreate = false;
-			onchange(parseInt(val, 10));
+			const next = Number(val);
+			if (Number.isInteger(next) && next > 0) onchange(next);
 		}
+		// The displayed option must always be `value`: undo "+ New category..."
+		// and any choice the parent did not take.
+		await tick();
+		if (selectEl) selectEl.value = String(value);
 	}
 
 	function resetQuickForm() {
@@ -69,7 +83,7 @@
 			const updated = await categories.list();
 			const newCat = updated.find(c => c.id === res.id);
 			if (newCat) {
-				onCreated(newCat);
+				onCreated?.(newCat);
 				onchange(newCat.id);
 			}
 			resetQuickForm();
@@ -81,18 +95,20 @@
 </script>
 
 <div class="cat-picker">
-	<select {id} {value} onchange={handleSelect}>
-		{#each topLevel() as parent}
-			<option value={parent.id}>{parent.icon || ''} {parent.name}</option>
-			{#each childrenOf(parent.id) as child}
-				<option value={child.id}>&nbsp;&nbsp;↳ {child.icon || ''} {child.name}</option>
-			{/each}
+	<select bind:this={selectEl} {id} {value} {disabled} onchange={handleSelect}>
+		{#if !matched}
+			<option {value} disabled>Choose a category…</option>
+		{/if}
+		{#each nodes as node (node.cat.id)}
+			<option value={node.cat.id}>{prefix(node.depth)}{node.cat.icon || ''} {node.cat.name}</option>
 		{/each}
-		<option disabled>──────────</option>
-		<option value="__new__">+ New category...</option>
+		{#if allowCreate}
+			<option disabled>──────────</option>
+			<option value="__new__">+ New category...</option>
+		{/if}
 	</select>
 
-	{#if showQuickCreate}
+	{#if showQuickCreate && allowCreate}
 		<div class="quick-create">
 			<form onsubmit={createCategory}>
 				<div class="qc-row">

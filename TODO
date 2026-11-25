@@ -47,3 +47,54 @@
 # next_occurrence), advanced from the anchor rather than from the previous
 # occurrence. Backend, Android worker and the form preview all have to change
 # together, and existing rows need a backfill from their creation date.
+
+
+# ============================================================================
+# Android single-edit schedule form: stale next_occurrence on push
+# ============================================================================
+# ScheduledRepository.update queues a full-row UPDATE whose payload carries
+# the next_occurrence Android last pulled. If the server scheduler advanced
+# the schedule in the meantime, the PUT rewinds next_occurrence to an
+# occurrence that was already materialized; processOne then collides on the
+# deterministic "sched-<id>-<next_occurrence>" client_id, rolls back and never
+# advances, so the schedule silently stops. Bulk edit (v1.27.0 / Android
+# 1.39.0) avoids this with partial PATCH ops; the single-edit form still has
+# it. Fix: omit next_occurrence from the UPDATE payload unless the user
+# actually changed it (needs a server-side "keep current" semantics or a
+# PATCH-style scheduled update endpoint).
+
+
+# ============================================================================
+# Pre-existing sync / data issues found by the v1.27.0 bulk-edit review
+# ============================================================================
+# Confirmed with probes; not caused by bulk edit, left for a dedicated fix.
+#
+# Android (SyncRepository push loop):
+#  1. Child op sent with its parent's negative FK can never sync. Deferral only
+#     looks at the op's own id; a transaction CREATE whose account CREATE failed
+#     transiently goes out with account_id=-2, fails permanently (403), and the
+#     remap FK rewrite only touches *pending* ops, so Retry resends -2 forever.
+#     Fix: also defer/hold ops whose payload account_id/category_id/parent_id
+#     is negative; let rewrite*Fk cover failed ops too.
+#  2. failStuckDeferred marks every pending negative-id non-CREATE op failed,
+#     including ops inserted during the drain whose CREATE was never tried.
+#     Fix: only fail the ids actually deferred in that drain.
+#  3. (fixed in 1.39.0: duplicate server rows after 401 → re-login → Retry;
+#     one CREATE per row, 401 keeps ops pending, success drops other CREATEs)
+#  4. AccountRepository/CategoryRepository create: id allocation + upsert + op
+#     insert are not in one withTransaction (Transaction/Scheduled are).
+#
+# Backend:
+#  5. Batch handlers use deferred transactions; under concurrent writers the
+#     read→write upgrade fails fast with SQLITE_BUSY/BUSY_SNAPSHOT (500, no
+#     corruption). Fix if it matters: BEGIN IMMEDIATE for write handlers.
+#  6. handleDeleteCategory checks "no rows reference it" outside a transaction;
+#     a concurrent assignment can leave rows on a soft-deleted category.
+#  7. match=exact trims only ASCII spaces in SQL (TRIM) while q is trimmed with
+#     strings.TrimSpace / Kotlin trim(): "Rent\t" is not an exact match.
+#
+# Web:
+#  8. "Select all matching" pages by offset; a concurrent insert/delete on
+#     another device between pages can skip a row (counts are reported).
+#  9. Single-entry forms list every accessible owner's categories in "all
+#     owners" mode; the server does not check category ownership on PUT/POST.

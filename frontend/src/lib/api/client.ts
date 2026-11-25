@@ -196,11 +196,32 @@ export interface AutocompleteSuggestion {
 	currency?: string;
 }
 
+// A type alias (not an interface) so it stays assignable to request()'s
+// Record<string, string> params.
+export type TransactionListParams = {
+	from?: string;
+	to?: string;
+	category_id?: string;
+	account_id?: string;
+	// Free-text search on description (since v1.22.0).
+	q?: string;
+	// Since v1.27.0: 'exact' matches the whole trimmed description, ignoring
+	// ASCII case, instead of a substring. Only meaningful with a non-blank q.
+	match?: 'contains' | 'exact';
+	// Since v1.27.0: only entries the caller added (created_by_user_id); the
+	// server binds the id from the session, never from the client.
+	added_by?: 'me';
+	limit?: string;
+	offset?: string;
+	sort_by?: string;
+	sort_dir?: string;
+	owner_id?: string;
+};
+
 export const transactions = {
 	// owner_id is an optional list/autocomplete filter (since v1.15.0); mutations
 	// derive auth from the path or the authenticated user.
-	// q is a free-text infix search on description (since v1.22.0).
-	list: (params?: { from?: string; to?: string; category_id?: string; account_id?: string; q?: string; limit?: string; offset?: string; sort_by?: string; sort_dir?: string; owner_id?: string }) =>
+	list: (params?: TransactionListParams) =>
 		request<Transaction[]>('/transactions', { params }),
 	create: (data: TransactionInput) =>
 		request<{ id: number }>('/transactions', { method: 'POST', body: data }),
@@ -472,17 +493,39 @@ export interface AdminUser {
 	created_at: string;
 }
 
+// Bulk edit (since v1.27.0). A field that is absent means "unchanged"; the
+// server rejects the whole request (400/403, nothing written) when any check
+// fails, and never resurrects missing or deleted ids (they count as skipped).
+export interface BatchUpdateInput {
+	ids: number[];
+	description?: string;
+	category_id?: number;
+	// Also apply the change to the live (not finished/deleted) schedules that
+	// generated the selected entries.
+	update_schedules?: boolean;
+}
+
+export interface BatchUpdateResult {
+	updated: number;
+	unchanged: number;
+	skipped: number;
+	schedules_updated: number;
+	schedules_unchanged: number;
+	schedules_skipped: number;
+}
+
 // Batch operations — auth derived per-id from each transaction's account.
 export const batch = {
 	deleteTransactions: (ids: number[]) =>
 		request<void>('/transactions/batch-delete', { method: 'POST', body: { ids } }),
-	updateCategory: (ids: number[], category_id: number) =>
-		request<void>('/transactions/batch-update-category', { method: 'POST', body: { ids, category_id } })
+	updateTransactions: (input: BatchUpdateInput) =>
+		request<BatchUpdateResult>('/transactions/batch-update', { method: 'POST', body: input })
 };
 
 // CSV import/export
 export const csv = {
-	exportTransactions: async (params?: { from?: string; to?: string; owner_id?: string; account_id?: string; q?: string }) => {
+	// Takes the list filters; the export ignores paging and sort.
+	exportTransactions: async (params?: Omit<TransactionListParams, 'limit' | 'offset'>) => {
 		let url = `${BASE}/transactions/export`;
 		if (params) {
 			const search = new URLSearchParams(

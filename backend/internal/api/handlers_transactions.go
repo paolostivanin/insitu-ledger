@@ -91,6 +91,16 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	matchMode, err := parseMatchMode(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	addedByMe, err := parseAddedBy(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	accInClause := sqlInPlaceholders(len(accIDs))
 	// LEFT JOIN users cu projects the creator's display name for the
@@ -130,15 +140,21 @@ func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) 
 		args = append(args, catID, catID)
 	}
 	if q != "" {
-		// Infix match on description only — mirrors the Android DAO
-		// (TransactionDao.search) and the only text column the web table
-		// renders, so every hit is visibly explainable. SQLite's LIKE already
-		// folds ASCII case (no case_sensitive_like pragma is set), so no
-		// COLLATE is needed. This is a scan: idx_transactions_description is
-		// prefix-ordered and cannot serve '%q%'. Fine at family scale — if it
-		// ever isn't, the answer is FTS5, not another index.
-		query += ` AND t.description LIKE ? ESCAPE '\'`
-		args = append(args, "%"+escapeLike(q)+"%")
+		// Description only — mirrors the Android DAO (TransactionDao.search)
+		// and the only text column the web table renders, so every hit is
+		// visibly explainable. Contains mode is an infix LIKE (SQLite's LIKE
+		// already folds ASCII case); exact mode compares the trimmed whole
+		// description under NOCASE. Contains is a scan:
+		// idx_transactions_description is prefix-ordered and cannot serve
+		// '%q%'. Fine at family scale — if it ever isn't, the answer is FTS5,
+		// not another index.
+		clause, arg := descriptionSearchClause(q, matchMode)
+		query += clause
+		args = append(args, arg)
+	}
+	if addedByMe {
+		query += addedByMeClause
+		args = append(args, userID)
 	}
 
 	query += " ORDER BY " + sortColumn + " " + sortDirection + ", t.id DESC LIMIT ? OFFSET ?"

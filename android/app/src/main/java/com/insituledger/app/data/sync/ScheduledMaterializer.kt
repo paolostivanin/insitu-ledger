@@ -2,7 +2,9 @@ package com.insituledger.app.data.sync
 
 import androidx.room.withTransaction
 import com.insituledger.app.data.local.db.AppDatabase
+import com.insituledger.app.data.local.db.nextLocalId
 import com.insituledger.app.data.local.db.dao.AccountDao
+import com.insituledger.app.data.local.db.dao.PendingOperationDao
 import com.insituledger.app.data.local.db.dao.ScheduledTransactionDao
 import com.insituledger.app.data.local.db.dao.TransactionDao
 import com.insituledger.app.data.local.db.entity.ScheduledTransactionEntity
@@ -35,6 +37,8 @@ class ScheduledMaterializer(
     private val scheduledDao: ScheduledTransactionDao,
     private val transactionDao: TransactionDao,
     private val accountDao: AccountDao,
+    // Read only to keep new local ids clear of ids queued ops still use.
+    private val pendingOpDao: PendingOperationDao,
     private val clock: Clock,
     private val log: (message: String, error: Throwable?) -> Unit = { _, _ -> }
 ) {
@@ -94,8 +98,7 @@ class ScheduledMaterializer(
             val deactivate = pastUntil ||
                 (fresh.maxOccurrences != null && newCount >= fresh.maxOccurrences)
 
-            val minId = transactionDao.getMinId() ?: 0
-            val localId = if (minId >= 0) -1 else minId - 1
+            val localId = nextLocalId(transactionDao.getMinId(), pendingOpDao.getMinEntityId("transaction"))
             transactionDao.upsert(TransactionEntity(
                 id = localId,
                 accountId = fresh.accountId,

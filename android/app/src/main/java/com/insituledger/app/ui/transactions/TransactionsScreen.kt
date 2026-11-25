@@ -25,9 +25,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material3.CircularProgressIndicator
@@ -71,7 +73,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
@@ -79,6 +83,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.insituledger.app.data.repository.BULK_EDIT_MAX_IDS
 import com.insituledger.app.domain.model.Account
 import com.insituledger.app.domain.model.Category
 import com.insituledger.app.domain.model.ScheduledTransaction
@@ -146,6 +151,13 @@ fun TransactionsScreen(
     BackHandler(enabled = uiState.isSelectionMode) { viewModel.clearSelection() }
     BackHandler(enabled = !uiState.isSelectionMode && uiState.isSearchActive) { viewModel.toggleSearch() }
 
+    LaunchedEffect(uiState.bulkEditMessage) {
+        uiState.bulkEditMessage?.let {
+            snackbar.show(it)
+            viewModel.clearBulkEditMessage()
+        }
+    }
+
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
@@ -154,6 +166,7 @@ fun TransactionsScreen(
                     count = uiState.selectedIds.size,
                     onClose = viewModel::clearSelection,
                     onSelectAll = viewModel::selectAll,
+                    onEdit = viewModel::openBulkEdit,
                     onDelete = { showBatchDeleteDialog = true }
                 )
                 uiState.isSearchActive -> SearchTopBar(
@@ -190,7 +203,15 @@ fun TransactionsScreen(
                     onPreset = viewModel::setDatePreset,
                     onCustomRange = viewModel::setCustomRange,
                     onCategory = viewModel::setCategoryFilter,
+                    onExactMatch = viewModel::setExactMatch,
+                    onOnlyMine = viewModel::setOnlyMine,
                     onClear = viewModel::clearFilters
+                )
+            } else {
+                SelectAllMatchingBanner(
+                    uiState = uiState,
+                    onSelectAllMatching = viewModel::selectAllMatching,
+                    onClear = viewModel::clearSelection
                 )
             }
             Box(Modifier.fillMaxSize()) {
@@ -250,15 +271,93 @@ fun TransactionsScreen(
             onDismiss = { showBatchDeleteDialog = false }
         )
     }
+
+    uiState.bulkEdit?.let { bulk ->
+        BulkEditSheet(
+            state = bulk,
+            categories = uiState.categories,
+            onRenameEnabled = viewModel::setBulkRenameEnabled,
+            onDescriptionChange = viewModel::setBulkDescription,
+            onSuggestion = viewModel::selectBulkSuggestion,
+            onDismissSuggestions = viewModel::dismissBulkSuggestions,
+            onCategoryEnabled = viewModel::setBulkCategoryEnabled,
+            onCategory = viewModel::setBulkCategory,
+            onUpdateSchedules = viewModel::setBulkUpdateSchedules,
+            onApply = viewModel::applyBulkEdit,
+            onDismiss = viewModel::dismissBulkEdit
+        )
+    }
+}
+
+/**
+ * Under the selection bar: once every loaded row is selected and more match,
+ * offers to extend the selection to all of them (the bulk-edit cap applies).
+ */
+@Composable
+private fun SelectAllMatchingBanner(
+    uiState: TransactionsUiState,
+    onSelectAllMatching: () -> Unit,
+    onClear: () -> Unit
+) {
+    val loaded = uiState.transactions
+    val allLoadedSelected = loaded.isNotEmpty() && loaded.all { it.id in uiState.selectedIds }
+    val showOffer = uiState.hasMore && allLoadedSelected
+    if (!uiState.allMatchingSelected && !showOffer) return
+
+    val pad = LocalContentPadding.current
+    val total = uiState.matchingCount
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = pad, end = AppSpacing.sm, top = AppSpacing.xs, bottom = AppSpacing.xs),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val (text, action) = when {
+                uiState.allMatchingSelected -> {
+                    val n = uiState.selectedIds.size
+                    (if (n == 1) "The 1 matching entry is selected" else "All $n matching entries selected") to
+                        ("Clear" to onClear)
+                }
+                uiState.selectAllError != null -> uiState.selectAllError to null
+                total != null && total > BULK_EDIT_MAX_IDS ->
+                    "$total entries match. Narrow the search to select them all." to null
+                else -> {
+                    val label = if (total != null) "Select all $total" else "Select all matching"
+                    "All ${loaded.size} loaded entries selected" to (label to onSelectAllMatching)
+                }
+            }
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = AppSpacing.sm)
+                    .semantics { liveRegion = LiveRegionMode.Polite }
+            )
+            if (action != null) {
+                TextButton(onClick = action.second, enabled = !uiState.isSelectingAllMatching) {
+                    Text(action.first)
+                }
+            }
+        }
+    }
 }
 
 private fun isNarrowed(state: TransactionsUiState): Boolean =
-    state.searchQuery.isNotBlank() ||
+    state.searchQuery.isNotBlank() || state.onlyMine ||
         state.filterFrom != null || state.filterTo != null || state.filterCategoryId != null
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SelectionTopBar(count: Int, onClose: () -> Unit, onSelectAll: () -> Unit, onDelete: () -> Unit) {
+private fun SelectionTopBar(
+    count: Int,
+    onClose: () -> Unit,
+    onSelectAll: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
     TopAppBar(
         title = { Text("$count selected") },
         navigationIcon = {
@@ -266,6 +365,7 @@ private fun SelectionTopBar(count: Int, onClose: () -> Unit, onSelectAll: () -> 
         },
         actions = {
             IconButton(onClick = onSelectAll) { Icon(Icons.Outlined.SelectAll, contentDescription = "Select all") }
+            IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, contentDescription = "Edit selected") }
             IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, contentDescription = "Delete selected") }
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
@@ -357,6 +457,8 @@ private fun FilterChipRow(
     onPreset: (DateRangePreset?) -> Unit,
     onCustomRange: (String, String) -> Unit,
     onCategory: (Long?) -> Unit,
+    onExactMatch: (Boolean) -> Unit,
+    onOnlyMine: (Boolean) -> Unit,
     onClear: () -> Unit
 ) {
     var dateMenu by remember { mutableStateOf(false) }
@@ -381,6 +483,17 @@ private fun FilterChipRow(
         horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (uiState.isSearchActive) {
+            // "Stipendio" but not "Stipendio Lisa".
+            FilterChip(
+                selected = uiState.exactMatch,
+                onClick = { onExactMatch(!uiState.exactMatch) },
+                label = { Text("Exact match", maxLines = 1) },
+                leadingIcon = if (uiState.exactMatch) {
+                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                } else null
+            )
+        }
         Box {
             FilterChip(
                 selected = hasDates,
@@ -417,7 +530,18 @@ private fun FilterChipRow(
             label = { Text(categoryLabel, maxLines = 1) },
             trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) }
         )
-        if (hasDates || hasCategory) {
+        // Without a shared account every entry is the user's own.
+        if (uiState.hasSharedAccounts) {
+            FilterChip(
+                selected = uiState.onlyMine,
+                onClick = { onOnlyMine(!uiState.onlyMine) },
+                label = { Text("Added by me", maxLines = 1) },
+                leadingIcon = if (uiState.onlyMine) {
+                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                } else null
+            )
+        }
+        if (hasDates || hasCategory || uiState.onlyMine) {
             TextButton(onClick = onClear) { Text("Clear") }
         }
     }

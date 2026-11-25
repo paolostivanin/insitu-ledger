@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -113,6 +114,58 @@ func validateRRule(s string) error {
 // Callers must append ESCAPE '\' to the LIKE predicate.
 func escapeLike(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
+// Description search modes for the `match` query param of the transaction
+// list, export and search-summary endpoints.
+const (
+	matchContains = "contains"
+	matchExact    = "exact"
+)
+
+// parseMatchMode reads the `match` query param: absent or "contains" (the
+// default infix search) or "exact". Anything else is an error (400).
+func parseMatchMode(r *http.Request) (string, error) {
+	switch m := r.URL.Query().Get("match"); m {
+	case "", matchContains:
+		return matchContains, nil
+	case matchExact:
+		return matchExact, nil
+	default:
+		return "", fmt.Errorf("invalid match: use 'contains' or 'exact'")
+	}
+}
+
+// descriptionSearchClause returns the predicate (to append to a WHERE whose
+// transactions table is aliased `t`) and its single argument for a
+// description search. q must already be trimmed and non-empty.
+//
+// Contains: case-insensitive infix LIKE with %, _ and \ escaped. Exact: the
+// whole description, ignoring surrounding spaces, equals q under NOCASE.
+// Both fold ASCII case only, and NULL descriptions never match. Android's
+// exact filter uses the same TRIM(...) = ? COLLATE NOCASE predicate.
+func descriptionSearchClause(q, mode string) (string, any) {
+	if mode == matchExact {
+		return ` AND TRIM(t.description) = ? COLLATE NOCASE`, q
+	}
+	return ` AND t.description LIKE ? ESCAPE '\'`, "%" + escapeLike(q) + "%"
+}
+
+// addedByMeClause narrows a transactions query (aliased `t`) to the rows the
+// caller entered. Bind it to UserIDFromContext, never to a client value.
+const addedByMeClause = ` AND t.created_by_user_id = ?`
+
+// parseAddedBy reads the `added_by` query param. Only "me" is accepted (so
+// no caller can probe another user's id); absent means no filter.
+func parseAddedBy(r *http.Request) (bool, error) {
+	switch r.URL.Query().Get("added_by") {
+	case "":
+		return false, nil
+	case "me":
+		return true, nil
+	default:
+		return false, fmt.Errorf("invalid added_by: use 'me'")
+	}
 }
 
 // parseSortParams validates and returns safe SQL sort fragments.
@@ -287,6 +340,13 @@ func listAccessibleAccountIDs(authUserID, targetOwnerID int64, db dbQuerier) ([]
 // (also used for "not found" / soft-deleted to avoid leaking IDs). Since
 // v1.15.0 dropped read-only sharing, any accessible account is fully writable;
 // callers no longer need a separate permission check.
+// errAccessCheck wraps a database failure inside checkAccountAccess, so a
+// caller that must not treat "could not check" as "no access" (e.g. a batch
+// edit that would otherwise silently skip a row) can tell the two apart.
+// Every error it returns still reads as a refusal to callers that only test
+// err != nil.
+var errAccessCheck = errors.New("access check failed")
+
 func checkAccountAccess(authUserID, accountID int64, db dbQuerier) (int64, error) {
 	var ownerID int64
 	err := db.QueryRow(
@@ -294,6 +354,9 @@ func checkAccountAccess(authUserID, accountID int64, db dbQuerier) (int64, error
 		accountID,
 	).Scan(&ownerID)
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("%s: %w: %v", errForbidden, errAccessCheck, err)
+		}
 		return 0, fmt.Errorf(errForbidden)
 	}
 	if ownerID == authUserID {
@@ -306,6 +369,9 @@ func checkAccountAccess(authUserID, accountID int64, db dbQuerier) (int64, error
 		ownerID, authUserID, accountID,
 	).Scan(&hasShare)
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("%s: %w: %v", errForbidden, errAccessCheck, err)
+		}
 		return 0, fmt.Errorf(errForbidden)
 	}
 	return ownerID, nil
